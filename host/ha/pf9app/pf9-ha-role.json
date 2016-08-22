@@ -1,0 +1,46 @@
+{
+    "role_name": "pf9-ha-slave",
+    "display_name": "Platform9 HA cluster manager",
+    "description": "Manage consul cluster for VM-HA in Platform9 KVM deployments",
+    "customizable_settings": {
+        "join": {
+            "default": "",
+            "path": "config/ha_slave_conf/consul"
+        },
+        "bootstrap_expect": {
+            "path": "config/ha_slave_conf/consul",
+            "default": 0
+        },
+        "ip_address": {
+            "path": "config/ha_slave_conf/node",
+            "default": ""
+        }
+    },
+    "rabbit_permissions": {
+        "config": "",
+        "read": "",
+        "write": ""
+    },
+    "role_version": "__VERSION__",
+    "config": {
+        "pf9-ha-slave": {
+            "version": "__VERSION__",
+            "service_states": {
+                "pf9-ha-slave": true
+            },
+            "url": "%(download_protocol)s://%(host_relative_amqp_fqdn)s:%(download_port)s/private/__RPMNAME__",
+            "config": {
+                "ha_slave_conf": {
+                    "keystone_authtoken": {
+                        "admin_user": "%(pf9-ha-slave.auth_user)s",
+                        "admin_password": "%(pf9-ha-slave.auth_pass)s",
+                        "admin_tenant_name": "%(pf9-ha-slave.auth_tenant_name)s",
+                        "insecure": "True"
+                    },
+                    "consul": {},
+                    "node": {}
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,100 @@
+#!/bin/sh
+#
+### BEGIN INIT INFO
+# Provides: consul
+# Required-Start: $network
+# Required-Stop: $network
+# Default-Start: 3 5
+# Default-Stop: 0 1 2 6
+# Description: Start the consul as a Platform9 service
+### END INIT INFO
+
+# read & export proxy information
+. /etc/environment
+
+SHORT_NAME="consul"
+svcname="pf9-${SHORT_NAME}"
+
+SERVER_BIN="/usr/bin/consul"
+
+SERVER_OPTS="agent -config-dir /opt/pf9/etc/pf9-consul/conf.d"
+
+SERVER_LOGFILE=/var/log/pf9/${svcname}.log
+
+PIDFILE=/var/run/${svcname}/${svcname}.pid
+PYTHON_EGG_CACHE=/tmp/python-eggs
+
+# Source function library.
+. /lib/lsb/init-functions
+
+
+RETVAL=0
+uid=`id | cut -d\( -f1 | cut -d= -f2`
+
+start() {
+
+   # Only root can start the service
+    [ $uid -ne 0 ] && exit 4
+
+    touch $PIDFILE
+    mkdir -p /var/log/pf9
+    /sbin/start-stop-daemon --start --name $svcname --quiet --pidfile $PIDFILE --exec $SERVER_BIN --chuid pf9 --make-pidfile -- $SERVER_OPTS > $SERVER_LOGFILE &
+    RETVAL=$?
+    if [ "$RETVAL" -eq "0" ]; then
+        log_success_msg "Started:" "$svcname"
+    else
+        log_failure_msg "Failed to start:" "$svcname"
+    fi
+    return $RETVAL
+}
+
+stop() {
+
+    start-stop-daemon --stop  --retry=0/30/KILL/5 --pidfile $PIDFILE --exec $SERVER_BIN
+    RETVAL=$?
+    if [ "$RETVAL" -eq "0" ]; then
+        log_success_msg "Stopped:" "$svcname"
+        rm -f $PIDFILE
+    else
+        log_failure_msg "Failed to stop:" "$svcname"
+    fi
+    return $RETVAL
+}
+
+status() {
+    status_of_proc $SHORT_NAME $svcname
+}
+
+# See how we were called.
+case "$1" in
+    start)
+        start
+        RETVAL=$?
+        ;;
+    stop)
+        stop
+        RETVAL=$?
+        ;;
+    status)
+        status
+        RETVAL=$?
+        ;;
+    restart | reload | force-reload)
+        stop
+        start
+        RETVAL=$?
+        ;;
+    condrestart | try-restart)
+        if status > /dev/null; then
+            stop
+            start
+            RETVAL=$?
+        fi
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|status|restart|reload|force-reload|condrestart|try-restart}"
+        RETVAL=2
+        ;;
+esac
+
+exit $RETVAL

@@ -1,0 +1,13 @@
+pbr==1.8.1
+oslo.config==3.9.0
+SQLAlchemy==0.9.8
+python-novaclient
+python-keystoneclient
+keystoneauth1
+flask==0.10.1
+Paste==1.7.5.1
+PasteDeploy==1.5.2
+eventlet==0.18.4
+sqlalchemy-migrate==0.9.5
+PyMySQL
+enum34

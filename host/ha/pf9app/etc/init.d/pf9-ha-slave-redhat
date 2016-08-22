@@ -1,0 +1,105 @@
+#!/bin/sh
+#
+### BEGIN INIT INFO
+# Provides: pf9-ha-slave
+# Required-Start: $network
+# Required-Stop: $network
+# Default-Start: 3 5
+# Default-Stop: 0 1 2 6
+# Description: Start the Platform9 VM HA slave service
+### END INIT INFO
+
+# read & export proxy information
+. /etc/environment
+
+SHORT_NAME="ha-slave"
+svcname="pf9-${SHORT_NAME}"
+
+SERVER_BIN="/opt/pf9/pf9-ha/bin/pf9-ha"
+
+SERVER_OPTS="--config-dir /opt/pf9/etc/pf9-ha/conf.d"
+
+SERVER_LOGFILE=/var/log/pf9/${svcname}-out.log
+
+PIDFILE=/var/run/${svcname}.pid
+PYTHON_EGG_CACHE=/tmp/python-eggs
+
+# Source function library.
+. /lib/lsb/init-functions
+
+
+RETVAL=0
+uid=`id | cut -d\( -f1 | cut -d= -f2`
+
+start_process() {
+
+    # Only root can start the service
+    [ $uid -ne 0 ] && exit 4
+
+    touch $PIDFILE
+    mkdir -p /var/log/pf9
+    LD_LIBRARY_PATH="/opt/pf9/python/pf9-lib:/opt/pf9/python/pf9-hostagent-lib:${LD_LIBRARY_PATH}" \
+        PYTHONPATH="/opt/pf9/python/lib/python2.7:${PYTHONPATH}" \
+        daemon --user pf9 "$SERVER_BIN $SERVER_OPTS >> $SERVER_LOGFILE 2>&1 &"
+    RETVAL=$?
+    pid=`pidofproc $SERVER_BIN`
+    echo $pid > $PIDFILE
+    if [ "$RETVAL" -eq "0" ]; then
+        log_success_msg "Started:" "$svcname"
+        touch $LOCKFILE
+    else
+        log_failure_msg "Failed to start:" "$svcname"
+    fi
+    return $RETVAL
+}
+
+stop_process() {
+    killproc -p $PIDFILE $SERVER_BIN -TERM
+    RETVAL=$?
+    if [ "$RETVAL" -eq "0" ]; then
+        log_success_msg "Stopped:" "$svcname"
+        rm -f $PIDFILE
+        rm -f $LOCKFILE
+    else
+        log_failure_msg "Failed to stop:" "$svcname"
+    fi
+    return $RETVAL
+}
+
+status_query() {
+    status $SERVER_BIN
+}
+
+# See how we were called.
+case "$1" in
+    start)
+        start_process
+        RETVAL=$?
+        ;;
+    stop)
+        stop_process
+        RETVAL=$?
+        ;;
+    status)
+        status_query
+        RETVAL=$?
+        ;;
+    restart | reload | force-reload)
+        stop_process
+        start_process
+        RETVAL=$?
+        ;;
+    condrestart | try-restart)
+        if status_query > /dev/null; then
+            stop_process
+            start_process
+            RETVAL=$?
+        fi
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|status|restart|reload|force-reload|condrestart|try-restart}"
+        RETVAL=2
+        ;;
+esac
+
+exit $RETVAL

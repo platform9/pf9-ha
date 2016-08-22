@@ -1,0 +1,4 @@
+pbr==1.8.1
+oslo.config==3.9.0
+python-consul==0.6.0
+netifaces==0.10.4

@@ -1,0 +1,4 @@
+{
+    "datacenter": "pf9-dc1",
+    "data_dir": "/opt/pf9/consul-data-dir/"
+}

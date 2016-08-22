@@ -1,0 +1,84 @@
+#!/opt/pf9/hostagent/bin/python
+
+from ConfigParser import ConfigParser
+from os.path import dirname
+from os.path import exists
+from os import makedirs
+
+import json
+import optparse
+import sys
+
+HA_CONF_FILE = '/opt/pf9/etc/pf9-ha/conf.d/pf9-ha.conf'
+SERVICES = ['pf9-ha-slave']
+INT_OPTS = ['bootstrap_expect']
+
+def get_config(option, opt_str, value, parser):
+    cfg = {}
+    cfgparser = ConfigParser()
+    cfgparser.read(HA_CONF_FILE)
+    for section in cfgparser.sections():
+        cfg[section] = {}
+        for option in cfgparser.options(section):
+            value = cfgparser.get(section, option)
+            if option in INT_OPTS:
+                value = int(value)
+            cfg[section][option] = value
+    if len(cfgparser.defaults()) > 0:
+        cfg['DEFAULT'] = {}
+    for opt, opt_val in cfgparser.defaults().items():
+        if opt in INT_OPTS:
+            opt_val = int(opt_val)
+        cfg['DEFAULT'][opt] = opt_val
+    sys.stdout.write(json.dumps({"ha_slave_conf": cfg}))
+    sys.exit(0)
+
+
+def set_config(option, opt_str, value_str, parser):
+    cfgparser = ConfigParser()
+    cfgparser.read(HA_CONF_FILE)
+    value = json.loads(value_str)
+    config = value.get('ha_slave_conf', {})
+    for section, section_config in config.items():
+        if section != 'DEFAULT' and not cfgparser.has_section(section):
+            cfgparser.add_section(section)
+        for opt, opt_val in section_config.items():
+            cfgparser.set(section, opt, opt_val)
+    with open(HA_CONF_FILE, 'w') as fptr:
+        cfgparser.write(fptr)
+    sys.exit(0)
+
+
+def get_services(option, opt_str, value, parser):
+    """
+    Callback method invoked when get-services is called. Returns
+    the names of the services this app can manage.
+    :param option: Option object
+    :param str opt_str: Name of the option
+    :param str value: Value of the option
+    :param Parser parser: The optparse parser object
+    """
+    sys.stdout.write(str(' '.join(SERVICES)))
+    sys.exit(0)
+
+
+def parse_args():
+    parser = optparse.OptionParser()
+    parser.add_option("--get-config",
+                      action="callback",
+                      callback=get_config,
+                      help="Get the configuration of pf9-ha-slave app")
+    parser.add_option("--set-config",
+                      action="callback",
+                      callback=set_config,
+                      type='string',
+                      help="Set the configuration of pf9-ha-slave app")
+    parser.add_option("--get-services",
+                      action="callback",
+                      callback=get_services,
+                      help="Get the services status of pf9-ha-slave")
+    parser.parse_args()
+
+
+if __name__ == '__main__':
+    parse_args()
