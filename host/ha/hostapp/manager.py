@@ -132,6 +132,8 @@ def loop():
         elif ch.am_i_cluster_leader():
             cluster_stat = ch.get_cluster_status()
             if not cluster_stat:
+                LOG.info('sleeping for %s seconds' % sleep_time)
+                sleep(sleep_time)
                 continue
             expand_stats(cluster_stat)
             LOG.info(cluster_stat)

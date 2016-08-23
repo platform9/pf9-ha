@@ -52,7 +52,7 @@ start() {
 
 stop() {
     servicename=`basename $SERVER_BIN`
-    start-stop-daemon --stop  --retry=0/30/KILL/5 --pidfile $PIDFILE --name $servicename
+    start-stop-daemon --stop --oknodo --retry=0/30/KILL/5 --pidfile $PIDFILE --name $servicename
     RETVAL=$?
     if [ "$RETVAL" -eq "0" ]; then
         log_success_msg "Stopped:" "$svcname"

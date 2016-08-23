@@ -107,18 +107,18 @@ class cluster:
 
     def __repr__(self):
         jobj = {
-            'change_time': datetime.strptime(self.change_time,
-                                             "%Y-%m-%d %H:%M:%S.%f"),
+            'change_time': datetime.strftime(self.change_time,
+                                             "%Y%m%d%H%M%S"),
             'change_info': json.dumps(self.change_info)
         }
         return json.dumps(jobj)
 
     @classmethod
-    def from_str(string):
+    def from_str(cls, string):
         obj = json.loads(string)
-        change_time = datetime.strftime(obj['change_time'], "%Y-%m-%d %H:%M:%S.%f")
+        change_time = datetime.strptime(obj['change_time'], "%Y%m%d%H%M%S")
         change_info = json.loads(obj['change_info'])
-        return cluster(change_time, change_info)
+        return cls(change_time, change_info)
 
 
 class consul_status:
@@ -143,7 +143,7 @@ class consul_status:
                 self.current_status = last_update_json.get('current_status')
                 if last_update_time and last_update_time != 'None':
                     self.last_status_update_time = datetime.strptime(
-                            last_update_time, "%Y-%m-%d %H:%M:%S.%f")
+                            last_update_time, "%Y%m%d%H%M%S")
         self.cc = consul.Consul()
         self.host_id = host_id
         reap_interval = CONF.consul.key_reap_interval
@@ -179,14 +179,14 @@ class consul_status:
                 event_type = 1
                 detail = 1
                 event_id = 1
-                start_time = str(current_time)
+                start_time = datetime.strftime(current_time, "%Y%m%d%H%M%S")
                 end_time = ""
             else:
                 # Node failed
                 event_type = 2
                 detail = 2
                 event_id = 1
-                start_time = end_time = str(current_time)
+                start_time = end_time = datetime.strftime(current_time, "%Y%m%d%H%M%S")
             cluster_port = "%s:%s" % (member.get('Addr'), member.get('Port'))
 
             ignore, data = self.cc.kv.get(cluster_port)
@@ -206,7 +206,7 @@ class consul_status:
                 'uuid': cluster_id,
                 'eventID': event_id,
                 'detail': detail,
-                'uuid': str(uuid4())
+                'id': str(uuid4())
             }
         return cluster_report
 
@@ -230,8 +230,8 @@ class consul_status:
             if not data:
                 self.report_node_down_to_kv(retval['hostname'], str(reported_cls))
             else:
-                data_obj = json.loads(data)
-                if data_obj.get('uuid'):
+                data_obj = json.loads(data['Value'])
+                if data_obj.get('id'):
                     # Already reported once
                     retval = None
         return retval
@@ -257,7 +257,7 @@ class consul_status:
             fptr.truncate()
             json.dump({
                 'status': self.last_status,
-                'time': str(self.last_status_update_time),
+                'time': datetime.strftime(self.last_status_update_time, '%Y%m%d%H%M%S'),
                 'current_status': self.current_status
             }, fptr)
 
@@ -273,10 +273,10 @@ class consul_status:
         current_time = datetime.now()
         report_change = self._should_report_change()
         current_status = self._get_cluster_status(current_time)
+        self.last_status_update_time = current_time
         self.update(current_status)
         if report_change:
             self.last_status = self.current_status
-            self.last_status_update_time = current_time
             return report_change
         return None
 
@@ -321,11 +321,11 @@ class consul_status:
         except:
             return False
 
-    def report_node_down_to_kv(self, hostid, node_info, report_time=None, uuid=None):
+    def report_node_down_to_kv(self, hostid, node_info, report_time=None, report_id=None):
         data = {
-            'notice_time': str(datetime.now()),
+            'notice_time': datetime.strftime(datetime.now(), '%Y%m%d%H%M%S'),
             'report_time': report_time,
-            'uuid': uuid,
+            'id': report_id,
             'node_info': node_info
         }
         self.cc.kv.put(hostid, json.dumps(data))
@@ -343,20 +343,20 @@ class consul_status:
     def get_report_status(self, hostid):
         ignore, data = self.cc.kv.get(hostid)
         if data:
-            return json.loads(data)
+            return json.loads(data['Value'])
         else:
             LOG.warn('{id} tried to access report status for {host} which '
                      'did not exist'.format(id=self.host_id, host=hostid))
             return None
 
     def update_reported_status(self, cluster_status):
-        temp_cls = cluster(datetime.now(), current_status)
+        temp_cls = cluster(datetime.now(), cluster_status)
         self.changed_clusters.remove(temp_cls)
         old_status = self.get_report_status(cluster_status['hostname'])
         if not old_status:
             return
-        old_status['report_time'] = str(datetime.now())
-        old_status['uuid'] = cluster_status['uuid']
+        old_status['report_time'] = datetime.strftime(datetime.now(), '%Y%m%d%H%M%S')
+        old_status['id'] = cluster_status['id']
         self.update_kv(cluster_status['hostname'], json.dumps(old_status))
 
     def cleanup_consul_kv_store(self):
@@ -366,9 +366,14 @@ class consul_status:
             value = kv['Value']
             if UUID_PATTERN.match(key):
                 # Dealing with a status report key-value pair
-                report_time_str = json.loads(value)['report_time']
+                value = json.loads(value)
+                report_time_str = value['report_time']
+                report_uuid = value['id']
+                if not report_uuid:
+                    # This key value pair was not reported.Don't delete the key
+                    continue
                 report_time = datetime.strptime(report_time_str,
-                                                "%Y-%m-%d %H:%M:%S.%f")
+                                                "%Y%m%d%H%M%S")
                 if datetime.now() - report_time > self.reap_interval:
                     self.cc.kv.delete(key)
             elif valid_cluster_port(key):

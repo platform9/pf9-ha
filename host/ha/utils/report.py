@@ -61,7 +61,7 @@ class MasakariReporter:
         payload = json.dumps(data)
         try:
             resp = requests.post(self.masakari_url, data=payload, headers=headers,
-                                 verify=CONF.du.insecure)
+                                 verify=CONF.keystone_authtoken.insecure)
             if resp.status_code != requests.codes.ok:
                 LOG.error('Masakari returned %s', resp.status_code)
                 return False
