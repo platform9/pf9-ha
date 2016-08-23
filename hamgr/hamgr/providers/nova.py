@@ -54,7 +54,7 @@ class NovaProvider(Provider):
         _ = self._get_aggregate(client, aggregate_id)
         cluster = None
         try:
-            cluster = db_api.get_cluster(aggregate_id)
+            cluster = db_api.get_cluster(str(aggregate_id))
         except ha_exceptions.ClusterNotFound:
             pass
 
@@ -127,7 +127,7 @@ class NovaProvider(Provider):
             servers += hosts[3:5]
             agents = hosts[5:]
         elif len(hosts) >= 4:
-            agents = hosts[4:]
+            agents = hosts[3:]
 
         ip_lookup = self._get_ips(client, hosts)
         if leader not in ip_lookup:
@@ -143,14 +143,15 @@ class NovaProvider(Provider):
 
     def _enable(self, aggregate_id):
         client = self._get_client()
-        db_api.create_cluster_if_needed(aggregate_id)
+        str_aggregate_id = str(aggregate_id)
+        db_api.create_cluster_if_needed(str_aggregate_id)
 
-        if self._validate_cluster(aggregate_id, False) is False:
-            LOG.info('Cluster %s already HA enabled', aggregate_id)
+        if self._validate_cluster(str_aggregate_id, False) is False:
+            LOG.info('Cluster %d already HA enabled', aggregate_id)
             return
 
         aggregate = self._get_aggregate(client, aggregate_id)
-        cluster = db_api.get_cluster(aggregate_id)
+        cluster = db_api.get_cluster(str_aggregate_id)
         db_api.add_nodes_if_needed(aggregate.hosts, cluster.id)
         self._validate_hosts(aggregate.hosts, cluster.id)
         self._assign_roles(client, cluster.id, aggregate.hosts)
@@ -167,11 +168,12 @@ class NovaProvider(Provider):
             resp.raise_for_status()
 
     def _disable(self, aggregate_id):
-        if self._validate_cluster(aggregate_id, True) is False:
-            LOG.info('Cluster %s already HA disabled', aggregate_id)
+        str_aggregate_id = str(aggregate_id)
+        if self._validate_cluster(str_aggregate_id, True) is False:
+            LOG.info('Cluster %d already HA disabled', aggregate_id)
             return
 
-        cluster = db_api.get_cluster(aggregate_id)
+        cluster = db_api.get_cluster(str_aggregate_id)
         nodes = db_api.get_all_nodes(cluster_id=cluster.id)
         if nodes:
             self._deauth([n.host for n in nodes])
