@@ -54,7 +54,6 @@ class Role(Enum):
 class Node(BaseTable, Base):
     __tablename__ = 'nodes'
     host = Column(String(255))
-    allocated = Column(Boolean, default=False)
 
     # None == not a member, 0 == leader, 1 == server, 2 == agent
     member_type = Column(Integer, default=None)

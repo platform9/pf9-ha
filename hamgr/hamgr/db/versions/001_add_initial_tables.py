@@ -1,4 +1,4 @@
-from sqlalchemy import Table, Column, Boolean, Integer, String, DateTime, MetaData
+from sqlalchemy import Table, Column, Boolean, Integer, String, DateTime, MetaData, ForeignKey
 
 meta = MetaData()
 
@@ -18,6 +18,7 @@ node = Table(
     'nodes', meta,
     Column('id', Integer, primary_key=True),
     Column('deleted', Integer, default=None),
+    Column('cluster_id', Integer, ForeignKey('clusters.id')),
     Column('host', String(255), default=1),
     Column('member_type', Integer, default=None),
     Column('enabled', Boolean, default=False),

@@ -126,6 +126,8 @@ class NovaProvider(Provider):
         if len(hosts) >= 5:
             servers += hosts[3:5]
             agents = hosts[5:]
+        elif len(hosts) >= 4:
+            agents = hosts[4:]
 
         ip_lookup = self._get_ips(client, hosts)
         if leader not in ip_lookup:
@@ -172,7 +174,7 @@ class NovaProvider(Provider):
         cluster = db_api.get_cluster(aggregate_id)
         nodes = db_api.get_all_nodes(cluster_id=cluster.id)
         if nodes:
-            self._deauth(nodes)
+            self._deauth([n.host for n in nodes])
         db_api.update_cluster(cluster.id, False)
     
     def put(self, aggregate_id, method):
