@@ -32,9 +32,9 @@
             "config": {
                 "ha_slave_conf": {
                     "keystone_authtoken": {
-                        "admin_user": "%(pf9-ha-slave.auth_user)s",
-                        "admin_password": "%(pf9-ha-slave.auth_pass)s",
-                        "admin_tenant_name": "%(pf9-ha-slave.auth_tenant_name)s",
+                        "admin_user": "%(pf9_ha_slave_auth_user)s",
+                        "admin_password": "%(pf9_ha_slave_auth_pass)s",
+                        "admin_tenant_name": "%(pf9_ha_slave_auth_tenant_name)s",
                         "insecure": "True"
                     },
                     "consul": {},
