@@ -35,9 +35,9 @@ start() {
 
    # Only root can start the service
     [ $uid -ne 0 ] && exit 4
-
+    mkdir -p `dirname $PIDFILE`
     touch $PIDFILE
-    mkdir -p /var/log/pf9
+    mkdir -p `dirname $SERVER_LOGFILE`
     /sbin/start-stop-daemon --start --name $svcname --quiet --pidfile $PIDFILE --exec $SERVER_BIN --chuid pf9 --make-pidfile -- $SERVER_OPTS > $SERVER_LOGFILE &
     RETVAL=$?
     if [ "$RETVAL" -eq "0" ]; then
@@ -50,7 +50,7 @@ start() {
 
 stop() {
 
-    start-stop-daemon --stop  --retry=0/30/KILL/5 --pidfile $PIDFILE --exec $SERVER_BIN
+    start-stop-daemon --stop --oknodo --retry=0/30/KILL/5 --pidfile $PIDFILE --exec $SERVER_BIN
     RETVAL=$?
     if [ "$RETVAL" -eq "0" ]; then
         log_success_msg "Stopped:" "$svcname"

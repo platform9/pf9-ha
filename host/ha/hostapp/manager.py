@@ -131,14 +131,11 @@ def loop():
                 cluster_setup = True
         elif ch.am_i_cluster_leader():
             cluster_stat = ch.get_cluster_status()
-            if not cluster_stat:
-                LOG.info('sleeping for %s seconds' % sleep_time)
-                sleep(sleep_time)
-                continue
-            expand_stats(cluster_stat)
-            LOG.info(cluster_stat)
-            if mreporter.report_status(cluster_stat):
-                ch.update_reported_status(cluster_stat)
+            if cluster_stat:
+                expand_stats(cluster_stat)
+                LOG.info(cluster_stat)
+                if mreporter.report_status(cluster_stat):
+                    ch.update_reported_status(cluster_stat)
             ch.cleanup_consul_kv_store()
         # It is possible that host ID was not published when the consul
         # helper was created as the cluster was not yet formed. Since this

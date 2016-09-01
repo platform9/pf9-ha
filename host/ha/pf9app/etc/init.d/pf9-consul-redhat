@@ -37,8 +37,9 @@ start_process() {
     # Only root can start the service
     [ $uid -ne 0 ] && exit 4
 
+    mkdir -p `dirname $PIDFILE`
     touch $PIDFILE
-    mkdir -p /var/log/pf9
+    mkdir -p `dirname $SERVER_LOGFILE`
 
     daemon --user pf9 "$SERVER_BIN $SERVER_OPTS >> $SERVER_LOGFILE &"
 

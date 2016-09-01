@@ -35,9 +35,9 @@ start() {
 
     # Only root can start the service
     [ $uid -ne 0 ] && exit 4
-
+    mkdir -p `dirname $PIDFILE`
     touch $PIDFILE
-    mkdir -p /var/log/pf9
+    mkdir -p `dirname $SERVER_LOGFILE`
     LD_LIBRARY_PATH="/opt/pf9/python/pf9-lib:/opt/pf9/python/pf9-hostagent-lib:${LD_LIBRARY_PATH}" \
         PYTHONPATH="/opt/pf9/python/lib/python2.7:${PYTHONPATH}" \
         /sbin/start-stop-daemon --start --name $svcname --quiet --pidfile $PIDFILE --exec $SERVER_BIN --chuid pf9 --make-pidfile -- $SERVER_OPTS >> $SERVER_LOGFILE 2>&1 &
