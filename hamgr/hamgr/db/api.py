@@ -1,8 +1,21 @@
+# Copyright (c) 2016 Platform9 Systems Inc.
 #
-# Copyright (C) 2016, Platform9 Systems. All Rights Reserved.
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
 #
-from enum import Enum
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either expressed or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
+
 from contextlib import contextmanager
+from enum import Enum
+from hamgr import exceptions
+from hamgr import states
 from sqlalchemy import create_engine
 from sqlalchemy import Column, Table, ForeignKey
 from sqlalchemy import Boolean, DateTime, Integer, String, types
@@ -40,6 +53,7 @@ class BaseTable(object):
 class Cluster(BaseTable, Base):
     __tablename__ = 'clusters'
     name = Column(String(255))
+    task_state = Column(String(36), nullable=True)
 
 
 class Role(Enum):
@@ -57,7 +71,7 @@ class Node(BaseTable, Base):
 
     # None == not a member, 0 == leader, 1 == server, 2 == agent
     member_type = Column(Integer, default=None)
-    cluster_id = Column(Integer, ForeignKey('clusters.id'))
+    cluster_id = Column(Integer, ForeignKey('clusters.id'), nullable=True)
 
 
 def init(config):
@@ -97,6 +111,17 @@ def _get_all_clusters(session, read_deleted=False):
     return query.all()
 
 
+def _get_all_active_clusters(session):
+    query = session.query(Cluster)
+    clusters = query.all()
+    return [cluster for cluster in clusters if cluster.enabled == True]
+
+
+def get_all_active_clusters():
+    with dbsession() as session:
+        return _get_all_active_clusters(session)
+
+
 def _get_cluster(session, cluster_name_or_id, read_deleted=False,):
     query = session.query(Cluster)
     if read_deleted is False:
@@ -111,6 +136,21 @@ def _get_cluster(session, cluster_name_or_id, read_deleted=False,):
 def get_all_clusters(read_deleted=False):
     with dbsession() as session:
         return _get_all_clusters(session, read_deleted=read_deleted)
+
+
+def _disable_all_nodes_in_cluster(session, cluster_id):
+    rcount = session.query(Node).filter_by(
+            cluster_id=cluster_id).update({"cluster_id": None},
+                                           synchronize_session=False)
+    # Without the following commit statement cluster_id does not get updated to
+    # NULL
+    session.commit()
+    LOG.debug('Updated %(count)s rows', {'count': str(rcount)})
+
+
+def disable_all_nodes_in_cluster(cluster_id):
+    with dbsession() as session:
+        return _disable_all_nodes_in_cluster(session, cluster_id)
 
 
 def _get_all_nodes(session, read_deleted=False, cluster_id=None, host=None, member_type=None):
@@ -146,6 +186,7 @@ def _create_cluster(session, cluster_name):
         clstr = Cluster()
         clstr.name = cluster_name
         session.add(clstr)
+        return clstr.id
     except SQLAlchemyError as se:
         LOG.error('DB error: %s', se)
         raise
@@ -161,8 +202,10 @@ def create_cluster(cluster_name):
 def create_cluster_if_needed(cluster_name):
     with dbsession() as session:
         cluster = _get_cluster(session, cluster_name)
+        cluster_id = cluster.id
         if cluster is None:
-            _create_cluster(session, cluster_name)
+            cluster_id = _create_cluster(session, cluster_name)
+        return cluster_id
 
 
 def add_nodes_if_needed(hosts, cluster_id):
@@ -200,9 +243,23 @@ def update_cluster(cluster_id, enabled):
         db_cluster = _get_cluster(session, cluster_id)
         db_cluster.enabled = enabled
 
+def update_cluster_task_state(cluster_id, state):
+    with dbsession() as session:
+        db_cluster = _get_cluster(session, cluster_id)
+        task_state = db_cluster.task_state
+        if task_state and state is not None:
+            if task_state == state:
+                # NOOP
+                LOG.debug('Updating task_state with same value - {val}'.format(
+                    val=state))
+            else:
+                raise exceptions.UpdateConflict(cluster_id, task_state, state)
+        if state not in states.VALID_TASK_STATES:
+            raise exceptions.InvalidTaskState(state)
+        db_cluster.task_state = state
 
-
-
-
-
+def get_cluster_task_state(cluster_id):
+    with dbsession() as session:
+        db_cluster = _get_cluster(session, cluster_id)
+        return db_cluster.task_state
 

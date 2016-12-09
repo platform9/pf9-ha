@@ -1,15 +1,27 @@
 #!/usr/bin/env python
 
+# Copyright (c) 2016 Platform9 Systems Inc.
 #
-# Copyright (c) 2016, Platform9 Systems, All Rights Reserved.
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
 #
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either expressed or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
 
-from paste.deploy import loadapp
 from eventlet import wsgi
-import eventlet
-import argparse, logging
-import logging.handlers
+from hamgr import periodic_task
+from paste.deploy import loadapp
+import argparse
 import ConfigParser
+import eventlet
+import logging
+import logging.handlers
 
 eventlet.monkey_patch()
 
@@ -38,7 +50,7 @@ def start_server(conf, paste_ini):
         paste_file = paste_ini
     else:
         paste_file = conf.get("DEFAULT", "paste-ini")
-
+    periodic_task.start()
     wsgi_app = loadapp('config:%s' % paste_file, 'main')
     wsgi.server(eventlet.listen(('', conf.getint("DEFAULT", "listen_port"))), wsgi_app)
 

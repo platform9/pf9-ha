@@ -39,18 +39,21 @@ start_process() {
 
     mkdir -p `dirname $PIDFILE`
     touch $PIDFILE
+    chown pf9:pf9group $PIDFILE
     mkdir -p `dirname $SERVER_LOGFILE`
+    touch $SERVER_LOGFILE
+    chown pf9:pf9group $SERVER_LOGFILE
 
-    daemon --user pf9 "$SERVER_BIN $SERVER_OPTS >> $SERVER_LOGFILE &"
+    daemon --user pf9 "$SERVER_BIN $SERVER_OPTS >> $SERVER_LOGFILE 2>&1 &"
 
     RETVAL=$?
     pid=`pidofproc $SHORT_NAME`
     echo $pid > $PIDFILE
     if [ "$RETVAL" -eq "0" ]; then
-        log_success_msg "Started:" "$svcname"
+        echo "Started:" "$svcname"
         touch $LOCKFILE
     else
-        log_failure_msg "Failed to start:" "$svcname"
+        echo "Failed to start:" "$svcname"
     fi
     return $RETVAL
 }
@@ -60,11 +63,11 @@ stop_process() {
     killproc -p $PIDILE $SERVER_BIN -TERM
     RETVAL=$?
     if [ "$RETVAL" -eq "0" ]; then
-        log_success_msg "Stopped:" "$svcname"
+        echo "Stopped:" "$svcname"
         rm -f $PIDFILE
         rm -f $LOCKFILE
     else
-        log_failure_msg "Failed to stop:" "$svcname"
+        echo "Failed to stop:" "$svcname"
     fi
     return $RETVAL
 }

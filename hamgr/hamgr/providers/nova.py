@@ -1,15 +1,30 @@
+# Copyright (c) 2016 Platform9 Systems Inc.
 #
-# Copyright (c) 2016, Platform9 Systems. All Rights Reserved
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
 #
-import logging
-import requests
-import json
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either expressed or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
 
-from novaclient import client, exceptions
-
-from provider import Provider
 import hamgr.db.api as db_api
 import hamgr.exceptions as ha_exceptions
+import json
+import logging
+import requests
+import time
+from datetime import datetime
+from datetime import timedelta
+from eventlet import greenthread
+from hamgr import states
+from hamgr import periodic_task
+from novaclient import client, exceptions
+from provider import Provider
 
 LOG = logging.getLogger(__name__)
 
@@ -22,6 +37,42 @@ class NovaProvider(Provider):
         self._auth_uri = config.get('keystone_middleware', 'auth_uri')
         self._tenant = config.get('keystone_middleware', 'admin_tenant_name')
         self._region = config.get('nova', 'region')
+        periodic_task.add_task(self._check_host_aggregate_changes, 120,
+                               run_now=True)
+
+    def _check_host_aggregate_changes(self):
+        clusters = db_api.get_all_active_clusters()
+        client = self._get_client()
+        for cluster in clusters:
+            aggregate_id = cluster.name
+            aggregate = self._get_aggregate(client, aggregate_id)
+            current_nodes = db_api.get_all_nodes(cluster_id=cluster.id)
+            db_node_ids = set([node.host for node in current_nodes])
+            current_host_ids = set(aggregate.hosts)
+            current_cluster_status = db_api.get_cluster_task_state(
+                    cluster.id)
+            if db_node_ids == current_host_ids:
+                if current_cluster_status != states.TASK_COMPLETED:
+                    # Since the nodes in cluster and aggregate are the same we
+                    # cluster formation must be complete.
+                    # Somehow the task update was not performed. Complete it now
+                    db_api.update_cluster_task_state(cluster.id,
+                                                     states.TASK_COMPLETED)
+                continue
+            if current_cluster_status != states.TASK_COMPLETED:
+                LOG.warn('Aggregate %(agg_id)s has pending task state '
+                         '%(state)s',{'agg_id': aggregate_id,
+                                      'state':current_cluster_status})
+                continue
+            db_api.update_cluster_task_state(cluster.id,
+                                             states.TASK_UPDATING)
+            # Do not update cluster state as this function is managing
+            # the cluster status
+            self._disable(aggregate_id, update_state=False, synchronize=True)
+            self._enable(aggregate_id, update_state=False, reconfig=True)
+            db_api.update_cluster_task_state(cluster.id,
+                                             states.TASK_COMPLETED)
+
 
     def _get_client(self):
         return client.Client(2,
@@ -59,7 +110,9 @@ class NovaProvider(Provider):
             pass
 
         enabled = cluster.enabled if cluster is not None else False
-        return dict(id=aggregate_id, enabled=enabled)
+        task_state = 'completed' if cluster.task_state is None else \
+                cluster.task_state
+        return dict(id=aggregate_id, enabled=enabled, task_state=task_state)
 
     def get(self, aggregate_id):
         client = self._get_client()
@@ -141,21 +194,48 @@ class NovaProvider(Provider):
         self._auth(ip_lookup, cluster_id, token, agents, 'agent',
                    ip=leader_ip)
 
-    def _enable(self, aggregate_id):
+    def _enable(self, aggregate_id, update_state=True, reconfig=False):
         client = self._get_client()
         str_aggregate_id = str(aggregate_id)
-        db_api.create_cluster_if_needed(str_aggregate_id)
-
+        cluster_id = db_api.create_cluster_if_needed(str_aggregate_id)
+        if update_state:
+            db_api.update_cluster_task_state(cluster_id, states.TASK_CREATING)
         if self._validate_cluster(str_aggregate_id, False) is False:
-            LOG.info('Cluster %d already HA enabled', aggregate_id)
-            return
+            if reconfig:
+                LOG.info('Reconfiguring already HA enabled cluster %s',
+                        aggregate_id)
+            else:
+                LOG.info('Cluster %d already HA enabled', aggregate_id)
+                return
 
         aggregate = self._get_aggregate(client, aggregate_id)
         cluster = db_api.get_cluster(str_aggregate_id)
         db_api.add_nodes_if_needed(aggregate.hosts, cluster.id)
         self._validate_hosts(aggregate.hosts, cluster.id)
         self._assign_roles(client, cluster.id, aggregate.hosts)
-        db_api.update_cluster(cluster.id, True)
+        if update_state:
+            db_api.update_cluster(cluster.id, True)
+            db_api.update_cluster_task_state(cluster_id, states.TASK_COMPLETED)
+
+    def _wait_for_role_removal(self, nodes, rolename='pf9-ha-slave'):
+        token = self._get_token()
+        headers = {'X-Auth-Token': token['access']['token']['id'],
+                   'Content-Type': 'application/json'}
+        url = 'http://localhost:8080/resmgr/v1/hosts/'
+        for node in nodes:
+            start_time = datetime.now()
+            auth_url = '/'.join([url, node])
+            resp = requests.get(auth_url, headers=headers)
+            resp.raise_for_status()
+            json_resp = resp.json()
+            while json_resp['role_status'] != 'ok' or \
+                    rolename in json_resp['roles']:
+                time.sleep(5)
+                resp = requests.get(auth_url, headers=headers)
+                resp.raise_for_status()
+                json_resp = resp.json()
+                if datetime.now() - start_time > timedelta(minutes=5):
+                    raise ha_exceptions.RoleConvergeFailed(node)
 
     def _deauth(self, nodes):
         token = self._get_token()
@@ -167,18 +247,26 @@ class NovaProvider(Provider):
             resp = requests.delete(auth_url, headers=headers)
             resp.raise_for_status()
 
-    def _disable(self, aggregate_id):
+    def _disable(self, aggregate_id, update_state=True, synchronize=False):
         str_aggregate_id = str(aggregate_id)
         if self._validate_cluster(str_aggregate_id, True) is False:
             LOG.info('Cluster %d already HA disabled', aggregate_id)
             return
 
         cluster = db_api.get_cluster(str_aggregate_id)
+        if update_state:
+            db_api.update_cluster_task_state(cluster.id, states.TASK_REMOVING)
         nodes = db_api.get_all_nodes(cluster_id=cluster.id)
+        hosts = [n.host for n in nodes]
         if nodes:
-            self._deauth([n.host for n in nodes])
-        db_api.update_cluster(cluster.id, False)
-    
+            self._deauth(hosts)
+        if update_state:
+            db_api.update_cluster(cluster.id, False)
+            db_api.update_cluster_task_state(cluster.id, states.TASK_COMPLETED)
+        db_api.disable_all_nodes_in_cluster(cluster.id)
+        if synchronize:
+            self._wait_for_role_removal(hosts)
+
     def put(self, aggregate_id, method):
         if method == 'enable':
             self._enable(aggregate_id)

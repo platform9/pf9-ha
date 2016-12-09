@@ -1,7 +1,16 @@
+# Copyright (c) 2016 Platform9 Systems Inc.
 #
-# Copyright (c) 2016, Platform9 Systems. All Rights Reserved.
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
 #
-
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either expressed or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
 
 class AggregateNotFound(Exception):
     def __init__(self, aggregate):
@@ -34,6 +43,25 @@ class HostNotFound(Exception):
 
 
 class InsufficientHosts(Exception):
-    def __ini__(self, expected=3):
+    def __init__(self, expected=3):
         message = 'Insufficient hosts to form a cluster. Atleast %d are neeeded' % expected
         super(InsufficientHosts, self).__init__(message)
+
+
+class RoleConvergeFailed(Exception):
+    def __init__(self, host):
+        message = 'Host %s failed to converge' % host
+        super(RoleConvergeFailed, self).__init__(message)
+
+
+class UpdateConflict(Exception):
+    def __init__(self, cluster, old_task, new_task):
+        message = 'Cluster %s has %s task already running. Failed to update' \
+                  ' task to %s' % (cluster, old_task, new_task)
+        super(UpdateConflict, self).__init__(message)
+
+
+class InvalidTaskState(Exception):
+    def __init__(self, state):
+        message = '%s is not a valid task state' % state
+        super(InvalidTaskState, self).__init__(message)

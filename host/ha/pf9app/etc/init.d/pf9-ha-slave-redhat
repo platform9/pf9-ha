@@ -25,7 +25,7 @@ PIDFILE=/var/run/${svcname}.pid
 PYTHON_EGG_CACHE=/tmp/python-eggs
 
 # Source function library.
-. /lib/lsb/init-functions
+. /etc/init.d/functions
 
 
 RETVAL=0
@@ -45,10 +45,10 @@ start_process() {
     pid=`pidofproc $SERVER_BIN`
     echo $pid > $PIDFILE
     if [ "$RETVAL" -eq "0" ]; then
-        log_success_msg "Started:" "$svcname"
+        echo "Started:" "$svcname"
         touch $LOCKFILE
     else
-        log_failure_msg "Failed to start:" "$svcname"
+        echo "Failed to start:" "$svcname"
     fi
     return $RETVAL
 }
@@ -57,11 +57,11 @@ stop_process() {
     killproc -p $PIDFILE $SERVER_BIN -TERM
     RETVAL=$?
     if [ "$RETVAL" -eq "0" ]; then
-        log_success_msg "Stopped:" "$svcname"
+        echo "Stopped:" "$svcname"
         rm -f $PIDFILE
         rm -f $LOCKFILE
     else
-        log_failure_msg "Failed to stop:" "$svcname"
+        echo "Failed to stop:" "$svcname"
     fi
     return $RETVAL
 }
