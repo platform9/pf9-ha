@@ -22,9 +22,9 @@ Example:
 HA configuration requires a minimum of three hosts. It is said to be
 non-available if the aggregate has less than three hosts.
 
-GET /v1/ha
+GET /v1/ha/\<aggregate_id>
 
-Returns HA configuration state for all host aggregates
+Returns HA configuration state for one host aggregate
 
 Example:
 ```
@@ -39,7 +39,7 @@ Example:
 ```
 
 
-PUT /v1/ha/<aggregate_id>/enable
+PUT /v1/ha/\<aggregate_id>/enable
 
 Activates the HA configuration on all hosts in the given aggregate.
 1. If HA is not yet enabled for given aggregate:  The eligible hosts are determined by looking at their
@@ -48,7 +48,7 @@ host aggregate metadata. All hosts in the host aggregate are treated as one HA c
 3. If HA cannot be enabled for given aggregate: This can happen if there are
 less than three hosts in the host aggregate. The API fails in such a case.
 
-PUT /v1/ha/<aggregate_id>/disable
+PUT /v1/ha/\<aggregate_id>/disable
 
 Disables HA for an aggregate. With following possible outcomes --
 1. If given aggregate is HA enabled, it is disabled. The clustering
