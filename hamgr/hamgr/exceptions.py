@@ -29,6 +29,10 @@ class ClusterNotFound(Exception):
         message = 'Cluster %s not found' % cluster
         super(ClusterNotFound, self).__init__(message)
 
+class ClusterBusy(Exception):
+    def __init__(self, cluster, task):
+        message = 'Cluster %s is running task %s' % (cluster, task)
+        super(ClusterBusy, self).__init__(message)
 
 class HostPartOfCluster(Exception):
     def __init__(self, host, cluster_id):
@@ -65,3 +69,8 @@ class InvalidTaskState(Exception):
     def __init__(self, state):
         message = '%s is not a valid task state' % state
         super(InvalidTaskState, self).__init__(message)
+
+class SegmentNotFound(Exception):
+    def __init__(self, name):
+        message = 'Segment %s was not found' % name
+        super(SegmentNotFound, self).__init__(message)
