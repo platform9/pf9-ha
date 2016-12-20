@@ -31,11 +31,14 @@ mkdir -p $stagedir
 # Make the correct directory structure as we would expect in DU
 install -d -m 755 ${stagedir}/opt/pf9/www/private
 install -d -m 755 ${stagedir}/etc/pf9/resmgr_roles/pf9-ha-slave/${version}/
+install -d -m 755 ${stagedir}/etc/pf9/resmgr_roles/conf.d/
 
 install -p -m 644 ${builddir}/pf9-ha-slave*.rpm ${stagedir}/opt/pf9/www/private
 install -p -m 644 ${builddir}/pf9-ha-slave*.deb ${stagedir}/opt/pf9/www/private
 install -p -m 644 ${thisdir}/../ha/pf9app/pf9-ha-role.json \
     ${stagedir}/etc/pf9/resmgr_roles/pf9-ha-slave/${version}/pf9-ha-role.json
+install -p -m 644 ${thisdir}/ha-slave-resmgr.conf \
+    ${stagedir}/etc/pf9/resmgr_roles/conf.d/
 
 rpm_name=`ls ${builddir}/pf9-ha-slave*.rpm`
 rpm_name=`basename ${rpm_name}`
