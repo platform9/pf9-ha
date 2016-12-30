@@ -28,9 +28,11 @@ def get_failover_segment(token, name):
     resp = requests.get(url, headers=headers)
     resp.raise_for_status()
 
-    expected_seg = filter(lambda s: s['name'] == name, resp.json()['segments'])
-
-    if len(expected_seg) == 0:
+    if 'segments' in resp.json():
+        expected_seg = filter(lambda s: s['name'] == name, resp.json()['segments'])
+        if len(expected_seg) == 0:
+            raise exceptions.SegmentNotFound(name)
+    else:
         raise exceptions.SegmentNotFound(name)
 
     return expected_seg[0]
@@ -84,9 +86,9 @@ def create_failover_segment(token, name, hosts):
         data = dict(host=dict(name=h,
                               type='COMPUTE',
                               reserved='False',
-                              on_maintenant='False',
+                              on_maintenance='False',
                               control_attributes=''))
-        resp = requests.post(url, headers=headers, data=data)
+        resp = requests.post(url, headers=headers, data=json.dumps(data))
         resp.raise_for_status()
 
 

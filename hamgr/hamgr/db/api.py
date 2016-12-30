@@ -153,8 +153,7 @@ def create_cluster_if_needed(cluster_name, task_state):
         cluster = _get_cluster(session, cluster_name)
         if cluster is None:
             cluster = _create_cluster(session, cluster_name, task_state)
-        cluster_id = cluster.id
-        return cluster_id
+        return cluster
 
 
 def update_cluster(cluster_id, enabled):

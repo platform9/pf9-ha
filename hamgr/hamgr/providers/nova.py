@@ -188,13 +188,13 @@ class NovaProvider(Provider):
             self._assign_roles(client, aggregate.hosts)
 
             # 2. Create cluster
-            cluster_id = db_api.create_cluster_if_needed(str_aggregate_id, states.TASK_CREATING)
+            cluster = db_api.create_cluster_if_needed(str_aggregate_id, states.TASK_CREATING)
+            LOG.info('Created cluster with id %d', cluster.id)
 
             # 3. Create fail-over segment
             masakari.create_failover_segment(self._token, str_aggregate_id, aggregate.hosts)
 
-
-
+            LOG.info('Enabling cluster %d', cluster.id)
             db_api.update_cluster(cluster.id, True)
         except Exception as e:
             LOG.error('Cannot enable HA on %s: %s', str_aggregate_id, e)
