@@ -41,7 +41,7 @@ PF9_CONSUL_CONF_DIR = '/opt/pf9/etc/pf9-consul/'
 def expand_stats(cluster_stat):
     cluster_stat['type'] = 'rscGroup'
     cluster_stat['regionID'] = ""
-    cluster_stat['time'] = datetime.strftime(datetime.now(), '%Y%m%d%H%M%S')
+    cluster_stat['time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     cluster_stat['tzname'] = tzname[0]
     cluster_stat['daylight'] = daylight
 
@@ -107,12 +107,11 @@ def loop():
     hostid = cfgparser.get('DEFAULT', 'host_id')
     sleep_time = CONF.consul.status_check_interval
     ch = consul_helper.consul_status(hostid)
-    mreporter = report.MasakariReporter()
+    reporter = report.HaManagerReporter()
     start_loop = False
     cluster_setup = False
 
     # TODO(pacharya): Handle restart of pf9-ha-slave service
-    # TODO(pacharya): Address cluster destroy and re-creation
     generate_consul_conf()
 
     # Assume that consul was not running beforehand
@@ -133,8 +132,8 @@ def loop():
             cluster_stat = ch.get_cluster_status()
             if cluster_stat:
                 expand_stats(cluster_stat)
-                LOG.info(cluster_stat)
-                if mreporter.report_status(cluster_stat):
+                LOG.info('cluster_stat: %s', cluster_stat)
+                if reporter.report_status(cluster_stat):
                     ch.update_reported_status(cluster_stat)
             ch.cleanup_consul_kv_store()
         # It is possible that host ID was not published when the consul

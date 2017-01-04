@@ -108,7 +108,7 @@ class cluster:
     def __repr__(self):
         jobj = {
             'change_time': datetime.strftime(self.change_time,
-                                             "%Y%m%d%H%M%S"),
+                                             "%Y-%m-%d %H:%M:%S"),
             'change_info': json.dumps(self.change_info)
         }
         return json.dumps(jobj)
@@ -116,7 +116,7 @@ class cluster:
     @classmethod
     def from_str(cls, string):
         obj = json.loads(string)
-        change_time = datetime.strptime(obj['change_time'], "%Y%m%d%H%M%S")
+        change_time = datetime.strptime(obj['change_time'], "%Y-%m-%d %H:%M:%S")
         change_info = json.loads(obj['change_info'])
         return cls(change_time, change_info)
 
@@ -143,7 +143,7 @@ class consul_status:
                 self.current_status = last_update_json.get('current_status')
                 if last_update_time and last_update_time != 'None':
                     self.last_status_update_time = datetime.strptime(
-                            last_update_time, "%Y%m%d%H%M%S")
+                            last_update_time, "%Y-%m-%d %H:%M:%S")
         self.cc = consul.Consul()
         self.host_id = host_id
         reap_interval = CONF.consul.key_reap_interval
@@ -179,14 +179,15 @@ class consul_status:
                 event_type = 1
                 detail = 1
                 event_id = 1
-                start_time = datetime.strftime(current_time, "%Y%m%d%H%M%S")
+                start_time = datetime.strftime(current_time, '%Y-%m-%d %H:%M:%S')
                 end_time = ""
             else:
                 # Node failed
                 event_type = 2
                 detail = 2
                 event_id = 1
-                start_time = end_time = datetime.strftime(current_time, "%Y%m%d%H%M%S")
+                start_time = end_time = datetime.strftime(current_time,
+                                                          '%Y-%m-%d %H:%M:%S')
             cluster_port = "%s:%s" % (member.get('Addr'), member.get('Port'))
 
             ignore, data = self.cc.kv.get(cluster_port)
@@ -257,7 +258,8 @@ class consul_status:
             fptr.truncate()
             json.dump({
                 'status': self.last_status,
-                'time': datetime.strftime(self.last_status_update_time, '%Y%m%d%H%M%S'),
+                'time': datetime.strftime(self.last_status_update_time,
+                                          '%Y-%m-%d %H:%M:%S'),
                 'current_status': self.current_status
             }, fptr)
 
@@ -321,9 +323,10 @@ class consul_status:
         except:
             return False
 
-    def report_node_down_to_kv(self, hostid, node_info, report_time=None, report_id=None):
+    def report_node_down_to_kv(self, hostid, node_info, report_time=None,
+                               report_id=None):
         data = {
-            'notice_time': datetime.strftime(datetime.now(), '%Y%m%d%H%M%S'),
+            'notice_time': datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S'),
             'report_time': report_time,
             'id': report_id,
             'node_info': node_info
@@ -355,7 +358,8 @@ class consul_status:
         old_status = self.get_report_status(cluster_status['hostname'])
         if not old_status:
             return
-        old_status['report_time'] = datetime.strftime(datetime.now(), '%Y%m%d%H%M%S')
+        old_status['report_time'] = datetime.strftime(datetime.now(),
+                                                      '%Y-%m-%d %H:%M:%S')
         old_status['id'] = cluster_status['id']
         self.update_kv(cluster_status['hostname'], json.dumps(old_status))
 
@@ -373,7 +377,7 @@ class consul_status:
                     # This key value pair was not reported.Don't delete the key
                     continue
                 report_time = datetime.strptime(report_time_str,
-                                                "%Y%m%d%H%M%S")
+                                                "%Y-%m-%d %H:%M:%S")
                 if datetime.now() - report_time > self.reap_interval:
                     self.cc.kv.delete(key)
             elif valid_cluster_port(key):

@@ -92,3 +92,23 @@ def create_failover_segment(token, name, hosts):
         resp.raise_for_status()
 
 
+def create_notification(token, ntype, hostname, time, payload):
+    data = dict(type=ntype, hostname=hostname, generated_time=time, payload=payload)
+    headers = {
+        'X-Auth-Token': token['id'],
+        'Content-Type': 'application/json'
+    }
+    url = '/'.join([_URL, 'notifications'])
+    resp = requests.post(url, headers=headers,
+                         data=json.dumps(dict(notification=data)))
+    if resp.status_code == requests.codes.accepted:
+        LOG.info('Status notification successfully accepted by masakari')
+        LOG.info('Masakari response: %s', resp.json())
+    elif resp.status_code == requests.codes.conflict and \
+        resp.content.find('ignored as the host is already under maintenance'):
+        LOG.warn('Masakari ignored the notification since host %s is already under maintenance',
+                 hostname)
+    else:
+        LOG.error('Masakari rejected notification with error %s: %s', resp.status_code, resp)
+        resp.raise_for_status()
+

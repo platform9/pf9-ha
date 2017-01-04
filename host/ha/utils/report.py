@@ -25,10 +25,10 @@ keystone_opts = [
 CONF.register_group(keystone_auth_grp)
 CONF.register_opts(keystone_opts, keystone_auth_grp)
 
-class MasakariReporter:
+
+class Reporter(object):
 
     def __init__(self):
-        self.masakari_url = '/'.join([DU_URL, 'masakari'])
         self.keystone_token_url = '/'.join([DU_URL, 'keystone', 'v2.0', 'tokens'])
         self.insecure = CONF.keystone_authtoken.insecure
         self.token = self._get_token()
@@ -45,7 +45,8 @@ class MasakariReporter:
             }
         }
         data = json.dumps(data)
-        resp = requests.post(self.keystone_token_url, data=data, headers=headers, verify=self.insecure)
+        resp = requests.post(self.keystone_token_url, data=data,
+                             headers=headers, verify=self.insecure)
         if resp.status_code != requests.codes.ok:
             return False
         return resp.json()['access']['token']['id']
@@ -53,22 +54,36 @@ class MasakariReporter:
     def _refresh_token(self):
         self.token = self._get_token()
 
-    def report_status(self, data):
+    def report_status(self, data, refresh_token=False):
+        raise NotImplementedError()
+
+class HaManagerReporter(Reporter):
+
+    def __init__(self):
+        self.hamgr_url = '/'.join([DU_URL, 'hamgr'])
+        super(HaManagerReporter, self).__init__()
+
+    def report_status(self, data, refresh_token=False):
+        if refresh_token:
+            self._refresh_token()
         headers = {
             "Content-Type": "application/json",
             "X-Auth-Token": self.token
         }
-        payload = json.dumps(data)
+        if data['eventType'] == 1:
+            event = 'host-up'
+        elif data['eventType'] == 2:
+            event = 'host-down'
+        payload = json.dumps({'event': event, 'event_details': data})
         try:
-            resp = requests.post(self.masakari_url, data=payload, headers=headers,
+            resp = requests.post(self.hamgr_url, data=payload, headers=headers,
                                  verify=CONF.keystone_authtoken.insecure)
             if resp.status_code != requests.codes.ok:
-                LOG.error('Masakari returned %s', resp.status_code)
+                LOG.error('HA manager returned %d', resp.status_code)
                 return False
             else:
-                LOG.info('Status reported successfully to masakari')
-                return True
-
+                LOG.info('Status reported successfully to HA manager')
+                return resp.json().get('success', False)
         except:
             LOG.error('Status report failed', exc_info=True)
             return False

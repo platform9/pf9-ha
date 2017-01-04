@@ -43,6 +43,7 @@ class NovaProvider(Provider):
                                run_now=True)
 
     def _check_host_aggregate_changes(self):
+        self._token = utils.get_token(self._tenant, self._username, self._passwd, self._token)
         clusters = db_api.get_all_active_clusters()
         client = self._get_client()
         for cluster in clusters:
@@ -51,7 +52,7 @@ class NovaProvider(Provider):
             current_host_ids = set(aggregate.hosts)
 
             try:
-                nodes = masakari.get_failover_segment(aggregate_id)
+                nodes = masakari.get_nodes_in_segment(self._token, aggregate_id)
                 db_node_ids = set([node['name'] for node in nodes])
 
                 if db_node_ids == current_host_ids:
@@ -278,6 +279,45 @@ class NovaProvider(Provider):
         else:
             self._disable(aggregate_id)
 
+    def host_down(self, event_details):
+        host = event_details['hostname']
+        time = event_details['time']
+        event = 'STOPPED'
+        host_status = 'NORMAL'
+        cluster_status = 'OFFLINE'
+        notification_type = 'COMPUTE_HOST'
+        payload = {
+            "event": event,
+            "host_status": host_status,
+            "cluster_status": cluster_status
+        }
+        try:
+            self._token = utils.get_token(self._tenant, self._username, self._passwd, self._token)
+            masakari.create_notification(self._token, notification_type,
+                                         host, time, payload)
+        except:
+            return False
+        return True
+
+    def host_up(self, event_details):
+        host = event_details['hostname']
+        time = event_details['time']
+        event = 'STARTED'
+        host_status = 'NORMAL'
+        cluster_status = 'ONLINE'
+        notification_type = 'COMPUTE_HOST'
+        payload = {
+            "event": event,
+            "host_status": host_status,
+            "cluster_status": cluster_status
+        }
+        try:
+            self._token = utils.get_token(self._tenant, self._username, self._passwd, self._token)
+            masakari.create_notification(self._token, notification_type,
+                                         host, time, payload)
+        except:
+            return False
+        return True
 
 def get_provider(config):
     db_api.init(config)

@@ -68,5 +68,24 @@ def update_status(aggregate_id, action):
         return jsonify(dict(success=False)), 404, CONTENT_TYPE_HEADER
 
 
+@app.route('/v1/ha/<uuid:host_id>', methods=['POST'])
+@error_handler
+def update_host_status(host_id):
+    event = request.get_json().get('event', None)
+    event_details = request.get_json().get('event_details', {})
+    provider = get_provider()
+    if event and event == 'host-down':
+        masakari_notified = provider.host_down(event_details)
+    elif event and event == 'host-up':
+        masakari_notified = provider.host_up(event_details)
+    else:
+        LOG.warn('Invalid request')
+        return jsonify(dict(success=False)), 422, CONTENT_TYPE_HEADER
+    if masakari_notified:
+        return jsonify(dict(success=True)), 200, CONTENT_TYPE_HEADER
+    else:
+        return jsonify(dict(success=False)), 403, CONTENT_TYPE_HEADER
+
+
 def app_factory(global_config, **local_conf):
     return app

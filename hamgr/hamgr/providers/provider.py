@@ -29,3 +29,11 @@ class Provider(object):
         :return:
         """
         pass
+
+    @abstractmethod
+    def host_up(self, event_details):
+        pass
+
+    @abstractmethod
+    def host_down(self, event_details):
+        pass
