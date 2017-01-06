@@ -118,3 +118,25 @@ def create_notification(token, ntype, hostname, time, payload):
         LOG.error('Masakari rejected notification with error %s: %s', resp.status_code, resp)
         resp.raise_for_status()
 
+
+def get_notifications(token, host_id, generated_since=None):
+    """
+    Get all the notifications for the specific host ID
+    """
+    headers = {
+        'X-Auth-Token': token['id'],
+        'Content-Type': 'application/json'
+    }
+    url = '/'.join([_URL, 'notifications'])
+    query_params = {
+        'source_host_uuid': host_id
+    }
+    if generated_since:
+        query_params['generated-since'] = generated_since
+    resp = requests.get(url, params=query_params, headers=headers)
+    if resp.status_code == requests.codes.ok:
+        LOG.debug('Fetched notifications for %s', host_id)
+    else:
+        LOG.error('Error fetching notifications for %s', host_id)
+        resp.raise_for_status()
+    return resp.json()

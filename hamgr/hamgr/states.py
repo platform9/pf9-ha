@@ -14,7 +14,6 @@
 
 TASK_CREATING = 'creating'
 TASK_REMOVING = 'removing'
-TASK_UPDATING = 'updating'
 TASK_MIGRATING = 'migrating'
 TASK_COMPLETED = None
 TASK_ERROR_REMOVING = 'error-removing'
@@ -22,4 +21,4 @@ TASK_ERROR_REMOVING = 'error-removing'
 # Blank i.e. NULL task state means that the task was completed. Hence the
 # valid task states are only creating, deleting, updating and error-removing.
 VALID_TASK_STATES = [TASK_CREATING, TASK_MIGRATING, TASK_REMOVING,
-                     TASK_UPDATING, TASK_COMPLETED, TASK_ERROR_REMOVING]
+                     TASK_COMPLETED, TASK_ERROR_REMOVING]

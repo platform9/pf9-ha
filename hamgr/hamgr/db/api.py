@@ -60,7 +60,7 @@ def init(config, connection_string=None):
     _engine = create_engine(conn_str)
 
     global _session_maker
-    _session_maker = sessionmaker(bind=_engine)
+    _session_maker = sessionmaker(bind=_engine, expire_on_commit=False)
 
 
 def _has_unsaved_changes(session):

@@ -57,11 +57,12 @@ def _get_object():
     return PERIODIC_TASK
 
 
-def add_task(function, interval, run_now=False):
+def add_task(function, interval, run_now=False, run_once=False):
     ptask = _get_object()
     task = Task(function, interval)
     if task not in ptask.task_list:
-        ptask.task_list.append(task)
+        if not run_once:
+            ptask.task_list.append(task)
         if run_now:
             eventlet.greenthread.spawn_n(function)
             task.last_called = datetime.now()

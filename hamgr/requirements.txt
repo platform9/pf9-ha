@@ -1,7 +1,7 @@
 pbr==1.8.1
 oslo.config==3.9.0
 SQLAlchemy==0.9.8
-python-novaclient
+python-novaclient==6.0.0
 python-keystoneclient
 keystoneauth1
 jinja2==2.8.1
