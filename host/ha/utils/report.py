@@ -60,7 +60,7 @@ class Reporter(object):
 class HaManagerReporter(Reporter):
 
     def __init__(self):
-        self.hamgr_url = '/'.join([DU_URL, 'hamgr'])
+        self.hamgr_url = '/'.join([DU_URL, 'hamgr', 'v1', 'ha'])
         super(HaManagerReporter, self).__init__()
 
     def report_status(self, data, refresh_token=False):
@@ -76,7 +76,8 @@ class HaManagerReporter(Reporter):
             event = 'host-down'
         payload = json.dumps({'event': event, 'event_details': data})
         try:
-            resp = requests.post(self.hamgr_url, data=payload, headers=headers,
+            host_url = '/'.join([self.hamgr_url, data['hostname']])
+            resp = requests.post(host_url, data=payload, headers=headers,
                                  verify=CONF.keystone_authtoken.insecure)
             if resp.status_code != requests.codes.ok:
                 LOG.error('HA manager returned %d', resp.status_code)
