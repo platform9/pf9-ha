@@ -49,18 +49,25 @@ def get_nodes_in_segment(token, name):
 
 
 def delete_failover_segment(token, name):
+    headers = {'X-Auth-Token': token['id']}
     seg = None
     try:
         seg = get_failover_segment(token, name)
+        # Delete hosts in failover segment before deleting the segment itself
+        nodes = get_nodes_in_segment(token, name)
+        for node in nodes:
+            url = '/'.join([_URL, 'segments', node['failover_segment_id'], 'hosts', node['uuid']])
+            resp = requests.delete(url, headers=headers)
+            if resp.status_code not in [ requests.codes.no_content, requests.codes.not_found ]:
+                resp.raise_for_status()
     except exceptions.SegmentNotFound:
         return
 
     url = '/'.join([_URL, 'segments', seg['uuid']])
-    headers = {'X-Auth-Token': token['id']}
 
     resp = requests.delete(url, headers=headers)
-
-    resp.raise_for_status()
+    if resp.status_code not in [ requests.codes.no_content, requests.codes.not_found ]:
+        resp.raise_for_status()
 
 
 def create_failover_segment(token, name, hosts):
@@ -77,7 +84,6 @@ def create_failover_segment(token, name, hosts):
     data = dict(name=name, service_type='COMPUTE', recovery_method='auto', description='Created by HA Manager')
 
     resp = requests.post(url, headers=headers, data=json.dumps(dict(segment=data)))
-
     resp.raise_for_status()
 
     seg = resp.json()['segment']

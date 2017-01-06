@@ -39,6 +39,10 @@ class HostPartOfCluster(Exception):
         message = 'Host %s already in cluster %d' % (host, cluster_id)
         super(HostPartOfCluster, self).__init__(message)
 
+class HostOffline(Exception):
+    def __init__(self, host):
+        message = 'Host %s is offline' % (host)
+        super(HostOffline, self).__init__(message)
 
 class HostNotFound(Exception):
     def __init__(self, host):

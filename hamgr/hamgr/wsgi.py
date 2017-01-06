@@ -4,7 +4,7 @@
 from ConfigParser import ConfigParser
 from flask import Flask, request, jsonify, g
 from context import error_handler
-from hamgr.exceptions import AggregateNotFound, ClusterNotFound
+from hamgr.exceptions import AggregateNotFound, ClusterNotFound, HostOffline
 import logging
 
 LOG = logging.getLogger(__name__)
@@ -66,6 +66,9 @@ def update_status(aggregate_id, action):
     except AggregateNotFound:
         LOG.error('Aggregate %s was not found', aggregate_id)
         return jsonify(dict(success=False)), 404, CONTENT_TYPE_HEADER
+    except HostOffline as ex:
+        LOG.error('Cannot update cluster status since %s', ex)
+        return jsonify(dict(error=ex.message)), 409, CONTENT_TYPE_HEADER
 
 
 @app.route('/v1/ha/<uuid:host_id>', methods=['POST'])
