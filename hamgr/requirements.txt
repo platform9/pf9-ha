@@ -4,6 +4,7 @@ SQLAlchemy==0.9.8
 python-novaclient
 python-keystoneclient
 keystoneauth1
+jinja2==2.8.1
 flask==0.10.1
 Paste==1.7.5.1
 PasteDeploy==1.5.2
