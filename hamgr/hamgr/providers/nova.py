@@ -62,6 +62,8 @@ class NovaProvider(Provider):
                 self._enable(aggregate_id)
             except ha_exceptions.ClusterBusy:
                 pass
+            except ha_exceptions.InsufficientHosts:
+                LOG.warn('Disabling HA since number of aggregate %s hosts is insufficient', aggregate_id)
             except ha_exceptions.SegmentNotFound:
                 LOG.warn('Failover segment for cluster: %s was not found', cluster.name)
             except Exception as e:
@@ -125,6 +127,7 @@ class NovaProvider(Provider):
         headers = {'X-Auth-Token': token['id'],
                    'Content-Type': 'application/json'}
         for node in nodes:
+            LOG.info('Authorizing pf9-ha-slave role on node %s', node)
             data = dict(join=ip, ip_address=ip_lookup[node].host_ip)
             data['bootstrap_expect'] = 3 if role == 'server' else 0
             auth_url = '/'.join([url, node, 'roles', 'pf9-ha-slave'])
@@ -135,6 +138,7 @@ class NovaProvider(Provider):
                 raise ha_exceptions.HostOffline(node)
             # Retry auth if resmgr throws conflict error for upto 2 minutes
             while resp.status_code == requests.codes.conflict:
+                LOG.info('Role conflict error for node %s, retrying after 5 sec', node)
                 time.sleep(5)
                 resp = requests.put(auth_url, headers=headers,
                                     json=data, verify=False)
@@ -252,11 +256,13 @@ class NovaProvider(Provider):
         url = 'http://localhost:8080/resmgr/v1/hosts/'
 
         for node in nodes:
+            LOG.info('De-authorizing pf9-ha-slave role on node %s', node)
             start_time = datetime.now()
             auth_url = '/'.join([url, node, 'roles', 'pf9-ha-slave'])
             resp = requests.delete(auth_url, headers=headers)
             # Retry deauth if resmgr throws conflict error for upto 2 minutes
             while resp.status_code == requests.codes.conflict:
+                LOG.info('Role removal conflict error for node %s, retrying after 5 sec', node)
                 time.sleep(5)
                 resp = requests.delete(auth_url, headers=headers)
                 if datetime.now() - start_time > timedelta(minutes=2):
@@ -281,19 +287,30 @@ class NovaProvider(Provider):
 
         try:
             self._token = utils.get_token(self._tenant, self._username, self._passwd, self._token)
-            masakari.delete_failover_segment(self._token, str_aggregate_id)
+            hosts = None
+            try:
+                if cluster:
+                    # If aggregate has changed, we need to remove role from previous segment's nodes
+                    nodes = masakari.get_nodes_in_segment(self._token, cluster.name)
+                    hosts = [n['name'] for n in nodes]
+                else:
+                    # If cluster was not even created, but we are disabling HA to rollback enablement
+                    client = self._get_client()
+                    aggregate = self._get_aggregate(client, aggregate_id)
+                    hosts = set(aggregate.hosts)
+            except ha_exceptions.SegmentNotFound:
+                LOG.warn('Failover segment for cluster: %s was not found, skipping deauth', cluster.name)
 
-            client = self._get_client()
-            aggregate = self._get_aggregate(client, aggregate_id)
-            hosts = set(aggregate.hosts)
             if hosts:
                 self._deauth(hosts)
                 if synchronize:
                     self._wait_for_role_removal(hosts)
+
+            masakari.delete_failover_segment(self._token, str_aggregate_id)
         except:
             if cluster:
-                db_api.update_cluster_task_state(cluster.id, states.TASK_COMPLETED)
                 db_api.update_cluster_task_state(cluster.id, states.TASK_ERROR_REMOVING)
+            raise
         else:
             if cluster:
                 db_api.update_cluster(cluster.id, False)

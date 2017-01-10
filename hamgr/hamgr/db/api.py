@@ -171,9 +171,11 @@ def update_cluster_task_state(cluster_id, state):
                 LOG.debug('Updating task_state with same value - {val}'.format(
                     val=state))
             else:
-                raise exceptions.UpdateConflict(cluster_id, task_state, state)
+                # TODO: Check if the task state transition is valid. Till then
+                #       log a warning.
+                LOG.warn('Task state being updated from %s to %s', task_state,
+                         state)
         if state not in states.VALID_TASK_STATES:
             raise exceptions.InvalidTaskState(state)
         db_cluster.task_state = state
-
 
