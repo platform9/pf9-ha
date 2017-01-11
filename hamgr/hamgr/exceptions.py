@@ -49,10 +49,14 @@ class HostNotFound(Exception):
         message = 'Host %s not found in nova' % host
         super(HostNotFound, self).__init__(message)
 
+class InvalidHostRoleStatus(Exception):
+    def __init__(self, host):
+        message = 'Host %s does not have converged role status.' % (host)
+        super(InvalidHostRoleStatus, self).__init__(message)
 
 class InsufficientHosts(Exception):
     def __init__(self, expected=3):
-        message = 'Insufficient hosts to form a cluster. Atleast %d are neeeded' % expected
+        message = 'Insufficient hosts to form a cluster. Atleast %d are needed' % expected
         super(InsufficientHosts, self).__init__(message)
 
 

@@ -121,6 +121,23 @@ class NovaProvider(Provider):
             raise ha_exceptions.InsufficientHosts()
         # TODO check if host is part of any other aggregates
 
+        # Check host state and role status in resmgr before proceeding
+        self._token = utils.get_token(self._tenant, self._username, self._passwd, self._token)
+        headers = {'X-Auth-Token': self._token['id'],
+                   'Content-Type': 'application/json'}
+        resmgr_url = 'http://localhost:8080/resmgr/v1/hosts/'
+        for host in hosts:
+            host_url = '/'.join([resmgr_url, host])
+            resp = requests.get(host_url, headers=headers)
+            resp.raise_for_status()
+            json_resp = resp.json()
+            if json_resp['role_status'] != 'ok':
+                LOG.warn('Role status of host %s is not ok, not enabling HA at the moment.', host)
+                raise ha_exceptions.InvalidHostRoleStatus(host)
+            elif json_resp['info']['responding'] == False:
+                LOG.warn('Host %s is not responding, not enabling HA at the moment.', host)
+                raise ha_exceptions.HostOffline(host)
+
     def _auth(self, ip_lookup, token, nodes, role, ip=None):
         assert role in ['server', 'agent']
         url = 'http://localhost:8080/resmgr/v1/hosts/'
