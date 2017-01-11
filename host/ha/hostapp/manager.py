@@ -32,9 +32,15 @@ consul_opts = [
                      'specified value.'),
 ]
 
+default_opts = [
+    cfg.StrOpt('host', default='',
+               help='Platform9 Host ID')
+]
+
 
 CONF.register_group(consul_grp)
 CONF.register_opts(consul_opts, consul_grp)
+CONF.register_opts(default_opts)
 PF9_CONSUL_CONF_DIR = '/opt/pf9/etc/pf9-consul/'
 
 
@@ -53,6 +59,9 @@ def generate_consul_conf():
         with open(PF9_CONSUL_CONF_DIR + 'client.json.template') as fptr:
             agent_conf = json.load(fptr)
         agent_conf['advertise_addr'] = ip_address
+        agent_conf['disable_remote_exec'] = True
+        if CONF.host:
+            agent_conf['node_name'] = CONF.host
         with open(PF9_CONSUL_CONF_DIR + 'conf.d/client.json', 'w') as fptr:
             json.dump(agent_conf, fptr)
     else:
@@ -61,6 +70,9 @@ def generate_consul_conf():
             server_conf = json.load(fptr)
         server_conf['advertise_addr'] = ip_address
         server_conf['bootstrap_expect'] = CONF.consul.bootstrap_expect
+        server_conf['disable_remote_exec'] = True
+        if CONF.host:
+            server_conf['node_name'] = CONF.host
         with open(PF9_CONSUL_CONF_DIR + 'conf.d/server.json', 'w') as fptr:
             json.dump(server_conf, fptr)
 

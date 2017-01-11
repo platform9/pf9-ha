@@ -37,6 +37,9 @@
                         "admin_tenant_name": "%(ha_slave.auth_tenant_name)s",
                         "insecure": "True"
                     },
+                    "DEFAULT": {
+                        "host": "%(host_id)s"
+                    },
                     "consul": {},
                     "node": {}
                 }
