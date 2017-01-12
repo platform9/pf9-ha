@@ -296,7 +296,7 @@ class consul_status:
             self.leader = am_i_leader
             if am_i_leader:
                 # Node just became the leader
-                self.populate_cache_from_kv()
+                self.populate_cache_from_consul()
             else:
                 # Node gave up leadership
                 # Clear the changed_clusters array so that there is nothing
@@ -304,11 +304,11 @@ class consul_status:
                 self.changed_clusters = []
         return am_i_leader
 
-    def populate_cache_from_kv(self):
+    def populate_cache_from_consul(self):
         _, kv_list = self.cc.kv.get('', recurse=True)
         self.changed_clusters = []
         if kv_list is None:
-            return
+            kv_list = []
         for kv in kv_list:
             key = kv['Key']
             value = kv['Value']
@@ -316,6 +316,20 @@ class consul_status:
                 obj = json.loads(value)
                 cls = cluster.from_str(obj['node_info'])
                 self.changed_clusters.append(cls)
+        # If the leader node goes down, then host down event is not
+        # recorded in KV store. It is possible that leader was not able to
+        # record some other failed nodes in KV store. Check the current status
+        # and add any failed nodes in the changed_status array that are not
+        # present in it already. Addresses bug: IAAS-7044
+        current_status = self._get_cluster_status()
+        for addr, data in current_status.items():
+            if data['eventType'] == 2:
+                # Failed node
+                cls_obj = cluster(datetime.now(), data)
+                if cls_obj not in self.changed_clusters:
+                    LOG.info('Found a failed node {node} that was not in '
+                             'KV'.format(node=addr))
+                    self.changed_clusters.append(cls_obj)
 
     def cluster_alive(self):
         try:
