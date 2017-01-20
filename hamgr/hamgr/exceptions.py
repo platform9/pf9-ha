@@ -54,6 +54,11 @@ class InvalidHostRoleStatus(Exception):
         message = 'Host %s does not have converged role status.' % (host)
         super(InvalidHostRoleStatus, self).__init__(message)
 
+class InvalidHypervisorRoleStatus(Exception):
+    def __init__(self, host):
+        message = 'Host %s does not have valid hypervisor role status.' % (host)
+        super(InvalidHypervisorRoleStatus, self).__init__(message)
+
 class InsufficientHosts(Exception):
     def __init__(self, expected=3):
         message = 'Insufficient hosts to form a cluster. Atleast %d are needed' % expected
