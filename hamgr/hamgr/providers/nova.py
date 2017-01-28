@@ -337,16 +337,15 @@ class NovaProvider(Provider):
                             cluster.task_state)
 
         aggregate = self._get_aggregate(client, aggregate_id)
-        current_roles = self._validate_hosts(aggregate.hosts)
-
-        self._token = utils.get_token(self._tenant, self._username,
-                                      self._passwd, self._token)
-
         if not hosts:
             hosts = aggregate.hosts
         else:
             LOG.info('Enabling HA on some of the hosts %s of the %s aggregate',
                      str(hosts), aggregate_id)
+        current_roles = self._validate_hosts(hosts)
+
+        self._token = utils.get_token(self._tenant, self._username,
+                                      self._passwd, self._token)
 
         try:
             # 1. Push roles
