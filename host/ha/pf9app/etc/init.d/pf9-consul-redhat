@@ -12,6 +12,9 @@
 # read & export proxy information
 . /etc/environment
 
+# This init script is not compatible with systemctl
+export SYSTEMCTL_SKIP_REDIRECT=1
+
 SHORT_NAME="consul"
 svcname="pf9-${SHORT_NAME}"
 
@@ -60,7 +63,7 @@ start_process() {
 
 stop_process() {
 
-    killproc -p $PIDILE $SERVER_BIN -TERM
+    killproc -p $PIDFILE $SERVER_BIN -TERM
     RETVAL=$?
     if [ "$RETVAL" -eq "0" ]; then
         echo "Stopped:" "$svcname"
