@@ -40,7 +40,9 @@
                     "DEFAULT": {
                         "host": "%(host_id)s"
                     },
-                    "consul": {},
+                    "consul": {
+                        "report_interval": "180"
+                    },
                     "node": {}
                 }
             }
