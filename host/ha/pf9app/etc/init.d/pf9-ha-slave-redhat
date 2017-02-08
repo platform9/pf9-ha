@@ -12,6 +12,9 @@
 # read & export proxy information
 . /etc/environment
 
+# This init script is not compatible with systemctl
+export SYSTEMCTL_SKIP_REDIRECT=1
+
 SHORT_NAME="ha-slave"
 svcname="pf9-${SHORT_NAME}"
 
