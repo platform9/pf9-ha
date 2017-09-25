@@ -52,7 +52,8 @@ def _need_refresh(token):
     token_time = time.strptime(str_exp_time, '%Y-%m-%dT%H:%M:%SZ')
     current_time = time.gmtime()
 
-    return True if time.mktime(token_time) - time.mktime(current_time) < 60 * 5\
+    # If the Token's expiry is in 300 secs or less, it needs refresh
+    return True if time.mktime(token_time) - time.mktime(current_time) < 300.0\
         else False
 
 

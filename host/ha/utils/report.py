@@ -6,6 +6,7 @@ from oslo_config import cfg
 
 import json
 import requests
+import time
 
 LOG = logging.getLogger(__name__)
 CONF = cfg.CONF
@@ -49,12 +50,24 @@ class Reporter(object):
                              headers=headers, verify=self.insecure)
         if resp.status_code != requests.codes.ok:
             return False
-        return resp.json()['access']['token']['id']
+        return resp.json()['access']['token']
+
+    def _need_refresh(self):
+        """
+        Return True if token should be refreshed.
+        """
+        str_exp_time = self.token['expires']
+        token_time = time.strptime(str_exp_time, '%Y-%m-%dT%H:%M:%SZ')
+        current_time = time.gmtime()
+
+        # If the Token's expiry is in 300 secs or less, it needs refresh
+        return True if time.mktime(token_time) - time.mktime(current_time) < 300.0 \
+            else False
 
     def _refresh_token(self):
         self.token = self._get_token()
 
-    def report_status(self, data, refresh_token=False):
+    def report_status(self, data):
         raise NotImplementedError()
 
 class HaManagerReporter(Reporter):
@@ -63,12 +76,13 @@ class HaManagerReporter(Reporter):
         self.hamgr_url = '/'.join([DU_URL, 'hamgr', 'v1', 'ha'])
         super(HaManagerReporter, self).__init__()
 
-    def report_status(self, data, refresh_token=False):
-        if refresh_token:
+    def report_status(self, data):
+        if self._need_refresh():
+            LOG.debug("Fetching new token as the old token has almost expired")
             self._refresh_token()
         headers = {
             "Content-Type": "application/json",
-            "X-Auth-Token": self.token
+            "X-Auth-Token": self.token['id']
         }
         if data['eventType'] == 1:
             event = 'host-up'
