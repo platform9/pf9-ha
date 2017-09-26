@@ -33,8 +33,10 @@ class Reporter(object):
         self.keystone_token_url = '/'.join([DU_URL, 'keystone', 'v2.0', 'tokens'])
         self.insecure = CONF.keystone_authtoken.insecure
         self.token = self._get_token()
+        LOG.info("Token initialized to {}".format(self.token))
 
     def _get_token(self):
+        LOG.info("_get_token in Reported called")
         headers = {'Content-Type': 'application/json'}
         data = {
             'auth': {
@@ -49,23 +51,29 @@ class Reporter(object):
         resp = requests.post(self.keystone_token_url, data=data,
                              headers=headers, verify=self.insecure)
         if resp.status_code != requests.codes.ok:
+            LOG.info(" HTTP {} from keystone".format(resp.status_code))
             return False
+        LOG.info("All OK from keystone")
         return resp.json()['access']['token']
 
     def _need_refresh(self):
         """
         Return True if token should be refreshed.
         """
+        LOG.info("Checking if a token needs refresh")
         str_exp_time = self.token['expires']
         token_time = time.strptime(str_exp_time, '%Y-%m-%dT%H:%M:%SZ')
         current_time = time.gmtime()
-
+        LOG.info("Token expiry:{}".format(token_time))
+        LOG.info("Current time:{}".format(current_time))
+        LOG.info("Token time diff: {}".format(time.mktime(token_time) - time.mktime(current_time)))
         # If the Token's expiry is in 300 secs or less, it needs refresh
         return True if time.mktime(token_time) - time.mktime(current_time) < 300.0 \
             else False
 
     def _refresh_token(self):
         self.token = self._get_token()
+        LOG.info("Token refreshed to {}".format(self.token))
 
     def report_status(self, data):
         raise NotImplementedError()
@@ -77,7 +85,9 @@ class HaManagerReporter(Reporter):
         super(HaManagerReporter, self).__init__()
 
     def report_status(self, data):
+        LOG.info("In report_status::")
         if self._need_refresh():
+            LOG.info("Refresh needed")
             LOG.debug("Fetching new token as the old token has almost expired")
             self._refresh_token()
         headers = {
