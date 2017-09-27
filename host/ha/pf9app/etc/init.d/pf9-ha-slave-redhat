@@ -25,6 +25,7 @@ SERVER_OPTS="--config-dir /opt/pf9/etc/pf9-ha/conf.d"
 SERVER_LOGFILE=/var/log/pf9/${svcname}-out.log
 
 PIDFILE=/var/run/${svcname}.pid
+LOCKFILE=/var/lock/subsys/${svcname}
 PYTHON_EGG_CACHE=/tmp/python-eggs
 
 # Source function library.
