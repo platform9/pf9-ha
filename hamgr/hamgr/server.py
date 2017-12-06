@@ -21,7 +21,6 @@ import argparse
 import ConfigParser
 import eventlet
 import logging
-import logging.handlers
 
 eventlet.monkey_patch()
 
@@ -35,14 +34,15 @@ def _get_arg_parser():
 
 def _configure_logging(conf):
     log_filename = conf.get("log", "location")
+    logger = logging.getLogger(log_filename)
     logging.basicConfig(filename=log_filename,
                         level=logging.DEBUG,
                         format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
                         datefmt='%m-%d %H:%M')
-    handler = logging.handlers.RotatingFileHandler(
-        log_filename, maxBytes=1024 * 1024 * 5, backupCount=5)
-    logging.root.addHandler(handler)
-
+    if not logger.handlers:
+        handler = logging.handlers.RotatingFileHandler(
+            log_filename, maxBytes=1024 * 1024 * 5, backupCount=5)
+        logger.addHandler(handler)
 
 def start_server(conf, paste_ini):
     _configure_logging(conf)
