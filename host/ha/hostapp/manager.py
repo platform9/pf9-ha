@@ -54,12 +54,13 @@ def expand_stats(cluster_stat):
 
 def generate_consul_conf():
     ip_address = consul_helper.get_ip_address()
+    bind_address = consul_helper.get_bind_address()
     if CONF.consul.bootstrap_expect == 0:
         # Start consul with agent conf
         with open(PF9_CONSUL_CONF_DIR + 'client.json.template') as fptr:
             agent_conf = json.load(fptr)
         agent_conf['advertise_addr'] = ip_address
-        agent_conf['bind_addr'] = ip_address
+        agent_conf['bind_addr'] = bind_address
         agent_conf['disable_remote_exec'] = True
         if CONF.host:
             agent_conf['node_name'] = CONF.host
@@ -70,7 +71,7 @@ def generate_consul_conf():
         with open(PF9_CONSUL_CONF_DIR + 'server.json.template') as fptr:
             server_conf = json.load(fptr)
         server_conf['advertise_addr'] = ip_address
-        server_conf['bind_addr'] = ip_address
+        server_conf['bind_addr'] = bind_address
         server_conf['bootstrap_expect'] = CONF.consul.bootstrap_expect
         server_conf['disable_remote_exec'] = True
         if CONF.host:

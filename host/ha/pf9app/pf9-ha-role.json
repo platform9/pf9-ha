@@ -14,6 +14,10 @@
         "ip_address": {
             "path": "config/ha_slave_conf/node",
             "default": ""
+        },
+        "cluster_ip": {
+            "path": "config/ha_slave_conf/node",
+            "default": ""
         }
     },
     "rabbit_permissions": {
