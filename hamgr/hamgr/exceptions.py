@@ -87,3 +87,9 @@ class SegmentNotFound(Exception):
     def __init__(self, name):
         message = 'Segment %s was not found' % name
         super(SegmentNotFound, self).__init__(message)
+
+
+class ClusterIpNotFound(Exception):
+    def __init__(self, hostname):
+        message = "Cluster IP for host %s not found" % hostname
+        super(ClusterIpNotFound, self).__init__(message)

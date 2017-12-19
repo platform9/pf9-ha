@@ -196,26 +196,21 @@ class NovaProvider(Provider):
         # TODO check if host is part of any other aggregates
 
         # Check host state and role status in resmgr before proceeding
-        self._token = utils.get_token(self._tenant, self._username, self._passwd, self._token)
-        headers = {'X-Auth-Token': self._token['id'],
-                   'Content-Type': 'application/json'}
-        resmgr_url = 'http://localhost:8080/resmgr/v1/hosts/'
         current_roles = {}
-        for host in hosts:
-            host_url = '/'.join([resmgr_url, host])
-            resp = requests.get(host_url, headers=headers)
-            resp.raise_for_status()
-            json_resp = resp.json()
-            if json_resp['role_status'] != 'ok':
-                LOG.warn('Role status of host %s is not ok, not enabling HA at the moment.', host)
-                raise ha_exceptions.InvalidHostRoleStatus(host)
-            elif json_resp['info']['responding'] == False:
-                LOG.warn('Host %s is not responding, not enabling HA at the moment.', host)
-                raise ha_exceptions.HostOffline(host)
-            current_roles[host] = json_resp['roles']
+        json_resp = self._wait_for_role_to_ok(hosts)
+        for host in json_resp:
+            if host['role_status'] != 'ok':
+                LOG.warn('Role status of host %s is not ok, not enabling HA '
+                         'at the moment.', host['id'])
+                raise ha_exceptions.InvalidHostRoleStatus(host['id'])
+            if host['info']['responding'] is False:
+                LOG.warn('Host %s is not responding, not enabling HA at the '
+                         'moment.', host['id'])
+                raise ha_exceptions.HostOffline(host['id'])
+            current_roles[host['id']] = host['roles']
         return current_roles
 
-    def _auth(self, ip_lookup, token, nodes, role, ip=None):
+    def _auth(self, ip_lookup, cluster_ip_lookup, token, nodes, role, ip=None):
         assert role in ['server', 'agent']
         url = 'http://localhost:8080/resmgr/v1/hosts/'
         headers = {'X-Auth-Token': token['id'],
@@ -223,7 +218,8 @@ class NovaProvider(Provider):
         for node in nodes:
             LOG.info('Authorizing pf9-ha-slave role on node %s using IP %s',
                      node, ip_lookup[node])
-            data = dict(join=ip, ip_address=ip_lookup[node])
+            data = dict(join=ip, ip_address=ip_lookup[node],
+                        cluster_ip=cluster_ip_lookup[node])
             data['bootstrap_expect'] = 3 if role == 'server' else 0
             auth_url = '/'.join([url, node, 'roles', 'pf9-ha-slave'])
             resp = requests.put(auth_url, headers=headers,
@@ -241,14 +237,14 @@ class NovaProvider(Provider):
                     break
             resp.raise_for_status()
 
-    def _query_resmgr_consul_ip(self, host_id, host_roles):
-        # Get ostackhost role name
+    def _fetch_role_details_for_host(self, host_id, host_roles):
         roles = filter(lambda x: x.startswith('pf9-ostackhost'), host_roles)
         if len(roles) != 1:
             raise ha_exceptions.InvalidHypervisorRoleStatus(host_id)
         rolename = roles[0]
         # Query consul_ip from resmgr ostackhost role settings
-        self._token = utils.get_token(self._tenant, self._username, self._passwd, self._token)
+        self._token = utils.get_token(self._tenant, self._username,
+                                      self._passwd, self._token)
         headers = {'X-Auth-Token': self._token['id'],
                    'Content-Type': 'application/json'}
         resmgr_url = 'http://localhost:8080/resmgr/v1/hosts/'
@@ -256,29 +252,46 @@ class NovaProvider(Provider):
         resp = requests.get(host_url, headers=headers)
         resp.raise_for_status()
         json_resp = resp.json()
+        return json_resp
+
+    def _get_cluster_ip(self, host_id, json_resp):
+        if 'cluster_ip' not in json_resp:
+            raise ha_exceptions.ClusterIpNotFound(host_id)
+        return str(json_resp['cluster_ip'])
+
+    def _get_consul_ip(self, json_resp):
         if 'consul_ip' in json_resp and json_resp['consul_ip']:
             return str(json_resp['consul_ip'])
-        elif 'novncproxy_base_url' in json_resp and json_resp['novncproxy_base_url']:
+        if ('novncproxy_base_url' in json_resp and
+                json_resp['novncproxy_base_url']):
             vnc_url = json_resp['novncproxy_base_url']
             LOG.info('vnc url %s', vnc_url)
             return urlparse(vnc_url).hostname
-        else:
-            return None
+        return None
 
     def _get_ips(self, client, nodes, current_roles):
         all_hypervisors = client.hypervisors.list()
         lookup = set(nodes)
         ip_lookup = dict()
+        cluster_ip_lookup = dict()
         for hyp in all_hypervisors:
             host_id = hyp.service['host']
             if host_id in lookup:
                 ip_lookup[host_id] = hyp.host_ip
-                # Overwrite host_ip value with consul_ip or novncproxy_base_url IP from ostackhost role
-                consul_ip = self._query_resmgr_consul_ip(host_id, current_roles[host_id])
+                # Overwrite host_ip value with consul_ip or novncproxy_base_url
+                # IP from ostackhost role
+                json_resp = self._fetch_role_details_for_host(
+                    host_id, current_roles[host_id])
+                consul_ip = self._get_consul_ip(json_resp)
                 if consul_ip:
-                    LOG.debug('Using consul ip %s from ostackhost role', consul_ip)
+                    LOG.debug('Using consul ip %s from ostackhost role',
+                              consul_ip)
                     ip_lookup[host_id] = consul_ip
-        return ip_lookup
+                cluster_ip = self._get_cluster_ip(host_id, json_resp)
+                LOG.debug('Using cluster ip %s from ostackhost role',
+                          cluster_ip)
+                cluster_ip_lookup[host_id] = cluster_ip
+        return ip_lookup, cluster_ip_lookup
 
     def _assign_roles(self, client, hosts, current_roles):
         hosts = sorted(hosts)
@@ -292,7 +305,8 @@ class NovaProvider(Provider):
         elif len(hosts) >= 4:
             agents = hosts[3:]
 
-        ip_lookup = self._get_ips(client, hosts, current_roles)
+        ip_lookup, cluster_ip_lookup = self._get_ips(client, hosts,
+                                                     current_roles)
         if leader not in ip_lookup:
             LOG.error('Leader %s not found in nova', leader)
             raise ha_exceptions.HostNotFound(leader)
@@ -300,9 +314,10 @@ class NovaProvider(Provider):
         leader_ip = ip_lookup[leader]
         self._token = utils.get_token(self._tenant, self._username,
                                       self._passwd, self._token)
-        self._auth(ip_lookup, self._token, [leader] + servers,
-                   'server', ip=leader_ip)
-        self._auth(ip_lookup, self._token, agents, 'agent', ip=leader_ip)
+        self._auth(ip_lookup, cluster_ip_lookup, self._token,
+                   [leader] + servers, 'server', ip=leader_ip)
+        self._auth(ip_lookup, cluster_ip_lookup, self._token, agents, 'agent',
+                   ip=leader_ip)
 
     def _enable(self, aggregate_id, hosts=None, next_state=states.TASK_COMPLETED):
         """
@@ -378,25 +393,27 @@ class NovaProvider(Provider):
             if cluster_id is not None:
                 db_api.update_cluster_task_state(cluster_id, next_state)
 
-    def _wait_for_role_removal(self, nodes, rolename='pf9-ha-slave'):
-        self._token = utils.get_token(self._tenant, self._username, self._passwd, self._token)
+    def _wait_for_role_to_ok(self, nodes, rolename='pf9-ha-slave'):
+        self._token = utils.get_token(self._tenant, self._username,
+                                      self._passwd, self._token)
         headers = {'X-Auth-Token': self._token['id'],
                    'Content-Type': 'application/json'}
         url = 'http://localhost:8080/resmgr/v1/hosts/'
+        json_resp = []
         for node in nodes:
             start_time = datetime.now()
             auth_url = '/'.join([url, node])
             resp = requests.get(auth_url, headers=headers)
             resp.raise_for_status()
-            json_resp = resp.json()
-            while json_resp['role_status'] != 'ok' or \
-                    rolename in json_resp['roles']:
-                time.sleep(5)
+            while resp.json()['role_status'] != 'ok' or \
+                    rolename in resp.json()['roles']:
+                time.sleep(30)
                 resp = requests.get(auth_url, headers=headers)
                 resp.raise_for_status()
-                json_resp = resp.json()
                 if datetime.now() - start_time > timedelta(minutes=5):
                     raise ha_exceptions.RoleConvergeFailed(node)
+            json_resp.append(resp.json())
+        return json_resp
 
     def _deauth(self, nodes):
         self._token = utils.get_token(self._tenant, self._username,
@@ -474,7 +491,7 @@ class NovaProvider(Provider):
             if hosts:
                 self._deauth(hosts)
                 if synchronize:
-                    self._wait_for_role_removal(hosts)
+                    _ = self._wait_for_role_to_ok(hosts)
 
             masakari.delete_failover_segment(self._token, str_aggregate_id)
         except:

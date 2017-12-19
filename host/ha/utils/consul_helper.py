@@ -40,7 +40,9 @@ node_grp = cfg.OptGroup('node', title='Options related to a consul node')
 
 node_opts = [
     cfg.StrOpt('ip_address', help='IP Address that provides connectivity to'
-               ' other hosts', default="")
+               ' other hosts', default=""),
+    cfg.StrOpt('cluster_ip', help="IP address to set as bind address",
+               default="")
 ]
 CONF.register_group(consul_grp)
 CONF.register_opts(consul_opts, consul_grp)
@@ -73,6 +75,10 @@ def _valid_consul_port(string):
 def valid_cluster_port(string):
     ip_address, port = string.split(':', 1)
     return _valid_ip_address(ip_address) and _valid_consul_port(port)
+
+
+def get_bind_address():
+    return CONF.node.cluster_ip
 
 
 def get_ip_address():
