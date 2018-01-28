@@ -1,18 +1,19 @@
 # Copyright 2016 Platform9 Systems Inc.
 # All Rights Reserved
 
+import json
+
 from ConfigParser import ConfigParser
 from datetime import datetime
-from oslo_config import cfg
-from ha.utils import log as logging
-from ha.utils import consul_helper
-from ha.utils import report
 from subprocess import call
 from time import daylight
 from time import sleep
 from time import tzname
 
-import json
+from ha.utils import consul_helper
+from ha.utils import log as logging
+from ha.utils import report
+from oslo_config import cfg
 
 LOG = logging.getLogger('ha-manager')
 
@@ -25,11 +26,11 @@ consul_opts = [
                help='Time interval in seconds between status checks'),
     cfg.IPOpt('join', help='IP address of the server to connect to'),
     cfg.IntOpt('bootstrap_expect', default=0,
-                help='Whether to start consul as server or agent. Valid values '
-                     'are 0, 1, 3 and 5. 0 indicates that consul is started in '
-                     'agent mode while 1, 3 and 5 indicate that consul is '
-                     'started in server mode with bootstrap_expect being that '
-                     'specified value.'),
+               help='Whether to start consul as server or agent. Valid '
+                    'values are 0, 1, 3 and 5. 0 indicates that consul is '
+                    'started in agent mode while 1, 3 and 5 indicate that '
+                    'consul is started in server mode with bootstrap_expect '
+                    'being that specified value.'),
 ]
 
 default_opts = [
@@ -161,4 +162,3 @@ def loop():
         sleep(sleep_time)
 
     LOG.error('pf9-ha-slave service exiting...')
-

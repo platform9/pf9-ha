@@ -12,10 +12,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import eventlet
 import logging
+
 from datetime import datetime
 from datetime import timedelta
+
+import eventlet
 
 PERIODIC_TASK = None
 LOG = logging.getLogger(__name__)
@@ -44,7 +46,7 @@ class PeriodicTask(object):
                 if task.last_called is None or \
                         datetime.now() - task.last_called >= task.interval:
                     LOG.debug('Running task: %(task)s',
-                            {'task': task.func.__name__})
+                              {'task': task.func.__name__})
                     eventlet.greenthread.spawn_n(task.func)
                     task.last_called = datetime.now()
             eventlet.greenthread.sleep(10)
@@ -71,4 +73,3 @@ def add_task(function, interval, run_now=False, run_once=False):
 def start():
     ptask = _get_object()
     eventlet.greenthread.spawn_n(ptask.run)
-

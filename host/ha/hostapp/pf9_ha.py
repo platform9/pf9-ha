@@ -1,11 +1,11 @@
 # Copyright 2016 Platform9 Systems Inc.
 # All Rights Reserved
 
-from oslo_config import cfg
-from ha.hostapp import manager
+import argparse
 from glob import glob
 
-import argparse
+from ha.hostapp import manager
+from oslo_config import cfg
 
 CONF_DIR = '/etc/vm-ha-helper'
 CONF = cfg.CONF
@@ -23,9 +23,8 @@ def parse_args():
 
 
 def main():
-    opts = parse_args() 
+    opts = parse_args()
     # CONF should be setup before any processing starts
     conf_files = glob(opts.config_dir + '/*.conf')
     CONF(default_config_files=conf_files)
     manager.loop()
-

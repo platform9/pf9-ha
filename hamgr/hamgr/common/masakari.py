@@ -13,13 +13,15 @@
 #    under the License.
 
 import json
-import requests
 import logging
+
+import requests
 
 from hamgr import exceptions
 
 LOG = logging.getLogger(__name__)
 _URL = 'http://localhost:8080/masakari/v1'
+
 
 def get_failover_segment(token, name):
     url = '/'.join([_URL, 'segments'])
@@ -29,13 +31,14 @@ def get_failover_segment(token, name):
     resp.raise_for_status()
 
     if 'segments' in resp.json():
-        expected_seg = filter(lambda s: s['name'] == name, resp.json()['segments'])
+        expected_seg = filter(lambda s: s['name'] == name, resp.json()[
+            'segments'])
         if len(expected_seg) == 0:
             raise exceptions.SegmentNotFound(name)
     else:
         raise exceptions.SegmentNotFound(name)
-
     return expected_seg[0]
+
 
 def get_nodes_in_segment(token, name):
     segment = get_failover_segment(token, name)
@@ -44,7 +47,6 @@ def get_nodes_in_segment(token, name):
                'Content-Type': 'application/json'}
     resp = requests.get(url, headers=headers)
     resp.raise_for_status()
-
     return resp.json()['hosts']
 
 
@@ -56,17 +58,19 @@ def delete_failover_segment(token, name):
         # Delete hosts in failover segment before deleting the segment itself
         nodes = get_nodes_in_segment(token, name)
         for node in nodes:
-            url = '/'.join([_URL, 'segments', node['failover_segment_id'], 'hosts', node['uuid']])
+            url = '/'.join([_URL, 'segments', node['failover_segment_id'],
+                            'hosts', node['uuid']])
             resp = requests.delete(url, headers=headers)
-            if resp.status_code not in [ requests.codes.no_content, requests.codes.not_found ]:
+            if resp.status_code not in [requests.codes.no_content,
+                                        requests.codes.not_found]:
                 resp.raise_for_status()
     except exceptions.SegmentNotFound:
         return
 
     url = '/'.join([_URL, 'segments', seg['uuid']])
-
     resp = requests.delete(url, headers=headers)
-    if resp.status_code not in [ requests.codes.no_content, requests.codes.not_found ]:
+    if resp.status_code not in [requests.codes.no_content,
+                                requests.codes.not_found]:
         resp.raise_for_status()
 
 
@@ -81,9 +85,10 @@ def create_failover_segment(token, name, hosts):
 
     headers = {'X-Auth-Token': token['id'], 'Content-Type': 'application/json'}
     url = '/'.join([_URL, 'segments'])
-    data = dict(name=name, service_type='COMPUTE', recovery_method='auto', description='Created by HA Manager')
-
-    resp = requests.post(url, headers=headers, data=json.dumps(dict(segment=data)))
+    data = dict(name=name, service_type='COMPUTE', recovery_method='auto',
+                description='Created by HA Manager')
+    resp = requests.post(url, headers=headers,
+                         data=json.dumps(dict(segment=data)))
     resp.raise_for_status()
 
     seg = resp.json()['segment']
@@ -99,7 +104,8 @@ def create_failover_segment(token, name, hosts):
 
 
 def create_notification(token, ntype, hostname, time, payload):
-    data = dict(type=ntype, hostname=hostname, generated_time=time, payload=payload)
+    data = dict(type=ntype, hostname=hostname, generated_time=time,
+                payload=payload)
     headers = {
         'X-Auth-Token': token['id'],
         'Content-Type': 'application/json'
@@ -111,18 +117,18 @@ def create_notification(token, ntype, hostname, time, payload):
         LOG.info('Status notification successfully accepted by masakari')
         LOG.info('Masakari response: %s', resp.json())
     elif resp.status_code == requests.codes.conflict and \
-        resp.content.find('ignored as the host is already under maintenance'):
-        LOG.warn('Masakari ignored the notification since host %s is already under maintenance',
-                 hostname)
+            resp.content.find('ignored as the host is already under '
+                              'maintenance'):
+        LOG.warn('Masakari ignored the notification since host %s is already '
+                 'under maintenance', hostname)
     else:
-        LOG.error('Masakari rejected notification with error %s: %s', resp.status_code, resp)
+        LOG.error('Masakari rejected notification with error %s: %s',
+                  resp.status_code, resp)
         resp.raise_for_status()
 
 
 def get_notifications(token, host_id, generated_since=None):
-    """
-    Get all the notifications for the specific host ID
-    """
+    """Get all the notifications for the specific host ID"""
     headers = {
         'X-Auth-Token': token['id'],
         'Content-Type': 'application/json'

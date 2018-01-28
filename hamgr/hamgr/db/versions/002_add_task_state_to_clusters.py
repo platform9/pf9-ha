@@ -12,9 +12,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from sqlalchemy import Table, Column, String, MetaData
+from sqlalchemy import Column
+from sqlalchemy import MetaData
+from sqlalchemy import String
+from sqlalchemy import Table
 
 meta = MetaData()
+
 
 def upgrade(migrate_engine):
     meta.bind = migrate_engine

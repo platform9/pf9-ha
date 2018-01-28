@@ -14,12 +14,14 @@
 
 from ConfigParser import ConfigParser
 import unittest
+
+from hamgr.db import api as db_api
+from hamgr import exceptions
+from hamgr.providers.nova import get_provider
+from hamgr import states
+
 import mock
 
-
-from hamgr.providers.nova import get_provider
-from hamgr.states import *
-import hamgr.db.api as db_api
 
 class FakeNovaClient(object):
     class Hypervisors(object):
@@ -48,8 +50,9 @@ class FakeNovaClient(object):
 
 
 class NovaProviderTest(unittest.TestCase):
+
     def setUp(self):
-        config  = ConfigParser()
+        config = ConfigParser()
         config.add_section('database')
         config.set('database', 'sqlconnectURI', 'sqlite://')
         config.set('database', 'sqlite_synchronous', False)
@@ -67,30 +70,67 @@ class NovaProviderTest(unittest.TestCase):
 
         db_api.Base.metadata.create_all(db_api._engine)
 
-
         def get_client():
             return FakeNovaClient()
 
+        def get_ips(*args, **kwargs):
+            ip_lookup = {"0": "fake_ip_0", "1": "fake_ip_1",
+                         "2": "fake_ip_2", "3": "fake_ip_3"}
+            cluster_ip_lookup = {"0": "fake_cluster_ip_0",
+                                 "1": "fake_cluster_ip_1",
+                                 "2": "fake_cluster_ip_2",
+                                 "3": "fake_cluster_ip_3"}
+            return ip_lookup, cluster_ip_lookup
+
         self._provider._get_client = get_client
+        self._provider._get_ips = get_ips
 
     def tearDown(self):
         db_api.Base.metadata.drop_all(db_api._engine)
 
-    @mock.patch('hamgr.common.utils.get_token')
-    @mock.patch('requests.get')
-    @mock.patch('requests.put')
-    @mock.patch('requests.delete')
-    def test_enable(self, mock_del, mock_put, mock_get, mock_token):
+    def _enable_aggregate(self, mock_del, mock_put, mock_get, mock_post,
+                          mock_token, aggregate_id):
+        host = {'id': "fake_id",
+                'roles': ['fake_role_1', 'fake_role_2', 'fake_role_2'],
+                'info': {'responding': True},
+                'role_status': 'ok'}
         mock_resp = mock.Mock()
         mock_resp.status_code = 200
         mock_resp.raise_for_status = lambda *args: None
-        mock_resp.json = lambda *args: dict(segments=[])
+        mock_resp.json = lambda *args: dict(
+            host, segment=dict(name='fake1', uuid='fake'), role_status='ok')
+        mock_post.return_value = mock_resp
         mock_get.return_value = mock_resp
         mock_put.return_value = mock_resp
         mock_del.return_value = mock_resp
         mock_token.return_value = dict(id='1234sbds')
-        aggregate_id = 'fake'
         self._provider.put(aggregate_id, 'enable')
+
+    @mock.patch('hamgr.common.utils.get_token')
+    @mock.patch('requests.post')
+    @mock.patch('requests.get')
+    @mock.patch('requests.put')
+    @mock.patch('requests.delete')
+    def test_enable(self, mock_del, mock_put, mock_get, mock_post, mock_token):
+        self._enable_aggregate(mock_del, mock_put, mock_get, mock_post,
+                               mock_token, aggregate_id='fake')
+
+    @mock.patch('hamgr.common.utils.get_token')
+    @mock.patch('requests.post')
+    @mock.patch('requests.get')
+    @mock.patch('requests.put')
+    @mock.patch('requests.delete')
+    def test_enable_with_hosts_in_another_cluster(
+            self, mock_del, mock_put, mock_get, mock_post, mock_token):
+        mock_resp = mock.Mock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = lambda *args: None
+        mock_resp.json = lambda *args: dict(role_status='ok')
+        self._enable_aggregate(mock_del, mock_put, mock_get, mock_post,
+                               mock_token, aggregate_id="fake")
+        # Create 2nd aggregate with hosts from first cluster
+        self.assertRaises(exceptions.HostPartOfCluster,
+                          self._provider.put, "fake1", "enable")
 
     @mock.patch('hamgr.common.utils.get_token')
     @mock.patch('requests.get')
@@ -105,7 +145,11 @@ class NovaProviderTest(unittest.TestCase):
             if 'keystone' in url:
                 mock_resp.json = lambda *args: dict(id='ejkfskds')
             elif 'hosts' in url:
-                hosts = [{'host': str(i)} for i in range(4)]
+                hosts = [
+                    {'name': str(i),
+                     'failover_segment_id': 'fake_failover_segment_id',
+                     'uuid': 'fake_uuid'}
+                    for i in range(4)]
                 mock_resp.json = lambda *args: dict(hosts=hosts)
             elif 'masakari' in url:
                 mock_resp.json = \
@@ -116,6 +160,6 @@ class NovaProviderTest(unittest.TestCase):
         mock_get.side_effect = handle_get
         mock_del.return_value = mock_resp
         mock_token.return_value = dict(id='12ewef')
-        db_api.create_cluster_if_needed('fake', TASK_COMPLETED)
+        db_api.create_cluster_if_needed('fake', states.TASK_COMPLETED)
         db_api.update_cluster('fake', True)
         self._provider.put('fake', 'disable')

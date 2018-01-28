@@ -14,8 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from flask import request, jsonify
 import functools
+import sys
+import traceback
+
+from flask import jsonify
+from flask import request
+from sqlalchemy.exc import IntegrityError
 
 
 def get_context():
@@ -26,26 +31,23 @@ def get_context():
 
 
 def error_handler(func):
-    from sqlalchemy.exc import IntegrityError
-    import traceback,sys
     @functools.wraps(func)
     def inner(*args, **kwargs):
+        HEADERS = {'ContentType': 'application/json'}
         try:
             return func(*args, **kwargs)
-        except ValueError as exc:
+        except ValueError:
             traceback.print_exc(file=sys.stdout)
-            return jsonify({'error': 'Invalid input'}), 422, {'ContentType': 'application/json'}
-
-        except IntegrityError as exc:
+            return jsonify({'error': 'Invalid input'}), 422, HEADERS
+        except IntegrityError:
             traceback.print_exc(file=sys.stdout)
-            return jsonify({'error': 'Already exists'}), 409, {'ContentType': 'application/json'}
-
+            return jsonify({'error': 'Already exists'}), 409, HEADERS
     return inner
 
 
 def enforce(required=[]):
-    """
-    Generates a decorator that checks permissions before calling the
+    """Generates a decorator that checks permissions before calling the
+
     contained pecan handler function.
     :param list[str] required: Roles require to run function.
     """
@@ -54,7 +56,6 @@ def enforce(required=[]):
 
         @functools.wraps(fun)
         def newfun(self, *args, **kwargs):
-
             if not (required):
                 return fun(*args, **kwargs)
             else:
@@ -65,17 +66,16 @@ def enforce(required=[]):
                     roles = []
 
                 if set(roles) & set(required):
-
-                    return fun( *args, **kwargs)
-                else:
-                    return jsonify({'error': 'Unauthorized'}), 403, {'ContentType': 'application/json'}
+                    return fun(*args, **kwargs)
+                HEADERS = {'ContentType': 'application/json'}
+                return jsonify({'error': 'Unauthorized'}), 403, HEADERS
 
         return newfun
 
     return _enforce
 
 
-class Context:
+class Context(object):
     def __init__(self, user_id, user_name, roles_str, tenant_id):
         self.user_id = user_id
         self.user_name = user_name

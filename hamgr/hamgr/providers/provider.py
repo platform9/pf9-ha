@@ -8,13 +8,11 @@ from abc import abstractmethod
 class Provider(object):
     __metaclass__ = ABCMeta
 
-    """
-    Interface to HA manager provider.
-    """
+    """Interface to HA manager provider."""
     @abstractmethod
     def get(self, aggregate_id):
-        """
-        Get the HA config status for given aggregate
+        """Get the HA config status for given aggregate
+
         :param aggregate_id: If none, returns all
         :return: 'enabled'/'disabled'/'not-applicable'
         """
@@ -22,8 +20,8 @@ class Provider(object):
 
     @abstractmethod
     def put(self, aggregate_id, method):
-        """
-        Enable/disable HA for an aggregate
+        """Enable/disable HA for an aggregate
+
         :param aggregate_id:
         :param method: enable/disable
         :return:

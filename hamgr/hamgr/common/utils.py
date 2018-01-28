@@ -12,12 +12,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import logging
-import requests
-import time
 import json
+import logging
+import time
+
+import requests
 
 LOG = logging.getLogger(__name__)
+
 
 def _get_auth_token(tenant, user, password):
     data = {
@@ -32,8 +34,8 @@ def _get_auth_token(tenant, user, password):
 
     url = 'http://localhost:8080/keystone/v2.0/tokens'
 
-    r = requests.post(url, json.dumps(data),
-                      verify=False, headers={'Content-Type': 'application/json'})
+    r = requests.post(url, json.dumps(data), verify=False,
+                      headers={'Content-Type': 'application/json'})
 
     if r.status_code != requests.codes.ok:
         raise RuntimeError('Token request returned: %d' % r.status_code)
@@ -42,11 +44,9 @@ def _get_auth_token(tenant, user, password):
 
 
 def _need_refresh(token):
-    """
-    Return True if token should be refreshed.
-    """
+    """Return True if token should be refreshed."""
 
-    # TODO check if token is valid by querying keystone
+    # ToDo(pratik): check if token is valid by querying keystone
 
     str_exp_time = token['expires']
     token_time = time.strptime(str_exp_time, '%Y-%m-%dT%H:%M:%SZ')
@@ -66,4 +66,3 @@ def get_token(tenant, user, password, old_token):
         token = _get_auth_token(tenant, user, password)
 
     return token
-

@@ -13,7 +13,13 @@
 #    under the License.
 
 
-from sqlalchemy import Table, Column, Boolean, Integer, String, DateTime, MetaData, ForeignKey
+from sqlalchemy import Boolean
+from sqlalchemy import Column
+from sqlalchemy import DateTime
+from sqlalchemy import Integer
+from sqlalchemy import MetaData
+from sqlalchemy import String
+from sqlalchemy import Table
 
 meta = MetaData()
 
@@ -29,13 +35,12 @@ cluster = Table(
     Column('deleted_at', DateTime, default=None)
 )
 
+
 def upgrade(migrate_engine):
     meta.bind = migrate_engine
     cluster.create()
 
 
-
 def downgrade(migrate_engine):
     meta.bind = migrate_engine
     cluster.drop()
-

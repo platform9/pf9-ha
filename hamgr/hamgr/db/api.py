@@ -18,15 +18,15 @@ from contextlib import contextmanager
 
 from hamgr import exceptions
 from hamgr import states
+from sqlalchemy import Boolean
+from sqlalchemy import Column
 from sqlalchemy import create_engine
-from sqlalchemy import Column, Table, ForeignKey
-from sqlalchemy import Boolean, DateTime, Integer, String, types
-from sqlalchemy.ext.declarative import declarative_base, declared_attr
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import DateTime
 from sqlalchemy.exc import SQLAlchemyError
-
-
-from hamgr.exceptions import ClusterExists, ClusterNotFound, HostPartOfCluster
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Integer
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import String
 
 LOG = logging.getLogger(__name__)
 
@@ -66,8 +66,8 @@ def init(config, connection_string=None):
 def _has_unsaved_changes(session):
     if any([session.dirty, session.new, session.deleted]):
         return True
-    else:
-        return False
+    return False
+
 
 @contextmanager
 def dbsession():
@@ -95,7 +95,7 @@ def _get_all_clusters(session, read_deleted=False):
 def _get_all_active_clusters(session):
     query = session.query(Cluster)
     clusters = query.all()
-    return [cluster for cluster in clusters if cluster.enabled == True]
+    return [cluster for cluster in clusters if cluster.enabled is True]
 
 
 def get_all_active_clusters():
@@ -124,7 +124,7 @@ def get_cluster(cluster_name_or_id, read_deleted=False):
         clstr = _get_cluster(session, cluster_name_or_id,
                              read_deleted=read_deleted)
         if clstr is None:
-            raise ClusterNotFound(cluster_name_or_id)
+            raise exceptions.ClusterNotFound(cluster_name_or_id)
         return clstr
 
 
@@ -144,7 +144,7 @@ def create_cluster(cluster_name, task_state):
     with dbsession() as session:
         existing_cluster = _get_cluster(session, cluster_name)
         if existing_cluster is not None:
-            raise ClusterExists(cluster_name)
+            raise exceptions.ClusterExists(cluster_name)
         return _create_cluster(session, cluster_name, task_state)
 
 
@@ -160,6 +160,7 @@ def update_cluster(cluster_id, enabled):
     with dbsession() as session:
         db_cluster = _get_cluster(session, cluster_id)
         db_cluster.enabled = enabled
+
 
 def update_cluster_task_state(cluster_id, state):
     with dbsession() as session:
@@ -178,4 +179,3 @@ def update_cluster_task_state(cluster_id, state):
         if state not in states.VALID_TASK_STATES:
             raise exceptions.InvalidTaskState(state)
         db_cluster.task_state = state
-

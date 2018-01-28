@@ -1,29 +1,26 @@
 # Copyright 2016 Platform9 Systems Inc.
 # All Rights Reserved
 
+import json
+import re
+
 from datetime import datetime
 from datetime import timedelta
-from ha.utils import log as logging
-from netifaces import gateways
-from netifaces import ifaddresses
-from netifaces import AF_INET
 from os import makedirs
 from os.path import dirname
 from os.path import exists
-from oslo_config import cfg
-from subprocess import check_output
-from subprocess import CalledProcessError
 from uuid import uuid4
 
-import json
-import consul
-import re
+from ha.utils import log as logging
+from netifaces import AF_INET
+from netifaces import gateways
+from netifaces import ifaddresses
+from oslo_config import cfg
 
+import consul
 
 LOG = logging.getLogger(__name__)
-
 CONF = cfg.CONF
-
 consul_grp = cfg.OptGroup('consul', title='Group for consul binary '
                                           'related options')
 consul_opts = [
@@ -35,9 +32,7 @@ consul_opts = [
     cfg.IntOpt('key_reap_interval', default=72*60,
                help='Minutes before stale key value entries are deleted.')
 ]
-
 node_grp = cfg.OptGroup('node', title='Options related to a consul node')
-
 node_opts = [
     cfg.StrOpt('ip_address', help='IP Address that provides connectivity to'
                ' other hosts', default=""),
@@ -48,9 +43,9 @@ CONF.register_group(consul_grp)
 CONF.register_opts(consul_opts, consul_grp)
 CONF.register_group(node_grp)
 CONF.register_opts(node_opts, node_grp)
-
 LAST_STATUS_UPDATE_FILE = CONF.consul.last_update_file
-UUID_PATTERN = re.compile(r'^[\da-f]{8}-([\da-f]{4}-){3}[\da-f]{12}$', re.IGNORECASE)
+UUID_PATTERN = re.compile(r'^[\da-f]{8}-([\da-f]{4}-){3}[\da-f]{12}$',
+                          re.IGNORECASE)
 CONSUL_PORTS = [8300, 8301, 8302, 8400, 8500, 8600]
 
 
@@ -59,9 +54,10 @@ def _valid_ip_address(string):
     if len(octets) != 4:
         return False
     try:
-        return all(0<=int(num)<256 for num in octets)
+        return all(0 <= int(num) < 256 for num in octets)
     except ValueError:
         return False
+
 
 def _valid_consul_port(string):
     try:
@@ -71,6 +67,7 @@ def _valid_consul_port(string):
         return False
     except ValueError:
         return False
+
 
 def valid_cluster_port(string):
     ip_address, port = string.split(':', 1)
@@ -92,13 +89,14 @@ def get_ip_address():
         # Get the IP address configured on that interface
         default_ip = ifaddresses(default_interface)[AF_INET][0]['addr']
         return default_ip
-    except:
+    except Exception:
         return ''
 
 
-class cluster:
+class cluster(object):
     change_time = None
     change_info = {}
+
     def __init__(self, time, info):
         self.change_info = info
         self.change_time = time
@@ -107,7 +105,8 @@ class cluster:
         if not isinstance(other, cluster):
             return False
         if (self.change_info['hostname'] == other.change_info['hostname'] and
-                self.change_info['eventType'] == other.change_info['eventType']):
+                self.change_info['eventType'] == other.change_info[
+                    'eventType']):
             return True
         return False
 
@@ -122,12 +121,13 @@ class cluster:
     @classmethod
     def from_str(cls, string):
         obj = json.loads(string)
-        change_time = datetime.strptime(obj['change_time'], "%Y-%m-%d %H:%M:%S")
+        change_time = datetime.strptime(obj['change_time'],
+                                        "%Y-%m-%d %H:%M:%S")
         change_info = json.loads(obj['change_info'])
         return cls(change_time, change_info)
 
 
-class consul_status:
+class consul_status(object):
     last_status = {}
     last_status_update_time = None
     current_status = {}
@@ -149,7 +149,7 @@ class consul_status:
                 self.current_status = last_update_json.get('current_status')
                 if last_update_time and last_update_time != 'None':
                     self.last_status_update_time = datetime.strptime(
-                            last_update_time, "%Y-%m-%d %H:%M:%S")
+                        last_update_time, "%Y-%m-%d %H:%M:%S")
         self.cc = consul.Consul()
         self.host_id = host_id
         reap_interval = CONF.consul.key_reap_interval
@@ -157,9 +157,10 @@ class consul_status:
         self.publish_hostid()
 
     def publish_hostid(self):
-        '''
-        This function updates the KV store with the <ip_addres>:8301=<host ID>.
-        If such a key already exists with the same value then it is not updated
+        '''This function updates the KV store with the
+
+        <ip_addres>:8301=<host ID>. If such a key already exists with the same
+        value then it is not updated
         '''
         key = '%s:%s' % (get_ip_address(), '8301')
         if self.cluster_alive():
@@ -185,7 +186,8 @@ class consul_status:
                 event_type = 1
                 detail = 1
                 event_id = 1
-                start_time = datetime.strftime(current_time, '%Y-%m-%d %H:%M:%S')
+                start_time = datetime.strftime(current_time,
+                                               '%Y-%m-%d %H:%M:%S')
                 end_time = ""
             else:
                 # Node failed
@@ -206,7 +208,8 @@ class consul_status:
 
             cluster_report[member['Addr']] = {
                 'eventType': event_type,
-                'cluster_port': "%s:%s" % (member.get('Addr'), member.get('Port')),
+                'cluster_port': "%s:%s" % (member.get('Addr'),
+                                           member.get('Port')),
                 'startTime': start_time,
                 'endTime': end_time,
                 'hostname': cluster_id,
@@ -223,7 +226,7 @@ class consul_status:
         reported_cls = None
         for cluster in self.changed_clusters:
             LOG.debug('Checking %s status before reporting',
-                    cluster.change_info['cluster_port'])
+                      cluster.change_info['cluster_port'])
             if datetime.now() - cluster.change_time > report_interval:
                 current_state = self._get_cluster_status()
                 addr = cluster.change_info['cluster_port'].split(':')[0]
@@ -235,7 +238,8 @@ class consul_status:
         if reported_cls:
             ignore, data = self.cc.kv.get(retval['hostname'])
             if not data:
-                self.report_node_down_to_kv(retval['hostname'], str(reported_cls))
+                self.report_node_down_to_kv(retval['hostname'],
+                                            str(reported_cls))
             else:
                 data_obj = json.loads(data['Value'])
                 if data_obj.get('id'):
@@ -270,14 +274,13 @@ class consul_status:
             }, fptr)
 
     def get_cluster_status(self):
-        """
-        This function will return a update the status file when called. If
+        """This function will return a update the status file when called. If
+
         cluster status remains changed for x minutes then the changed status
         will be reported back else the older status is returned.
         x is fetched from the conf option - CONF.consul.report_interval and
         it defaults to 6 minutes.
         """
-        result = {}
         current_time = datetime.now()
         report_change = self._should_report_change()
         current_status = self._get_cluster_status(current_time)
@@ -340,13 +343,14 @@ class consul_status:
     def cluster_alive(self):
         try:
             return self.cc.status.leader() != ''
-        except:
+        except Exception:
             return False
 
     def report_node_down_to_kv(self, hostid, node_info, report_time=None,
                                report_id=None):
         data = {
-            'notice_time': datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S'),
+            'notice_time': datetime.strftime(datetime.now(),
+                                             '%Y-%m-%d %H:%M:%S'),
             'report_time': report_time,
             'id': report_id,
             'node_info': node_info
@@ -359,7 +363,7 @@ class consul_status:
     def delete_from_kv(self, key):
         try:
             self.cc.kv.delete(key)
-        except:
+        except Exception:
             LOG.warn('{id} tried to delete non-existent key - {key}'.format(
                 id=self.host_id, key=key))
 
@@ -367,10 +371,9 @@ class consul_status:
         ignore, data = self.cc.kv.get(hostid)
         if data:
             return json.loads(data['Value'])
-        else:
-            LOG.warn('{id} tried to access report status for {host} which '
-                     'did not exist'.format(id=self.host_id, host=hostid))
-            return None
+        LOG.warn('{id} tried to access report status for {host} which '
+                 'did not exist'.format(id=self.host_id, host=hostid))
+        return None
 
     def update_reported_status(self, cluster_status):
         temp_cls = cluster(datetime.now(), cluster_status)
@@ -405,4 +408,3 @@ class consul_status:
                 ip_addr = key.split(':')[0]
                 if ip_addr not in [x['Addr'] for x in self.cc.agent.members()]:
                     self.cc.kv.delete(key)
-

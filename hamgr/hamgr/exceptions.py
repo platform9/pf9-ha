@@ -12,6 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+
 class AggregateNotFound(Exception):
     def __init__(self, aggregate):
         message = 'Aggregate %s not found' % aggregate
@@ -29,39 +30,47 @@ class ClusterNotFound(Exception):
         message = 'Cluster %s not found' % cluster
         super(ClusterNotFound, self).__init__(message)
 
+
 class ClusterBusy(Exception):
     def __init__(self, cluster, task):
         message = 'Cluster %s is running task %s' % (cluster, task)
         super(ClusterBusy, self).__init__(message)
 
+
 class HostPartOfCluster(Exception):
-    def __init__(self, host, cluster_id):
-        message = 'Host %s already in cluster %d' % (host, cluster_id)
+    def __init__(self, hosts):
+        message = 'Hosts %s already in cluster' % hosts
         super(HostPartOfCluster, self).__init__(message)
+
 
 class HostOffline(Exception):
     def __init__(self, host):
         message = 'Host %s is offline' % (host)
         super(HostOffline, self).__init__(message)
 
+
 class HostNotFound(Exception):
     def __init__(self, host):
         message = 'Host %s not found in nova' % host
         super(HostNotFound, self).__init__(message)
+
 
 class InvalidHostRoleStatus(Exception):
     def __init__(self, host):
         message = 'Host %s does not have converged role status.' % (host)
         super(InvalidHostRoleStatus, self).__init__(message)
 
+
 class InvalidHypervisorRoleStatus(Exception):
     def __init__(self, host):
-        message = 'Host %s does not have valid hypervisor role status.' % (host)
+        message = 'Host %s does not have valid hypervisor role status' % host
         super(InvalidHypervisorRoleStatus, self).__init__(message)
+
 
 class InsufficientHosts(Exception):
     def __init__(self, expected=3):
-        message = 'Insufficient hosts to form a cluster. Atleast %d are needed' % expected
+        message = 'Insufficient hosts to form a cluster. Atleast %d are ' \
+            'needed' % expected
         super(InsufficientHosts, self).__init__(message)
 
 
@@ -82,6 +91,7 @@ class InvalidTaskState(Exception):
     def __init__(self, state):
         message = '%s is not a valid task state' % state
         super(InvalidTaskState, self).__init__(message)
+
 
 class SegmentNotFound(Exception):
     def __init__(self, name):
