@@ -191,7 +191,10 @@ class NovaProvider(Provider):
 
     def _validate_hosts(self, hosts):
         # TODO Make this check configurable
-        if len(hosts) < 3:
+        # Since the consul needs 3 to 5 servers for bootstrapping, it is safe
+        # to enable HA only if 4 hosts are present. So that even if 1 host goes
+        # down after cluster is created, we can reconfigure it.
+        if len(hosts) < 4:
             raise ha_exceptions.InsufficientHosts()
         # TODO check if host is part of any other aggregates
 
@@ -296,14 +299,12 @@ class NovaProvider(Provider):
     def _assign_roles(self, client, hosts, current_roles):
         hosts = sorted(hosts)
         leader = hosts[0]
-        servers = hosts[1:3]
+        servers = hosts[1:4]
 
         agents = []
         if len(hosts) >= 5:
-            servers += hosts[3:5]
+            servers += hosts[4:5]
             agents = hosts[5:]
-        elif len(hosts) >= 4:
-            agents = hosts[3:]
 
         ip_lookup, cluster_ip_lookup = self._get_ips(client, hosts,
                                                      current_roles)
