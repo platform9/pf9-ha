@@ -1,0 +1,5 @@
+REVIEWBOARD_URL = "https://rbcommons.com/s/platform9"
+REPOSITORY = "pf9-ha"
+REPOSITORY_TYPE = "git"
+BRANCH = "atherton"
+LAND_DEST_BRANCH = "atherton"
