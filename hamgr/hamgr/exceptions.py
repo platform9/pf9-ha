@@ -68,8 +68,8 @@ class InvalidHypervisorRoleStatus(Exception):
 
 
 class InsufficientHosts(Exception):
-    def __init__(self, expected=3):
-        message = 'Insufficient hosts to form a cluster. Atleast %d are ' \
+    def __init__(self, expected=4):
+        message = 'Insufficient hosts to form a cluster. At least %d are ' \
             'needed' % expected
         super(InsufficientHosts, self).__init__(message)
 

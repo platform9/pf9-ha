@@ -65,6 +65,9 @@ def update_status(aggregate_id, action):
         provider = get_provider()
         provider.put(aggregate_id, action)
         return jsonify(dict(success=True)), 200, CONTENT_TYPE_HEADER
+    except exceptions.InsufficientHosts as ex:
+        LOG.error('Bad request was made. %s', ex)
+        return jsonify(dict(error=ex.message)), 400, CONTENT_TYPE_HEADER
     except exceptions.AggregateNotFound:
         LOG.error('Aggregate %s was not found', aggregate_id)
         return jsonify(dict(success=False)), 404, CONTENT_TYPE_HEADER
