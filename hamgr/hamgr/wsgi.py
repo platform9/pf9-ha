@@ -10,7 +10,7 @@ from flask import jsonify
 from flask import request
 from hamgr.context import error_handler
 from hamgr import exceptions
-
+from hamgr import ha_provider
 
 LOG = logging.getLogger(__name__)
 app = Flask(__name__)
@@ -19,18 +19,7 @@ CONTENT_TYPE_HEADER = {'Content-Type': 'application/json'}
 
 
 def get_provider():
-    provider = getattr(g, '_provider', None)
-
-    if provider is None:
-        # TODO: Make this part of config
-        provider_name = 'nova'
-        pkg = __import__('hamgr.providers.%s' % provider_name)
-        conf = ConfigParser()
-        conf.read(['/etc/pf9/hamgr/hamgr.conf'])
-        module = getattr(pkg.providers, provider_name)
-        provider = module.get_provider(conf)
-        g._provider = provider
-    return provider
+    return ha_provider.ha_provider()
 
 
 @app.route('/v1/ha', methods=['GET'])

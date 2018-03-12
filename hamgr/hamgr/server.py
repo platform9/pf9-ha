@@ -23,6 +23,7 @@ import eventlet
 from eventlet import wsgi
 from hamgr import periodic_task
 from paste.deploy import loadapp
+from hamgr import ha_provider
 
 eventlet.monkey_patch()
 
@@ -58,6 +59,8 @@ def start_server(conf, paste_ini):
     wsgi_app = loadapp('config:%s' % paste_file, 'main')
     wsgi.server(eventlet.listen(('', conf.getint("DEFAULT", "listen_port"))),
                 wsgi_app)
+    provider = ha_provider.ha_provider()
+    periodic_task.add_task(provider.check_host_aggregate_changes, 120, run_now=True)
 
 
 if __name__ == '__main__':

@@ -47,14 +47,17 @@ class NovaProvider(Provider):
         self._tenant = config.get('keystone_middleware', 'admin_tenant_name')
         self._region = config.get('nova', 'region')
         self._token = None
-        periodic_task.add_task(self._check_host_aggregate_changes, 120,
-                               run_now=True)
+
+        # the add_task will check whether a task exists, will ignore if already exist
+        # otherwise will add it
+        periodic_task.add_task(self.check_host_aggregate_changes, 120, run_now=True)
+
         self.hosts_down_per_cluster = defaultdict(dict)
         self.aggregate_task_lock = threading.Lock()
         self.aggregate_task_running = False
         self.host_down_dict_lock = threading.Lock()
 
-    def _check_host_aggregate_changes(self):
+    def check_host_aggregate_changes(self):
         with self.aggregate_task_lock:
             if self.aggregate_task_running:
                 LOG.info('Check host aggregates for changes task already '
@@ -656,7 +659,6 @@ class NovaProvider(Provider):
         except Exception:
             return False
         return True
-
 
 def get_provider(config):
     db_api.init(config)
