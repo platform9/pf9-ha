@@ -12,6 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import json
 import logging
 import threading
 import time
@@ -76,12 +77,19 @@ class NovaProvider(Provider):
             active_host_ids = set()
             inactive_host_ids = set()
             removed_host_ids = set()
+            remaining_host_ids = set()
             try:
                 nodes = masakari.get_nodes_in_segment(self._token,
                                                       aggregate_id)
                 db_node_ids = set([node['name'] for node in nodes])
+
+                LOG.debug("hosts records from nova : %s", ','.join(list(current_host_ids)))
+                LOG.debug("hosts records from masakari : %s", ','.join(list(db_node_ids)))
+
                 for host in current_host_ids:
                     if self._is_nova_service_active(host, client=client):
+                        remaining_host_ids.add(host)
+
                         if host not in db_node_ids:
                             new_host_ids.add(host)
                         else:
@@ -105,6 +113,25 @@ class NovaProvider(Provider):
                     # No new hosts to process
                     LOG.info('No new hosts to process in {clsid} '
                              'cluster'.format(clsid=cluster.name))
+
+                    # make sure ha-slave is enabled on existing active hosts
+                    current_roles = self._validate_hosts(remaining_host_ids, check_cluster=False)
+                    LOG.debug("found roles : %s", str(current_roles))
+                    tmp_ids = set()
+                    for r_host in remaining_host_ids:
+                        h_roles = current_roles[r_host]
+                        LOG.debug("host %s  has roles : %s", str(r_host), ','.join(h_roles))
+                        if "pf9-ha-slave" not in h_roles:
+                            tmp_ids.add(r_host)
+
+                    if len(tmp_ids) > 0:
+                        txt_ids = ','.join(list(tmp_ids))
+                        LOG.debug("assign ha-slave role for hosts : %s", txt_ids )
+                        self._assign_roles(client, remaining_host_ids, current_roles)
+                        LOG.debug("ha-slave roles are assigned to : %s", txt_ids)
+                    else:
+                        LOG.info("all hosts already have pf9-ha-slave role")
+
                     continue
 
                 if inactive_host_ids or \
@@ -146,11 +173,12 @@ class NovaProvider(Provider):
         services = client.services.list(binary=binary, host=host_id)
         if len(services) == 1:
             if services[0].state == 'up':
-                disabled_reason = 'Host disabled by PF9 HA manager'
-                if services[0].status != 'enabled' \
-                        and services[0].disabled_reason == disabled_reason:
+                if services[0].status != 'enabled':
+                    LOG.debug("nova host %s state is up, but status is disabled, so now enable it", str(host_id))
                     client.services.enable(binary=binary, host=host_id)
+                LOG.debug("nova host %s is up and enabled", str(host_id))
                 return True
+            LOG.debug("nova host %s state is down", str(host_id))
             return False
         else:
             LOG.error('Found %d nova compute services with %s host id'
@@ -222,7 +250,7 @@ class NovaProvider(Provider):
                       str(invalid_hosts))
             raise ha_exceptions.HostPartOfCluster(str(invalid_hosts))
 
-    def _validate_hosts(self, hosts):
+    def _validate_hosts(self, hosts, check_cluster=True):
         # TODO Make this check configurable
         # Since the consul needs 3 to 5 servers for bootstrapping, it is safe
         # to enable HA only if 4 hosts are present. So that even if 1 host goes
@@ -230,7 +258,9 @@ class NovaProvider(Provider):
         if len(hosts) < 4:
             raise ha_exceptions.InsufficientHosts()
 
-        self._check_if_host_in_other_cluster(hosts)
+        LOG.debug("check host in other cluster : %s", str(check_cluster))
+        if check_cluster is True:
+           self._check_if_host_in_other_cluster(hosts)
 
         # Check host state and role status in resmgr before proceeding
         current_roles = {}
@@ -245,6 +275,7 @@ class NovaProvider(Provider):
                          'moment.', host['id'])
                 raise ha_exceptions.HostOffline(host['id'])
             current_roles[host['id']] = host['roles']
+        LOG.debug("current roles : %s , from resp : ", str(current_roles), json.dumps(json_resp))
         return current_roles
 
     def _auth(self, ip_lookup, cluster_ip_lookup, token, nodes, role, ip=None):
@@ -291,6 +322,7 @@ class NovaProvider(Provider):
         resp = requests.get(host_url, headers=headers)
         resp.raise_for_status()
         json_resp = resp.json()
+        LOG.debug("role details for host %s : %s", str(host_id), json.dumps(json_resp))
         return json_resp
 
     def _get_cluster_ip(self, host_id, json_resp):
