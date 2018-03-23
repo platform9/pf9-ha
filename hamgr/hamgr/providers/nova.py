@@ -484,7 +484,8 @@ class NovaProvider(Provider):
                 time.sleep(30)
                 resp = requests.get(auth_url, headers=headers)
                 resp.raise_for_status()
-                if datetime.now() - start_time > timedelta(minutes=5):
+                if datetime.now() - start_time > timedelta(minutes=15):
+                    LOG.debug("host %s is not converged, starting from %s to %s ", str(node), str(start_time), str(datetime.now()))
                     raise ha_exceptions.RoleConvergeFailed(node)
             json_resp.append(resp.json())
         return json_resp
