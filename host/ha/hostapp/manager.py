@@ -15,7 +15,7 @@ from ha.utils import log as logging
 from ha.utils import report
 from oslo_config import cfg
 
-LOG = logging.getLogger('ha-manager')
+LOG = logging.getLogger(__name__)
 
 CONF = cfg.CONF
 
@@ -121,6 +121,7 @@ def loop():
     cfgparser = ConfigParser()
     cfgparser.read('/var/opt/pf9/hostagent/data.conf')
     hostid = cfgparser.get('DEFAULT', 'host_id')
+    LOG.debug('configured consul host id %s', str(hostid))
     sleep_time = CONF.consul.status_check_interval
     ch = consul_helper.consul_status(hostid)
     reporter = report.HaManagerReporter()
@@ -137,6 +138,7 @@ def loop():
 
     while start_loop:
         if not cluster_setup:
+            LOG.debug("setup consul cluster by joining %s", str(CONF.consul.join))
             # Running join against oneself generates a warning message in
             # logs but does not cause consul to crash
             retcode = run_cmd('consul join {ip}'.format(ip=CONF.consul.join))
@@ -144,13 +146,22 @@ def loop():
                 LOG.info('Joined consul cluster server {ip}'.format(
                     ip=CONF.consul.join))
                 cluster_setup = True
+            else:
+                LOG.info("join consul cluster %s failed . error %d", str(CONF.consul.join), retcode)
         elif ch.am_i_cluster_leader():
+            LOG.debug('i am consul cluster leader %s', hostid)
             cluster_stat = ch.get_cluster_status()
             if cluster_stat:
                 expand_stats(cluster_stat)
-                LOG.info('cluster_stat: %s', cluster_stat)
+                LOG.info('consul cluster stat: %s', str(cluster_stat))
                 if reporter.report_status(cluster_stat):
+                    LOG.debug('successfully reported consul cluster status to ha mgr')
                     ch.update_reported_status(cluster_stat)
+                else:
+                    LOG.debug("failed to report consul cluster status to ha mgr by leader")
+            else:
+                LOG.debug('No consul cluster state on leader %s', hostid)
+            LOG.debug("consul cluster leader cleans up kv store")
             ch.cleanup_consul_kv_store()
         # It is possible that host ID was not published when the consul
         # helper was created as the cluster was not yet formed. Since this

@@ -167,20 +167,24 @@ class consul_status(object):
             # KV store is not available when quorum is lost
             _, data = self.cc.kv.get(key)
             if not data:
-                LOG.info('Adding {key}={id}'.format(key=key, id=self.host_id))
+                LOG.info('Publish host id by adding {key}={id}'.format(key=key, id=self.host_id))
                 self.cc.kv.put(key, self.host_id)
             else:
                 if data['Value'] != self.host_id:
-                    LOG.info('Updating {key} to {id}'.format(
+                    LOG.info('Publish host id by updating {key} to {id}'.format(
                         key=key, id=self.host_id))
                     self.cc.kv.put(key, self.host_id)
+                else:
+                    LOG.debug('Skip publishing host id, as id not changed : %s', str(data))
         else:
-            LOG.warn('Not adding {id} to KV since cluster is '
+            LOG.warn('Not publish {id} to KV since cluster is '
                      'unavailable'.format(id=self.host_id))
 
     def _get_cluster_status(self, current_time=datetime.now()):
         cluster_report = {}
-        for member in self.cc.agent.members():
+        members = self.cc.agent.members()
+        LOG.debug('consul members %s', str(members))
+        for member in members:
             if member.get('Status', 4) == 1:
                 # Node alive
                 event_type = 1
@@ -203,6 +207,7 @@ class consul_status(object):
                 # Cannot get the host id, which means that ha-slave is not
                 # running. We cannot be sure of the cluster state and reporting
                 # without the host id does not work hence skip this host.
+                LOG.warn('empty consul record for member %s  with key %s', str(member), str(cluster_port))
                 continue
             cluster_id = data['Value']
 
@@ -218,15 +223,17 @@ class consul_status(object):
                 'detail': detail,
                 'id': str(uuid4())
             }
+        LOG.debug('consul cluster status : %s', str(cluster_report))
         return cluster_report
 
     def _should_report_change(self):
         report_interval = timedelta(seconds=CONF.consul.report_interval)
         retval = None
         reported_cls = None
+        LOG.debug('changed_clusters is : %s', str(self.changed_clusters))
         for cluster in self.changed_clusters:
-            LOG.debug('Checking %s status before reporting',
-                      cluster.change_info['cluster_port'])
+            LOG.debug('Checking %s status before reporting for %s',
+                      cluster.change_info['cluster_port'], str(cluster))
             if datetime.now() - cluster.change_time > report_interval:
                 current_state = self._get_cluster_status()
                 addr = cluster.change_info['cluster_port'].split(':')[0]
@@ -238,6 +245,7 @@ class consul_status(object):
         if reported_cls:
             ignore, data = self.cc.kv.get(retval['hostname'])
             if not data:
+                LOG.debug('report host down to kv store : %s ', str(reported_cls))
                 self.report_node_down_to_kv(retval['hostname'],
                                             str(reported_cls))
             else:
@@ -245,14 +253,16 @@ class consul_status(object):
                 if data_obj.get('id'):
                     # Already reported once
                     retval = None
+        LOG.debug("changes should report : %s", str(retval))
         return retval
 
     def update(self, current_status):
+        LOG.debug('before update, last_status : %s, current_status : %s', str(self.last_status), str(current_status))
         for key, value in current_status.items():
             if key not in self.last_status:
                 # New node was added
                 self.last_status[key] = current_status[key]
-                LOG.info('New node added %s', key)
+                LOG.info('New node added, key : %s , val : %s', key, str(value))
             elif value.get('eventType') != \
                     self.last_status[key].get('eventType'):
                 LOG.info('Status of {node} changed from {old} to {new}'.format(
@@ -262,7 +272,11 @@ class consul_status(object):
                 cls_obj = cluster(datetime.now(), current_status[key])
                 if cls_obj not in self.changed_clusters:
                     self.changed_clusters.append(cls_obj)
+                    LOG.debug('changed_clusters updated : %s', str(self.changed_clusters))
                 self.dirty = True
+            else:
+                LOG.debug('skip updating key : %s , value : %s', str(key), str(value))
+        LOG.debug('write updated status to file %s, current_status : %s, last_status : %s', LAST_STATUS_UPDATE_FILE, str(current_status), str(self.last_status))
         self.current_status = current_status
         with open(LAST_STATUS_UPDATE_FILE, 'w') as fptr:
             fptr.truncate()
@@ -285,6 +299,7 @@ class consul_status(object):
         report_change = self._should_report_change()
         current_status = self._get_cluster_status(current_time)
         self.last_status_update_time = current_time
+        LOG.debug('report_change : %s , current_status : %s , last_update : %s', str(report_change), str(current_status), str(current_time))
         self.update(current_status)
         if report_change:
             self.last_status = self.current_status
@@ -294,23 +309,29 @@ class consul_status(object):
     def am_i_cluster_leader(self):
         if not self.cluster_alive():
             # There is no cluster so no leader
+            LOG.debug('skip checking leader because consul cluster is not healthy(as no cluster leader is returned)')
             return False
         cluster_leader = self.cc.status.leader()
         leader_ip = cluster_leader.split(':')[0]
         my_ip = get_ip_address()
         am_i_leader = my_ip == leader_ip
-
+        LOG.debug('self.leader = %s , am_i_leader = %s', str(self.leader), str(am_i_leader))
         # Check if a node is becoming leader or giving up leader status
         if am_i_leader != self.leader:
+            LOG.debug('claim i am leader : %s ', str(my_ip))
             self.leader = am_i_leader
             if am_i_leader:
                 # Node just became the leader
+                LOG.debug('i am in leader role so sync my cache with consul')
                 self.populate_cache_from_consul()
             else:
                 # Node gave up leadership
                 # Clear the changed_clusters array so that there is nothing
                 # to report
+                LOG.debug('i am not leader, so clean changed_clusters')
                 self.changed_clusters = []
+        else:
+            LOG.debug('self.leader = %s , am_i_leader = %s, do nothing if already played leader role', str(self.leader), str(am_i_leader))
         return am_i_leader
 
     def populate_cache_from_consul(self):
@@ -325,6 +346,7 @@ class consul_status(object):
                 obj = json.loads(value)
                 cls = cluster.from_str(obj['node_info'])
                 self.changed_clusters.append(cls)
+        LOG.debug('changed_clusters updated after synced from kv store : %s ', str(self.changed_clusters))
         # If the leader node goes down, then host down event is not
         # recorded in KV store. It is possible that leader was not able to
         # record some other failed nodes in KV store. Check the current status
@@ -339,11 +361,16 @@ class consul_status(object):
                     LOG.info('Found a failed node {node} that was not in '
                              'KV'.format(node=addr))
                     self.changed_clusters.append(cls_obj)
+        LOG.debug('cached changed cluster is now : %s', str(self.changed_clusters))
 
     def cluster_alive(self):
         try:
-            return self.cc.status.leader() != ''
-        except Exception:
+            leader=self.cc.status.leader()
+            peers=self.cc.status.peers()
+            LOG.debug("consul cluster leader %s, peers %s", str(leader), str(peers))
+            return leader != ''
+        except Exception as e:
+            LOG.error("failed to detect consul cluster leader and peers. %s", str(e))
             return False
 
     def report_node_down_to_kv(self, hostid, node_info, report_time=None,
@@ -355,13 +382,16 @@ class consul_status(object):
             'id': report_id,
             'node_info': node_info
         }
+        LOG.debug('host %s is recorded as down : %s', str(hostid), str(data))
         self.cc.kv.put(hostid, json.dumps(data))
 
     def update_kv(self, key, value):
+        LOG.debug('update kv store key %s , val %s', str(key), str(value))
         self.cc.kv.put(key, value)
 
     def delete_from_kv(self, key):
         try:
+            LOG.debug('delete kv key from store : %s', str(key))
             self.cc.kv.delete(key)
         except Exception:
             LOG.warn('{id} tried to delete non-existent key - {key}'.format(
@@ -370,6 +400,7 @@ class consul_status(object):
     def get_report_status(self, hostid):
         ignore, data = self.cc.kv.get(hostid)
         if data:
+            LOG.debug('report status for host %s : %s', str(hostid), str(data))
             return json.loads(data['Value'])
         LOG.warn('{id} tried to access report status for {host} which '
                  'did not exist'.format(id=self.host_id, host=hostid))
@@ -377,6 +408,7 @@ class consul_status(object):
 
     def update_reported_status(self, cluster_status):
         temp_cls = cluster(datetime.now(), cluster_status)
+        LOG.debug('trying to remove %s from changed_clusters %s', str(temp_cls), str(self.changed_clusters))
         self.changed_clusters.remove(temp_cls)
         old_status = self.get_report_status(cluster_status['hostname'])
         if not old_status:
@@ -388,9 +420,11 @@ class consul_status(object):
 
     def cleanup_consul_kv_store(self):
         _, kv_list = self.cc.kv.get('', recurse=True)
+        LOG.debug('consul kv store : %s', str(kv_list))
         for kv in kv_list:
             key = kv['Key']
             value = kv['Value']
+            LOG.debug('try to clean up kv %s', str(kv))
             if UUID_PATTERN.match(key):
                 # Dealing with a status report key-value pair
                 value = json.loads(value)
@@ -402,9 +436,11 @@ class consul_status(object):
                 report_time = datetime.strptime(report_time_str,
                                                 "%Y-%m-%d %H:%M:%S")
                 if datetime.now() - report_time > self.reap_interval:
+                    LOG.debug('clean up report %s', str(kv))
                     self.cc.kv.delete(key)
             elif valid_cluster_port(key):
                 # Dealing with "<ip>:<port>" = <host_id>
                 ip_addr = key.split(':')[0]
                 if ip_addr not in [x['Addr'] for x in self.cc.agent.members()]:
+                    LOG.debug('clean up member %s', str(kv))
                     self.cc.kv.delete(key)

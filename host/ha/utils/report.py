@@ -98,11 +98,11 @@ class HaManagerReporter(Reporter):
             resp = requests.post(host_url, data=payload, headers=headers,
                                  verify=CONF.keystone_authtoken.insecure)
             if resp.status_code != requests.codes.ok:
-                LOG.error('HA manager returned %d', resp.status_code)
+                LOG.error('HA manager %s returned %d for request.(%s)', str(host_url), resp.status_code, str(payload))
                 return False
             else:
-                LOG.info('Status reported successfully to HA manager')
+                LOG.info('Status reported (%s) successfully to HA manager %s', str(payload), str(host_url))
                 return resp.json().get('success', False)
         except Exception:
-            LOG.error('Status report failed', exc_info=True)
+            LOG.error('Status report (%s) failed to HA manager %s', str(payload), str(host_url), exc_info=True)
             return False
