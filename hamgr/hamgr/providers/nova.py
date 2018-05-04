@@ -275,7 +275,7 @@ class NovaProvider(Provider):
                          'moment.', host['id'])
                 raise ha_exceptions.HostOffline(host['id'])
             current_roles[host['id']] = host['roles']
-        LOG.debug("current roles : %s , from resp : ", str(current_roles), json.dumps(json_resp))
+        LOG.debug("current roles : %s , from resp : %s", str(current_roles), json.dumps(json_resp))
         return current_roles
 
     def _auth(self, ip_lookup, cluster_ip_lookup, token, nodes, role, ip=None):
@@ -658,6 +658,9 @@ class NovaProvider(Provider):
         }
 
         try:
+            # report host down event
+            self._report_event(event_details)
+
             cluster = self._get_cluster_for_host(host)
             db_api.update_cluster_task_state(cluster.id, states.TASK_MIGRATING)
             cluster = db_api.get_cluster(cluster.id)
@@ -681,6 +684,9 @@ class NovaProvider(Provider):
     def host_up(self, event_details):
         host = event_details['hostname']
         try:
+            # also report host up event
+            self._report_event(event_details)
+
             if self._is_nova_service_active(host):
                 # When the cluster was reconfigured for host down event this
                 # node is removed from masakari. Hence generating a host up
@@ -692,6 +698,42 @@ class NovaProvider(Provider):
         except Exception:
             return False
         return True
+
+    def _report_event(self, event_details):
+        if event_details is None:
+            return
+        if 'host_id' in event_details and 'consul' in event_details:
+            host_id = event_details['host_id']
+            consul_event = event_details['consul']
+            self._on_change_event(host_id, consul_event)
+
+    def _on_change_event(self, host_id, events):
+        LOG.debug('_on_change_event prepare to write change event, host %s, events %s', host_id, events)
+        # find the cluster id from given host id
+        clusters = db_api.get_all_active_clusters()
+        LOG.debug('_on_change_event all active clusters : %s', str(clusters))
+        client = self._get_client()
+        target_cluster = None
+        for cluster in clusters:
+            aggregate_id = cluster.name
+            aggregate = self._get_aggregate(client, aggregate_id)
+            hosts = set(aggregate.hosts)
+            LOG.debug('_on_change_event aggregate id : %s ---> cluster : %s ---> hosts : %s', str(aggregate_id), str(cluster), str(hosts))
+            if str(host_id) in hosts:
+                target_cluster = cluster.id
+                LOG.debug("_on_change_event cluster id for host %s is %s ---> %s", host_id, cluster.id, str(target_cluster))
+                break
+            else:
+                LOG.info('_on_change_event : host %s is not in set %s ---> %s', str(host_id), str(hosts), str(host_id in hosts))
+        # write change event into db
+        if target_cluster is not None:
+            db_api.create_change_event(target_cluster, events)
+            LOG.debug("_on_change_event change event is created for host %s in cluster %s", host_id, target_cluster)
+            return True
+        LOG.debug("_on_change_event unable to write change event as could not find cluster id for host %s", host_id)
+        return False
+
+
 
 def get_provider(config):
     db_api.init(config)

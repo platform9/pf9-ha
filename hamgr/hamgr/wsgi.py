@@ -77,6 +77,8 @@ def update_status(aggregate_id, action):
 def update_host_status(host_id):
     event = request.get_json().get('event', None)
     event_details = request.get_json().get('event_details', {})
+    event_details['host_id'] = host_id
+    LOG.debug('received POST event %s ----> %s', str(event), str(event_details))
     provider = get_provider()
     if event and event == 'host-down':
         masakari_notified = provider.host_down(event_details)

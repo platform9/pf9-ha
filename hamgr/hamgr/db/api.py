@@ -16,6 +16,7 @@ import logging
 
 from contextlib import contextmanager
 
+import datetime
 from hamgr import exceptions
 from hamgr import states
 from sqlalchemy import Boolean
@@ -27,6 +28,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import Integer
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import String
+from sqlalchemy import Text
 
 LOG = logging.getLogger(__name__)
 
@@ -51,6 +53,18 @@ class Cluster(Base):
     deleted_at = Column(DateTime, default=None)
     name = Column(String(255))
     task_state = Column(String(36), nullable=True)
+
+
+
+class ChangeEvents(Base):
+    __tablename__ = 'change_events'
+    __table_args__ = {'mysql_engine': 'InnoDB'}
+    __mapper_args__ = {'always_refresh': True}
+
+    cluster = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow())
+    events = Column(Text, nullable=True)
+
 
 
 def init(config, connection_string=None):
@@ -179,3 +193,23 @@ def update_cluster_task_state(cluster_id, state):
         if state not in states.VALID_TASK_STATES:
             raise exceptions.InvalidTaskState(state)
         db_cluster.task_state = state
+
+
+def create_change_event(cluster_id, events):
+    if cluster_id is None:
+        LOG.debug("cluster_id argument is null or empty, won't write events to db.")
+        return
+    if events is None:
+        LOG.debug("events argument is null or empty, won't write events to db.")
+        return
+    with dbsession() as session:
+        try:
+            change = ChangeEvents()
+            change.cluster= int(cluster_id)
+            change.timestamp = datetime.datetime.utcnow()
+            change.events = str(events)
+            session.add(change)
+            LOG.debug('successfully committed change event : %s', str(change))
+            return change
+        except SQLAlchemyError as se:
+            LOG.error('DB error when create change event : %s', se)

@@ -181,6 +181,7 @@ class consul_status(object):
     def _get_cluster_status(self, current_time=datetime.now()):
         cluster_report = {}
         for member in self.cc.agent.members():
+            LOG.debug('member addr %s status %s', str(member.get('Addr')), str(member.get('Status')))
             if member.get('Status', 4) == 1:
                 # Node alive
                 event_type = 1
@@ -199,12 +200,21 @@ class consul_status(object):
             cluster_port = "%s:%s" % (member.get('Addr'), member.get('Port'))
 
             ignore, data = self.cc.kv.get(cluster_port)
+            LOG.debug('get kv data for %s ---> %s', str(cluster_port), str(data))
             if not data:
                 # Cannot get the host id, which means that ha-slave is not
                 # running. We cannot be sure of the cluster state and reporting
                 # without the host id does not work hence skip this host.
                 continue
             cluster_id = data['Value']
+
+            # extend report data with key consul info to be reported to ha mgr
+            consul_info = {}
+            consul_info['leader'] = self.cc.status.leader()
+            consul_info['peers'] = self.cc.status.peers()
+            consul_info['members'] = self.cc.agent.members()
+            consul_info['timestamp'] = datetime.strftime(
+                current_time, '%Y-%m-%d %H:%M:%S')
 
             cluster_report[member['Addr']] = {
                 'eventType': event_type,
@@ -216,38 +226,48 @@ class consul_status(object):
                 'uuid': cluster_id,
                 'eventID': event_id,
                 'detail': detail,
-                'id': str(uuid4())
+                'id': str(uuid4()),
+                'consul': json.dumps(consul_info)
             }
+        LOG.debug('cluster_report is : %s', str(cluster_report))
         return cluster_report
 
     def _should_report_change(self):
         report_interval = timedelta(seconds=CONF.consul.report_interval)
         retval = None
         reported_cls = None
+        LOG.debug('changed_clusters : %s', str(self.changed_clusters))
         for cluster in self.changed_clusters:
-            LOG.debug('Checking %s status before reporting',
-                      cluster.change_info['cluster_port'])
+            LOG.debug('Checking %s status before reporting : %s',
+                      cluster.change_info['cluster_port'], str(cluster))
             if datetime.now() - cluster.change_time > report_interval:
                 current_state = self._get_cluster_status()
                 addr = cluster.change_info['cluster_port'].split(':')[0]
+                LOG.debug('check changed cluster %s against ---> %s', str(cluster), str(current_state))
                 if addr in current_state and current_state[addr]['eventType'] \
                         == cluster.change_info['eventType']:
                     reported_cls = cluster
                     retval = cluster.change_info
+                    LOG.debug('found one change %s', str(cluster))
                     break
         if reported_cls:
             ignore, data = self.cc.kv.get(retval['hostname'])
+            LOG.debug('get kv for %s ---->  %s', str(retval), str(data))
             if not data:
+                LOG.debug('report node down to kv : %s  ----> %s', str(retval), str(reported_cls))
                 self.report_node_down_to_kv(retval['hostname'],
                                             str(reported_cls))
             else:
                 data_obj = json.loads(data['Value'])
                 if data_obj.get('id'):
                     # Already reported once
+                    LOG.debug('will not report as change has been reported before : %s', str(data))
                     retval = None
+        LOG.debug('_should_report returns : %s', str(retval))
         return retval
 
     def update(self, current_status):
+        LOG.debug('try to update with new status : last :  %s ---> new : %s',str(self.last_status), str(current_status))
         for key, value in current_status.items():
             if key not in self.last_status:
                 # New node was added
@@ -260,10 +280,17 @@ class consul_status(object):
                     new=value.get('eventType')))
                 # Status of a node has changed
                 cls_obj = cluster(datetime.now(), current_status[key])
+                LOG.info('update : cluster key %s ---> value: %s', key, str(cls_obj))
                 if cls_obj not in self.changed_clusters:
+                    LOG.debug('change found : %s ----> %s', str(cls_obj), str(self.changed_clusters))
                     self.changed_clusters.append(cls_obj)
+                else:
+                    LOG.debug('already recorded this change : %s ---> %s', str(cls_obj), str(self.changed_clusters))
                 self.dirty = True
+            else:
+                LOG.debug('no changes as eventType is same ')
         self.current_status = current_status
+        LOG.debug('write to file %s , last : %s ---> current : %s', LAST_STATUS_UPDATE_FILE, str(self.last_status), str(self.current_status))
         with open(LAST_STATUS_UPDATE_FILE, 'w') as fptr:
             fptr.truncate()
             json.dump({
@@ -325,6 +352,7 @@ class consul_status(object):
                 obj = json.loads(value)
                 cls = cluster.from_str(obj['node_info'])
                 self.changed_clusters.append(cls)
+        LOG.debug("populate_cache_from_consul : after init from kv store  ---->  %s  ", str(self.changed_clusters))
         # If the leader node goes down, then host down event is not
         # recorded in KV store. It is possible that leader was not able to
         # record some other failed nodes in KV store. Check the current status
@@ -339,6 +367,7 @@ class consul_status(object):
                     LOG.info('Found a failed node {node} that was not in '
                              'KV'.format(node=addr))
                     self.changed_clusters.append(cls_obj)
+        LOG.debug("populate_cache_from_consul : after init from consul  ---->  %s  ", str(self.changed_clusters))
 
     def cluster_alive(self):
         try:

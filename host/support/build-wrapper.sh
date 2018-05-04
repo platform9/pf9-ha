@@ -27,6 +27,7 @@ package=$builddir/$name-$version-$buildnum.$arch.rpm
 
 mkdir -p $builddir
 mkdir -p $stagedir
+mkdir -p $builddir/fpm-work
 
 # Make the correct directory structure as we would expect in DU
 install -d -m 755 ${stagedir}/opt/pf9/www/private

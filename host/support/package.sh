@@ -28,6 +28,8 @@ package=$outdir/$name-$version-$buildnum.$arch.$pkgtype
 
 [ -e $package ] && rm -f $package
 
+mkdir -p $outdir/fpm-work
+
 echo $srcdir
 echo $package
 echo $outdir
