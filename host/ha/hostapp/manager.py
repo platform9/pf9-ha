@@ -145,21 +145,23 @@ def loop():
                 LOG.info('Joined consul cluster server {ip}'.format(
                     ip=CONF.consul.join))
                 cluster_setup = True
+                ch.log_kvstore()
         elif ch.am_i_cluster_leader():
             cluster_stat = ch.get_cluster_status()
-            LOG.debug('i am consul cluster leader, status --->  %s', str(cluster_stat))
+            LOG.debug('i am leader, found changes : %s', str(cluster_stat))
             if cluster_stat:
                 expand_stats(cluster_stat)
                 LOG.debug('cluster_stat: %s', cluster_stat)
                 if reporter.report_status(cluster_stat):
+                    LOG.debug('consul status is reported to hamgr: %s', cluster_stat)
                     ch.update_reported_status(cluster_stat)
                 else:
-                    LOG.debug('report consul status to ha mger failed')
+                    LOG.debug('report consul status to hamgr failed')
             else:
                 LOG.debug('no consul status changes to report for now')
             ch.cleanup_consul_kv_store()
         else:
-            LOG.debug('i am not consul cluster leader so do nothing')
+            LOG.debug('i am not leader so do nothing')
         # It is possible that host ID was not published when the consul
         # helper was created as the cluster was not yet formed. Since this
         # operation is idempotent calling it in a loop will not cause

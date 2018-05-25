@@ -50,11 +50,14 @@ class Reporter(object):
             }
         }
         data = json.dumps(data)
-        resp = requests.post(self.keystone_token_url, data=data,
-                             headers=headers, verify=self.insecure)
-        if resp.status_code != requests.codes.ok:
-            return False
-        return resp.json()['access']['token']
+        try:
+            resp = requests.post(self.keystone_token_url, data=data,
+                                 headers=headers, verify=self.insecure)
+            if resp.status_code != requests.codes.ok:
+                return False
+            return resp.json()['access']['token']
+        except Exception as e:
+            LOG.warn('failed to request token, error : %s', str(e))
 
     def _need_refresh(self):
         """Return True if token should be refreshed."""
@@ -99,7 +102,7 @@ class HaManagerReporter(Reporter):
             resp = requests.post(host_url, data=payload, headers=headers,
                                  verify=CONF.keystone_authtoken.insecure)
             if resp.status_code != requests.codes.ok:
-                LOG.error('HA manager returned %d', resp.status_code)
+                LOG.error('report to HA manager failed, returned %d', resp.status_code)
                 return False
             else:
                 LOG.info('Status reported successfully to HA manager')

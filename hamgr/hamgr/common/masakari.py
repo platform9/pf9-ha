@@ -55,23 +55,44 @@ def delete_failover_segment(token, name):
     seg = None
     try:
         seg = get_failover_segment(token, name)
+    except exceptions.SegmentNotFound as e:
+        LOG.error('error when get segment info for %s : %s', str(name), str(e))
+        return
+    if seg is None:
+        LOG.debug('failover segment %s does not exist ', str(name))
+        return
+
+    try:
         # Delete hosts in failover segment before deleting the segment itself
         nodes = get_nodes_in_segment(token, name)
         for node in nodes:
+            if node.get('on_maintenance', None):
+                LOG.warn('host %s in segment %s is on maintenance',
+                         str(node['name']), str(name))
             url = '/'.join([_URL, 'segments', node['failover_segment_id'],
                             'hosts', node['uuid']])
+            LOG.debug('remove host from masakari segment : %s', str(url))
             resp = requests.delete(url, headers=headers)
             if resp.status_code not in [requests.codes.no_content,
                                         requests.codes.not_found]:
+                LOG.debug('unexpected status %s while deleting host %s',
+                          str(resp), str(node))
                 resp.raise_for_status()
-    except exceptions.SegmentNotFound:
-        return
+    except Exception:
+        LOG.warn('error when delete host from segment %s', str(name),
+                  exc_info=True)
+        raise
 
     url = '/'.join([_URL, 'segments', seg['uuid']])
+    LOG.debug('delete masakari segment : %s', str(url))
     resp = requests.delete(url, headers=headers)
     if resp.status_code not in [requests.codes.no_content,
                                 requests.codes.not_found]:
+        LOG.error('unexpected status %s when deleting segment %s', str(resp),
+                  str(name))
         resp.raise_for_status()
+    else:
+        LOG.info('successfully deleted failover segment %s', str(name))
 
 
 def create_failover_segment(token, name, hosts):
@@ -125,6 +146,8 @@ def create_notification(token, ntype, hostname, time, payload):
         LOG.error('Masakari rejected notification with error %s: %s',
                   resp.status_code, resp)
         resp.raise_for_status()
+    LOG.debug('masakari notification is created : %s', str(resp.json()))
+    return resp.json()
 
 
 def get_notifications(token, host_id, generated_since=None):
@@ -146,3 +169,53 @@ def get_notifications(token, host_id, generated_since=None):
         LOG.error('Error fetching notifications for %s', host_id)
         resp.raise_for_status()
     return resp.json()
+
+
+def get_notification_status(token, uuid):
+    headers = {
+        'X-Auth-Token': token['id'],
+        'Content-Type': 'application/json'
+    }
+    url = '/'.join([_URL, 'notifications', uuid])
+    resp = requests.get(url, headers=headers)
+    LOG.debug('get notification %s , resp : %s', str(uuid), str(resp.json()))
+    resp.raise_for_status()
+    obj = resp.json()
+    return obj['notification']['status']
+
+def update_host_maintenance(token, host_id, segment_name, on_maintenance):
+    if not host_id or \
+            not segment_name or \
+            str(on_maintenance).lower() not in ['true', 'false']:
+        raise Exception('invalid argument')
+
+    # confirm the given segment_id eixist
+    target_segment = get_failover_segment(token, segment_name)
+    LOG.debug('found segment %s : %s', segment_name, str(target_segment))
+    segment_uuid = target_segment['uuid']
+    # confirm host exist in target segment
+    hosts = get_nodes_in_segment(token, segment_name)
+    LOG.debug('found hosts in failover segment %s : %s', segment_name, str(hosts))
+    xhosts = filter(lambda x:x['name'] == str(host_id), hosts)
+    if len(xhosts) != 1:
+        LOG.error('host %s does not exist in failover segment %s', host_id,
+                  segment_name)
+        return
+    host_uuid = xhosts[0]['uuid']
+    LOG.debug('uuid of host %s : %s', host_id, str(host_uuid))
+    # update the host maintenance status
+    headers = {
+        'X-Auth-Token': token['id'],
+        'Content-Type': 'application/json'
+    }
+    url = '/'.join([_URL, 'segments', segment_uuid, 'hosts', host_uuid])
+    data = dict(host=dict(name=host_id,
+                          on_maintenance=on_maintenance,
+                          type='COMPUTE',
+                          reserved='False',
+                          control_attributes=''))
+    resp = requests.put(url, headers=headers, data=json.dumps(data))
+    resp.raise_for_status()
+    LOG.debug('host %s in segment %s is updated with maintenance status : '
+              '%s', host_id, segment_name, str(on_maintenance))
+

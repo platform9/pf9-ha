@@ -1,6 +1,6 @@
 # Copyright (C) 2015 Platform 9 Systems, Inc.
 
-PF9_VERSION ?= 1.5.0
+PF9_VERSION ?= 3.6.0
 BUILD_NUMBER ?= 0
 UID ?= $(shell id -u)
 GID ?= $(shell id -g)

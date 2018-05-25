@@ -48,15 +48,39 @@ class NovaProvider(Provider):
         self._tenant = config.get('keystone_middleware', 'admin_tenant_name')
         self._region = config.get('nova', 'region')
         self._token = None
+        # make sure the waiting timeout for masakari to process notification
+        # falls in reasonable range. normally it should finish in 5 minutes
+        self._notification_waiting_timeout_minutes = 5
+        if config.has_section('masakari'):
+            setting_timeout = config.getint('masakari',
+                                            'notification_waiting_minutes')
+            if 5 <= setting_timeout <= 10:
+                self._notification_waiting_timeout_minutes = setting_timeout
+        LOG.info('masakari notification waiting timeout is set to %s '
+                 'minutes', str(self._notification_waiting_timeout_minutes))
 
-        # the add_task will check whether a task exists, will ignore if already exist
-        # otherwise will add it
-        periodic_task.add_task(self.check_host_aggregate_changes, 120, run_now=True)
+        # the add_task will check whether a task exists, will ignore if
+        # already exist, otherwise will add it
+        periodic_task.add_task(self.check_host_aggregate_changes, 120,
+                               run_now=True)
 
         self.hosts_down_per_cluster = defaultdict(dict)
         self.aggregate_task_lock = threading.Lock()
         self.aggregate_task_running = False
         self.host_down_dict_lock = threading.Lock()
+
+    def _toggle_host_maintenance_state(self, host_id, aggregate_id,
+                                       on_maintenance):
+        LOG.debug(
+            'toggle masakari host %s in segment %s to maintenance state %s',
+            str(host_id), str(aggregate_id), str(on_maintenance))
+        try:
+            masakari.update_host_maintenance(self._token, host_id, aggregate_id,
+                                             on_maintenance)
+
+        except Exception as e:
+            LOG.error('failed to toggle maintenance for host %s to %s , '
+                      'error : %s', host_id, str(on_maintenance), str(e))
 
     def check_host_aggregate_changes(self):
         with self.aggregate_task_lock:
@@ -83,8 +107,10 @@ class NovaProvider(Provider):
                                                       aggregate_id)
                 db_node_ids = set([node['name'] for node in nodes])
 
-                LOG.debug("hosts records from nova : %s", ','.join(list(current_host_ids)))
-                LOG.debug("hosts records from masakari : %s", ','.join(list(db_node_ids)))
+                LOG.debug("hosts records from nova : %s",
+                          ','.join(list(current_host_ids)))
+                LOG.debug("hosts records from masakari : %s",
+                          ','.join(list(db_node_ids)))
 
                 for host in current_host_ids:
                     if self._is_nova_service_active(host, client=client):
@@ -109,26 +135,43 @@ class NovaProvider(Provider):
                 LOG.info('Found %s inactive hosts', str(inactive_host_ids))
                 LOG.info('Found %s removed hosts', str(removed_host_ids))
 
+                # only when the cluster state is completed
+                if cluster.task_state in [states.TASK_COMPLETED]:
+                    for hid in remaining_host_ids:
+                        # already know the host is active in nova
+                        xhosts = filter(lambda x: str(x['name']) == str(hid),
+                                        nodes)
+                        if len(xhosts) == 1 and xhosts[0]['on_maintenance']:
+                            # need to unlock the host
+                            self._toggle_host_maintenance_state(hid,
+                                                                aggregate_id,
+                                                                False)
+
                 if len(new_host_ids) == 0 and len(removed_host_ids) == 0:
                     # No new hosts to process
                     LOG.info('No new hosts to process in {clsid} '
                              'cluster'.format(clsid=cluster.name))
 
                     # make sure ha-slave is enabled on existing active hosts
-                    current_roles = self._validate_hosts(remaining_host_ids, check_cluster=False)
+                    current_roles = self._validate_hosts(remaining_host_ids,
+                                                         check_cluster=False)
                     LOG.debug("found roles : %s", str(current_roles))
                     tmp_ids = set()
                     for r_host in remaining_host_ids:
                         h_roles = current_roles[r_host]
-                        LOG.debug("host %s  has roles : %s", str(r_host), ','.join(h_roles))
+                        LOG.debug("host %s  has roles : %s", str(r_host),
+                                  ','.join(h_roles))
                         if "pf9-ha-slave" not in h_roles:
                             tmp_ids.add(r_host)
 
                     if len(tmp_ids) > 0:
                         txt_ids = ','.join(list(tmp_ids))
-                        LOG.debug("assign ha-slave role for hosts : %s", txt_ids )
-                        self._assign_roles(client, remaining_host_ids, current_roles)
-                        LOG.debug("ha-slave roles are assigned to : %s", txt_ids)
+                        LOG.debug("assign ha-slave role for hosts : %s",
+                                  txt_ids)
+                        self._assign_roles(client, remaining_host_ids,
+                                           current_roles)
+                        LOG.debug("ha-slave roles are assigned to : %s",
+                                  txt_ids)
                     else:
                         LOG.info("all hosts already have pf9-ha-slave role")
 
@@ -141,7 +184,7 @@ class NovaProvider(Provider):
                     # same cluster so do not reconfigure the cluster yet
                     LOG.warn('Skipping {clsid} because there are inactive '
                              'hosts or incomplete tasks'.format(
-                                 clsid=cluster.name))
+                        clsid=cluster.name))
                     continue
 
                 self._disable(aggregate_id, synchronize=True)
@@ -174,7 +217,9 @@ class NovaProvider(Provider):
         if len(services) == 1:
             if services[0].state == 'up':
                 if services[0].status != 'enabled':
-                    LOG.debug("nova host %s state is up, but status is disabled, so now enable it", str(host_id))
+                    LOG.debug(
+                        'host %s state is up, status is disabled, so enable it',
+                        str(host_id))
                     client.services.enable(binary=binary, host=host_id)
                 LOG.debug("nova host %s is up and enabled", str(host_id))
                 return True
@@ -221,8 +266,8 @@ class NovaProvider(Provider):
     def get(self, aggregate_id):
         client = self._get_client()
 
-        return [self._get_one(client, aggregate_id)] if aggregate_id is not \
-            None else self._get_all(client)
+        return [self._get_one(client, aggregate_id)] \
+            if aggregate_id is not None else self._get_all(client)
 
     def _get_aggregate(self, client, aggregate_id):
         try:
@@ -260,13 +305,13 @@ class NovaProvider(Provider):
 
         LOG.debug("check host in other cluster : %s", str(check_cluster))
         if check_cluster is True:
-           self._check_if_host_in_other_cluster(hosts)
+            self._check_if_host_in_other_cluster(hosts)
 
         # Check host state and role status in resmgr before proceeding
         current_roles = {}
         json_resp = self._wait_for_role_to_ok(hosts)
         for host in json_resp:
-            if host['role_status'] != 'ok':
+            if host.get('role_status', '') != 'ok':
                 LOG.warn('Role status of host %s is not ok, not enabling HA '
                          'at the moment.', host['id'])
                 raise ha_exceptions.InvalidHostRoleStatus(host['id'])
@@ -275,7 +320,8 @@ class NovaProvider(Provider):
                          'moment.', host['id'])
                 raise ha_exceptions.HostOffline(host['id'])
             current_roles[host['id']] = host['roles']
-        LOG.debug("current roles : %s , from resp : %s", str(current_roles), json.dumps(json_resp))
+        LOG.debug("current roles : %s , from resp : %s", str(current_roles),
+                  json.dumps(json_resp))
         return current_roles
 
     def _auth(self, ip_lookup, cluster_ip_lookup, token, nodes, role, ip=None):
@@ -322,7 +368,8 @@ class NovaProvider(Provider):
         resp = requests.get(host_url, headers=headers)
         resp.raise_for_status()
         json_resp = resp.json()
-        LOG.debug("role details for host %s : %s", str(host_id), json.dumps(json_resp))
+        LOG.debug("role details for host %s : %s", str(host_id),
+                  json.dumps(json_resp))
         return json_resp
 
     def _get_cluster_ip(self, host_id, json_resp):
@@ -411,6 +458,10 @@ class NovaProvider(Provider):
             cluster_id = cluster.id
         except ha_exceptions.ClusterNotFound:
             pass
+        except Exception:
+            LOG.exception('error when get cluster %s from db',
+                          str(str_aggregate_id))
+            raise
         else:
             if cluster.task_state not in [states.TASK_COMPLETED]:
                 if cluster.task_state == states.TASK_MIGRATING and \
@@ -480,12 +531,14 @@ class NovaProvider(Provider):
             auth_url = '/'.join([url, node])
             resp = requests.get(auth_url, headers=headers)
             resp.raise_for_status()
-            while resp.json()['role_status'] != 'ok':
+            while resp.json().get('role_status', '') != 'ok':
                 time.sleep(30)
                 resp = requests.get(auth_url, headers=headers)
                 resp.raise_for_status()
                 if datetime.now() - start_time > timedelta(minutes=15):
-                    LOG.debug("host %s is not converged, starting from %s to %s ", str(node), str(start_time), str(datetime.now()))
+                    LOG.debug(
+                        "host %s is not converged, starting from %s to %s ",
+                        str(node), str(start_time), str(datetime.now()))
                     raise ha_exceptions.RoleConvergeFailed(node)
             json_resp.append(resp.json())
         return json_resp
@@ -572,7 +625,6 @@ class NovaProvider(Provider):
                 self._deauth(hosts)
                 if synchronize:
                     _ = self._wait_for_role_to_ok(hosts)
-
             masakari.delete_failover_segment(self._token, str_aggregate_id)
         except Exception:
             if cluster:
@@ -625,9 +677,9 @@ class NovaProvider(Provider):
 
             self.hosts_down_per_cluster[cluster.id][host] = True
             if all([v for k, v in self.hosts_down_per_cluster[
-                    cluster.id].items()]):
+                cluster.id].items()]):
                 host_list = current_host_ids - \
-                    set(self.hosts_down_per_cluster[cluster.id].keys())
+                            set(self.hosts_down_per_cluster[cluster.id].keys())
                 # Task state will be managed by this function
                 self._disable(aggregate_id, synchronize=True,
                               next_state=states.TASK_MIGRATING)
@@ -639,14 +691,16 @@ class NovaProvider(Provider):
                 #       does not have other side effects
                 LOG.info('There are still down hosts that need to be reported'
                          ' before reconfiguring the cluster')
-        except Exception:
-            LOG.exception('Could not process {host} host down'.format(
-                host=host))
+        except Exception as e:
+            LOG.exception(
+                'Could not process {host} host down. HA is not enabled '
+                'because of this error : {error}'.format(
+                    host=host, error=e))
         db_api.update_cluster_task_state(cluster.id, states.TASK_COMPLETED)
 
     def host_down(self, event_details):
         host = event_details['hostname']
-        time = event_details['time']
+        event_time = event_details['time']
         event = 'STOPPED'
         host_status = 'NORMAL'
         cluster_status = 'OFFLINE'
@@ -657,6 +711,10 @@ class NovaProvider(Provider):
             "cluster_status": cluster_status
         }
 
+        # re-design needed :
+        # TODO : https://platform9.atlassian.net/browse/IAAS-9015
+        notification_created = False
+        notification_finished = False
         try:
             # report host down event
             self._report_event(event_details)
@@ -666,19 +724,79 @@ class NovaProvider(Provider):
             cluster = db_api.get_cluster(cluster.id)
             self._token = utils.get_token(self._tenant, self._username,
                                           self._passwd, self._token)
-            masakari.create_notification(self._token, notification_type,
-                                         host, time, payload)
+            notification_obj = None
+            try:
+                reportedby = event_details.get('reportedby', '')
+                LOG.debug('event reported by %s for host %s : %s',
+                          str(reportedby), str(host), event)
 
-            def _remove_host_task():
-                self._remove_host_from_cluster(cluster, host)
+                notification_obj = masakari.create_notification(self._token,
+                                                                notification_type,
+                                                                host,
+                                                                event_time,
+                                                                payload)
+                if notification_obj and notification_obj.get('notification',
+                                                             None):
+                    notification_created = True
+            except Exception:
+                LOG.error('failed to create masakari notification, error',
+                          exc_info=True)
+                return False
 
-            periodic_task.add_task(_remove_host_task, 0, run_now=True,
+            if not notification_created:
+                LOG.error('failed to create masakari notifiction : %s',
+                          str(notification_obj))
+                return False
+
+            LOG.debug('masakari notification is created : %s',
+                      str(notification_obj))
+            uid = notification_obj['notification']['notification_uuid']
+            state = notification_obj['notification']['status']
+            LOG.debug('masakari notification uid %s , status : %s',
+                      str(uid), str(state))
+
+            time_out = timedelta(
+                minutes=self._notification_waiting_timeout_minutes)
+            time_start = datetime.utcnow()
+            time_end = datetime.utcnow()
+
+            def _report_progress():
+                notification_finished = False
+                while not notification_finished:
+                    state = masakari.get_notification_status(self._token, uid)
+                    LOG.debug('masakari notification %s status : %s',
+                              str(uid), str(state))
+                    if state == "finished":
+                        notification_finished = True
+                    time.sleep(5)
+                    time_end = datetime.utcnow()
+                    if time_end - time_start > time_out:
+                        LOG.warn(
+                            'masakari notifiction %s timed out after %s '
+                            'minutes',
+                            str(uid), str(time_out))
+                        break
+                if notification_finished:
+                    LOG.debug('masakari notification %s has finished. ' \
+                              'started : %s,  completed : %s',
+                              str(uid), str(time_start), str(time_end))
+
+            periodic_task.add_task(_report_progress, 0, run_now=True,
                                    run_once=True)
+
             retval = True
         except Exception:
-            LOG.exception('Error processing {host} host down'.format(
-                host=host))
+            LOG.exception('Error processing %s host down', host)
             retval = False
+        finally:
+            if notification_created:
+                # when notification was created, still think the operation was
+                # succeeded, so restore the cluster status, and return True
+                # to to ha-slave to stop it from sending the same event again
+                db_api.update_cluster_task_state(cluster.id,
+                                                 states.TASK_COMPLETED)
+                retval = True
+
         return retval
 
     def host_up(self, event_details):
@@ -696,6 +814,7 @@ class NovaProvider(Provider):
             # No point in adding the node back if nova-compute is down
             return False
         except Exception:
+            LOG.exception('failed to process host up event')
             return False
         return True
 
@@ -708,31 +827,35 @@ class NovaProvider(Provider):
             self._on_change_event(host_id, consul_event)
 
     def _on_change_event(self, host_id, events):
-        LOG.debug('_on_change_event prepare to write change event, host %s, events %s', host_id, events)
-        # find the cluster id from given host id
-        clusters = db_api.get_all_active_clusters()
-        LOG.debug('_on_change_event all active clusters : %s', str(clusters))
-        client = self._get_client()
-        target_cluster = None
-        for cluster in clusters:
-            aggregate_id = cluster.name
-            aggregate = self._get_aggregate(client, aggregate_id)
-            hosts = set(aggregate.hosts)
-            LOG.debug('_on_change_event aggregate id : %s ---> cluster : %s ---> hosts : %s', str(aggregate_id), str(cluster), str(hosts))
-            if str(host_id) in hosts:
-                target_cluster = cluster.id
-                LOG.debug("_on_change_event cluster id for host %s is %s ---> %s", host_id, cluster.id, str(target_cluster))
-                break
-            else:
-                LOG.info('_on_change_event : host %s is not in set %s ---> %s', str(host_id), str(hosts), str(host_id in hosts))
-        # write change event into db
-        if target_cluster is not None:
-            db_api.create_change_event(target_cluster, events)
-            LOG.debug("_on_change_event change event is created for host %s in cluster %s", host_id, target_cluster)
-            return True
-        LOG.debug("_on_change_event unable to write change event as could not find cluster id for host %s", host_id)
+        try:
+            LOG.debug('prepare to write change event, host %s, events %s',
+                host_id, events)
+            # find the cluster id from given host id
+            clusters = db_api.get_all_active_clusters()
+            LOG.debug('all active clusters : %s', str(clusters))
+            if clusters is None:
+                LOG.warn(
+                    'unable to get active clusters to write change events : %s',
+                    str(events))
+                return
+            client = self._get_client()
+            target_cluster = None
+            for cluster in clusters:
+                aggregate_id = cluster.name
+                aggregate = self._get_aggregate(client, aggregate_id)
+                hosts = set(aggregate.hosts)
+                if str(host_id) in hosts:
+                    target_cluster = cluster.id
+                    break
+            # write change event into db
+            if target_cluster is not None:
+                db_api.create_change_event(target_cluster, events)
+                LOG.debug('change event is created for host %s in cluster %s',
+                    host_id, target_cluster)
+                return True
+        except Exception as e:
+            LOG.debug('failed to record change event : %s', str(e))
         return False
-
 
 
 def get_provider(config):
