@@ -103,3 +103,15 @@ class ClusterIpNotFound(Exception):
     def __init__(self, hostname):
         message = "Cluster IP for host %s not found" % hostname
         super(ClusterIpNotFound, self).__init__(message)
+
+
+class ArgumentException(Exception):
+    def __init__(self, message, innerException):
+        message = 'Invalid argument. %s . %s' % (message, str(innerException))
+        super(ArgumentException, self).__init__(message)
+
+
+class ConfigException(Exception):
+    def __init__(self, message, innerException):
+        message = '%s . %s' % (message, str(innerException))
+        super(ConfigException, self).__init__(message)

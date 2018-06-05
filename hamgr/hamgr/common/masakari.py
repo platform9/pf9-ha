@@ -184,10 +184,12 @@ def get_notification_status(token, uuid):
     return obj['notification']['status']
 
 def update_host_maintenance(token, host_id, segment_name, on_maintenance):
-    if not host_id or \
-            not segment_name or \
-            str(on_maintenance).lower() not in ['true', 'false']:
-        raise Exception('invalid argument')
+    if not host_id :
+        raise ArgumentException('host_id is null or empty')
+    if not segment_name:
+        raise ArgumentException('segment_name is null or empty')
+    if str(on_maintenance).lower() not in ['true', 'false']:
+        raise ArgumentException('on_maintenance can only be true or false')
 
     # confirm the given segment_id eixist
     target_segment = get_failover_segment(token, segment_name)
@@ -195,10 +197,9 @@ def update_host_maintenance(token, host_id, segment_name, on_maintenance):
     segment_uuid = target_segment['uuid']
     # confirm host exist in target segment
     hosts = get_nodes_in_segment(token, segment_name)
-    LOG.debug('found hosts in failover segment %s : %s', segment_name, str(hosts))
     xhosts = filter(lambda x:x['name'] == str(host_id), hosts)
     if len(xhosts) != 1:
-        LOG.error('host %s does not exist in failover segment %s', host_id,
+        LOG.error('host %s does not exist in masakari segment %s', host_id,
                   segment_name)
         return
     host_uuid = xhosts[0]['uuid']

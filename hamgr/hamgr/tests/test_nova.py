@@ -66,6 +66,8 @@ class NovaProviderTest(unittest.TestCase):
         config.add_section('nova')
         config.set('nova', 'region', 'fake')
 
+        config.set('DEFAULT', 'event_report_threshold_seconds', '30')
+
         self._provider = get_provider(config)
 
         db_api.Base.metadata.create_all(db_api._engine)

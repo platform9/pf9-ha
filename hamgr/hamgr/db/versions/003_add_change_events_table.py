@@ -35,7 +35,6 @@ def upgrade(migrate_engine):
     meta.bind = migrate_engine
     change_events.create()
 
-
 def downgrade(migrate_engine):
     meta.bind = migrate_engine
     change_events.drop()

@@ -19,6 +19,7 @@ from contextlib import contextmanager
 import datetime
 from hamgr import exceptions
 from hamgr import states
+from hamgr import constants
 from sqlalchemy import Boolean
 from sqlalchemy import Column
 from sqlalchemy import create_engine
@@ -29,6 +30,8 @@ from sqlalchemy import Integer
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import String
 from sqlalchemy import Text
+from sqlalchemy import or_
+from uuid import uuid4
 
 LOG = logging.getLogger(__name__)
 
@@ -39,7 +42,6 @@ _engine = None
 
 
 class Cluster(Base):
-
     __tablename__ = 'clusters'
     __table_args__ = {'mysql_engine': 'InnoDB'}
     __mapper_args__ = {'always_refresh': True}
@@ -55,16 +57,33 @@ class Cluster(Base):
     task_state = Column(String(36), nullable=True)
 
 
-
 class ChangeEvents(Base):
     __tablename__ = 'change_events'
     __table_args__ = {'mysql_engine': 'InnoDB'}
     __mapper_args__ = {'always_refresh': True}
 
-    cluster = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True)
+    uuid = Column(Text)
+    cluster = Column(Integer)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow())
     events = Column(Text, nullable=True)
 
+
+class EventsProcessing(Base):
+    __tablename__ = 'events_processing'
+    __table_args__ = {'mysql_engine': 'InnoDB'}
+    __mapper_args__ = {'always_refresh': True}
+
+    id = Column(Integer, primary_key=True)
+    event_uuid = Column(Text)
+    event_type = Column(Text)
+    event_time = Column(DateTime)
+    host_name = Column(Text)
+    cluster_id = Column(Text)
+    notification_uuid = Column(Text)
+    notification_created = Column(Text)
+    notification_status = Column(Text)
+    notification_updated = Column(DateTime)
 
 
 def init(config, connection_string=None):
@@ -117,7 +136,7 @@ def get_all_active_clusters():
         return _get_all_active_clusters(session)
 
 
-def _get_cluster(session, cluster_name_or_id, read_deleted=False,):
+def _get_cluster(session, cluster_name_or_id, read_deleted=False, ):
     query = session.query(Cluster)
     if read_deleted is False:
         query = query.filter_by(deleted=None)
@@ -197,15 +216,14 @@ def update_cluster_task_state(cluster_id, state):
 
 def create_change_event(cluster_id, events):
     if cluster_id is None:
-        LOG.debug("cluster_id argument is null or empty, won't write events to db.")
-        return
+        raise ArgumentException("cluster_id is null or empty")
     if events is None:
-        LOG.debug("events argument is null or empty, won't write events to db.")
-        return
+        raise ArgumentException("events argument is null or empty")
     with dbsession() as session:
         try:
             change = ChangeEvents()
-            change.cluster= int(cluster_id)
+            change.uuid = str(uuid4())
+            change.cluster = int(cluster_id)
             change.timestamp = datetime.datetime.utcnow()
             change.events = str(events)
             session.add(change)
@@ -213,3 +231,146 @@ def create_change_event(cluster_id, events):
             return change
         except SQLAlchemyError as se:
             LOG.error('DB error when create change event : %s', se)
+
+
+# get change envents between given time range for cluster id, host name
+# and event type
+def get_change_events_between_times(cluster_id,
+                                    host_name,
+                                    event_type,
+                                    start_time,
+                                    end_time):
+    if cluster_id is None:
+        raise ArgumentException('cluster_id is null or empty')
+    if host_name is None:
+        raise ArgumentException('host_name is null or empty')
+    if start_time > end_time:
+        raise ArgumentException('start_time is bigger than end_time')
+    if event_type not in constants.VALID_EVENT_TYPES:
+        raise ArgumentException('event_type is null or empty or not valid')
+    etype = ''
+    if event_type == constants.EVENT_HOST_DOWN:
+        etype = '\'eventType\': 2'
+    elif event_type == constants.EVENT_HOST_UP:
+        etype = '\'eventType\': 1'
+    with dbsession() as session:
+        try:
+            query = session.query(ChangeEvents)
+            query = query.filter(ChangeEvents.cluster == cluster_id)
+            query = query.filter(
+                ChangeEvents.events.contains(host_name),
+                ChangeEvents.events.constants(etype))
+            query = query.filter(
+                ChangeEvents.timestamp - start_time >= 0,
+                ChangeEvents.timestamp - end_time <= 0
+            )
+            return query.all()
+        except SQLAlchemyError as se:
+            LOG.error('DB error when query change events : %s', se)
+
+
+# create event, return event created to caller
+def create_processing_event(event_uuid, event_type, host_name, cluster_id):
+    if event_type not in constants.VALID_EVENT_TYPES:
+        raise ArgumentException('event_type not in %s' % \
+                                str(constants.VALID_EVENT_TYPES))
+    if host_name is None:
+        raise ArgumentException('host_name is empty')
+    if cluster_id is None:
+        raise ArgumentException('cluster_id is empty')
+    with dbsession() as session:
+        try:
+            ep = EventsProcessing()
+            ep.event_uuid = event_uuid
+            ep.event_type = event_type
+            ep.event_time = datetime.datetime.utcnow()
+            ep.host_name = str(host_name)
+            ep.cluster_id = str(cluster_id)
+            session.add(ep)
+            return ep
+        except Exception:
+            LOG.error('failed to create event', exc_info=True)
+        return None
+
+
+# get all unhandled events
+def get_all_unhandled_processing_events():
+    with dbsession() as session:
+        try:
+            query = session.query(EventsProcessing)
+            query = query.filter(or_(
+                EventsProcessing.notification_status == None,
+                ~EventsProcessing.notification_status.in_(
+                    constants.HANDLED_STATES)))
+            records = query.all()
+            return records
+        except Exception as e:
+            LOG.error('failed to get all unhandled processing events : %s ',
+                      str(e))
+        return None
+
+
+# query event by id
+def get_processing_event_by_id(event_uuid):
+    if event_uuid is None:
+        raise ArgumentException('event_uuid is empty')
+    with dbsession() as session:
+        try:
+            query = session.query(EventsProcessing)
+            query = query.filter_by(event_uuid=event_uuid)
+            ep = query.first()
+            return ep
+        except Exception:
+            LOG.error('failed to get event %s', str(event_uuid), exc_info=True)
+        return None
+
+
+# get processing events with given time range
+def get_processing_events_between_times(event_type,
+                                        host_name,
+                                        cluster_id,
+                                        start_time,
+                                        end_time):
+    if not event_type or event_type not in constants.VALID_EVENT_TYPES:
+        raise ArgumentException('event_type is null or empty or invalid')
+    if host_name is None:
+        raise ArgumentException('host_name is empty')
+    with dbsession() as session:
+        try:
+            query = session.query(EventsProcessing)
+            query = query.filter(
+                EventsProcessing.event_type == event_type,
+                EventsProcessing.host_name == host_name,
+                EventsProcessing.cluster_id == cluster_id)
+            query = query.filter(EventsProcessing.event_time - start_time >= 0,
+                                 EventsProcessing.event_time - end_time <= 0)
+            return query.all()
+        except Exception:
+            LOG.error('failed to query events for %s', str(host_name),
+                      exc_info=True)
+        return None
+
+
+# update event for notification fields
+def update_processing_event_with_notification(event_uuid, notification_uuid,
+                                              notification_created,
+                                              notification_status):
+    if event_uuid is None:
+        raise ArgumentException('event_uuid is empty')
+    with dbsession() as session:
+        try:
+            query = session.query(EventsProcessing)
+            query = query.filter_by(event_uuid=event_uuid)
+            ep = query.first()
+            if not ep:
+                LOG.info('event %s does not exist', event_uuid)
+                return
+            LOG.debug('found processing event %s : %s', event_uuid, str(ep))
+            ep.notification_uuid = notification_uuid
+            ep.notification_created = notification_created
+            ep.notification_status = notification_status
+            ep.notification_updated = datetime.datetime.utcnow()
+            return ep
+        except Exception:
+            LOG.error('failed to update event with notification', exc_info=True)
+        return None

@@ -32,6 +32,7 @@ from hamgr import exceptions as ha_exceptions
 from hamgr import periodic_task
 from hamgr.providers.provider import Provider
 from hamgr import states
+from hamgr import constants
 from novaclient import client
 from novaclient import exceptions
 
@@ -50,24 +51,46 @@ class NovaProvider(Provider):
         self._token = None
         # make sure the waiting timeout for masakari to process notification
         # falls in reasonable range. normally it should finish in 5 minutes
-        self._notification_waiting_timeout_minutes = 5
+        # in a cluster of 5 nodes, if 2 hosts are down at same time, normally
+        # masakari takes 2 times of processing time for single host (also
+        # dependents on how many vms hosted on it by nova)
+        self._notification_stale_minutes = 30
         if config.has_section('masakari'):
             setting_timeout = config.getint('masakari',
                                             'notification_waiting_minutes')
-            if 5 <= setting_timeout <= 10:
-                self._notification_waiting_timeout_minutes = setting_timeout
+            if setting_timeout < 5:
+                raise ha_exceptions.ConfigException(
+                    'invalid setting in '
+                    'configuration file : notification_waiting_minutes , '
+                    'should be equal or bigger than 5')
+
+            self._notification_stale_minutes = setting_timeout
         LOG.info('masakari notification waiting timeout is set to %s '
-                 'minutes', str(self._notification_waiting_timeout_minutes))
+                 'minutes', str(self._notification_stale_minutes))
 
-        # the add_task will check whether a task exists, will ignore if
-        # already exist, otherwise will add it
-        periodic_task.add_task(self.check_host_aggregate_changes, 120,
-                               run_now=True)
-
+        # to suppress possible too much host events in the case where
+        # salve failed to report the event to hamgr du to network issue,
+        # use the configured threshold seconds to check whether similar event
+        # has been reported, if not then record down, otherwise ignore it
+        self._event_report_threshold_seconds = 30
+        setting_seconds = config.getint('DEFAULT',
+                                        'event_report_threshold_seconds')
+        if setting_seconds <= 0:
+            raise ha_exceptions.ConfigException('invalid setting in ' \
+                                                'configuration file : '
+                                                'event_report_threshold_seconds ' \
+                                                'should be bigger than 0')
+        else:
+            self._event_report_threshold_seconds = setting_seconds
+        LOG.info('event report threshold seconds is %s',
+                 str(self._event_report_threshold_seconds))
         self.hosts_down_per_cluster = defaultdict(dict)
         self.aggregate_task_lock = threading.Lock()
         self.aggregate_task_running = False
         self.host_down_dict_lock = threading.Lock()
+        # thread lock
+        self.events_processing_lock = threading.Lock()
+        self.events_processing_running = False
 
     def _toggle_host_maintenance_state(self, host_id, aggregate_id,
                                        on_maintenance):
@@ -81,6 +104,189 @@ class NovaProvider(Provider):
         except Exception as e:
             LOG.error('failed to toggle maintenance for host %s to %s , '
                       'error : %s', host_id, str(on_maintenance), str(e))
+
+    # thread is dedicated to handle recorded host events
+    def host_events_processing(self):
+        # wait until current task complete
+        with self.events_processing_lock:
+            if self.events_processing_running:
+                LOG.debug('events processing task is already running')
+                return
+            self.events_processing_running = True
+
+        try:
+            LOG.debug('handle host events now at %s', str(datetime.utcnow()))
+
+            # ---------------------------------------------------------------------
+            # because masakari only be able to handle one notification each time
+            # for the same segment, so for the same segment need to
+            # create/handle
+            # notification in sequential manner
+            #
+            # for all unhandled processing events (both host-down and host-up) ,
+            #  1 sort the records by event_time
+            #  2 for each record
+            #    2.1 if host-down event
+            #      a) if host still down in nova
+            #        if notification_id is empty, then create notification
+            #        if notification_status is not 'running' or 'finished', then
+            #           track notification progress
+            #      b) if host is up in nova
+            #         mark the event as aborted
+            #    2.2 if host-up event
+            #      c) if host still up in nova
+            #         mark event as finished
+            #      d) if host is down in nova
+            #         check there is unhandled host-down processing event exist
+            #         if such event exist, just mark current host-up event as
+            #         finished
+            #         if no such event, then check timestamp , if this
+            # host-up event
+            #         is too old, just delete it, otherwise ignore it until it
+            #         become too old to be deleted
+            # ---------------------------------------------------------------------
+            unhandled_events = db_api.get_all_unhandled_processing_events()
+            if not unhandled_events:
+                LOG.debug('no unhandled processing events found')
+                return
+            events = sorted(unhandled_events, key=lambda x: x.event_time)
+            if not events or len(events) <= 0:
+                LOG.debug('no unhandled processing events to process')
+                return
+            LOG.debug('found unhandled events : %s', str(events))
+            # TODO : https://platform9.atlassian.net/browse/IAAS-9060
+            self._token = utils.get_token(self._tenant, self._username,
+                                          self._passwd, self._token)
+            nova_client = self._get_client()
+            time_out = timedelta(minutes=self._notification_stale_minutes)
+            for event in events:
+                LOG.debug('start of handling event %s', str(event))
+                event_uuid = event.event_uuid
+                event_type = event.event_type
+                event_time = event.event_time
+                host_name = event.host_name
+                cluster = db_api.get_cluster(int(event.cluster_id))
+                # if cluster of this event is disabled, no need to handle it
+                if not cluster or not cluster.enabled:
+                    LOG.debug('cluster %s in event %s is not enabled nor exist',
+                              event.cluster_id, str(event))
+                    continue
+                LOG.debug('found ha cluster with id %s : %s', event.cluster_id,
+                          str(cluster))
+                nova_aggregate = self._get_aggregate(nova_client, cluster.name)
+                # if no such host aggregate, no need to handle it
+                if not nova_aggregate:
+                    LOG.debug('no nova host aggregation found with name %s',
+                              str(cluster.name))
+                    continue
+                # if host in the event not exist in host aggregate, no need to
+                # handle the event
+                if host_name not in nova_aggregate.hosts:
+                    LOG.debug('host %s in event does not exist in nova %s',
+                              host_name, str(nova_aggregate.hosts))
+                    continue
+                # if the event happened long time ago, just abort
+                if datetime.utcnow() - event_time > time_out:
+                    db_api.update_processing_event_with_notification(
+                        event_uuid, None, None,
+                        constants.STATE_ABORTED)
+                    LOG.warn('event %s is aborted as it is too stale',
+                             str(event_uuid))
+                    continue
+
+                # check whether host is active in nova
+                is_active = self._is_nova_service_active(host_name,
+                                                         client=nova_client)
+                LOG.debug('is host %s active in nova ? %s', host_name,
+                          str(is_active))
+
+                # for 'host-down' event
+                if event_type == constants.EVENT_HOST_DOWN:
+                    if is_active:
+                        # since host is alive, mark it as aborted
+                        db_api.update_processing_event_with_notification(
+                            event_uuid, None, None, constants.STATE_ABORTED)
+                        LOG.info('event %s is marked as aborted', event_uuid)
+                    else:
+
+                        # host still dead, see whether reported to masakari
+                        if not event.notification_uuid:
+                            notification_obj = self._report_event_to_masakari(
+                                event)
+                            if notification_obj:
+                                LOG.debug('event %s is reported to masakari : '
+                                          '%s', event_uuid,
+                                          str(notification_obj))
+                                event.notification_uuid = \
+                                    notification_obj['notification'][
+                                        'notification_uuid']
+                                state = self._tracking_masakari_notification(
+                                    event)
+                                LOG.debug('event %s is updated with '
+                                          'notification state %s', event_uuid,
+                                          state)
+                        else:
+                            state = self._tracking_masakari_notification(event)
+                            LOG.debug('event %s is updated with '
+                                      'notification state %s', event_uuid,
+                                      state)
+                elif event_type == constants.EVENT_HOST_UP:
+                    if is_active:
+                        db_api.update_processing_event_with_notification(
+                            event_uuid, None, None, constants.STATE_FINISHED)
+                        LOG.info('event %s is marked as %s',
+                                 event_uuid, constants.STATE_FINISHED)
+                    else:
+                        # when there is host-up, but actual nova status is down
+                        # there should be a host-down event soon, sine the
+                        # pf9-slave has a grace period of time to report events
+                        # so here just wait the new host-down event, or just
+                        # wait until this event become stale
+                        LOG.warn('event %s is host-up event at %s but host '
+                                 'is not active in nova now %s', event_uuid,
+                                 event_time, datetime.utcnow())
+                LOG.debug('end of handling event %s', str(event))
+        finally:
+            # release thread lock
+            with self.events_processing_lock:
+                self.events_processing_running = False
+
+    def _report_event_to_masakari(self, event):
+        if not event:
+            return
+        try:
+            data = {
+                "event": 'STOPPED',
+                "host_status": 'NORMAL',
+                "cluster_status": 'OFFLINE'
+            }
+            notification_obj = \
+                masakari.create_notification(self._token,
+                                             'COMPUTE_HOST',
+                                             event.host_name,
+                                             str(event.event_time),
+                                             data)
+            if notification_obj and notification_obj.get('notification',
+                                                         None):
+                return notification_obj
+        except Exception:
+            LOG.error('failed to create masakari notification, error',
+                      exc_info=True)
+        return None
+
+    def _tracking_masakari_notification(self, event):
+        if not event:
+            return None
+        notification_uuid = event.notification_uuid
+        state = masakari.get_notification_status(self._token, notification_uuid)
+        LOG.debug('masakari notification %s status : %s',
+                  str(notification_uuid), str(state))
+        # save the state to event
+        db_api.update_processing_event_with_notification(event.event_uuid,
+                                                         event.notification_uuid,
+                                                         event.notification_created,
+                                                         state)
+        return state
 
     def check_host_aggregate_changes(self):
         with self.aggregate_task_lock:
@@ -196,7 +402,7 @@ class NovaProvider(Provider):
                 LOG.warn('Disabling HA since number of aggregate %s hosts is '
                          'insufficient', aggregate_id)
             except ha_exceptions.SegmentNotFound:
-                LOG.warn('Failover segment for cluster: %s was not found',
+                LOG.warn('Masakari segment for cluster: %s was not found',
                          cluster.name)
             except ha_exceptions.HostPartOfCluster:
                 LOG.error("Not enabling cluster as cluster hosts are part of"
@@ -618,7 +824,7 @@ class NovaProvider(Provider):
                     aggregate = self._get_aggregate(client, aggregate_id)
                     hosts = set(aggregate.hosts)
             except ha_exceptions.SegmentNotFound:
-                LOG.warn('Failover segment for cluster: %s was not found, '
+                LOG.warn('Masakari segment for cluster: %s was not found, '
                          'skipping deauth', cluster.name)
 
             if hosts:
@@ -700,110 +906,20 @@ class NovaProvider(Provider):
 
     def host_down(self, event_details):
         host = event_details['hostname']
-        event_time = event_details['time']
-        event = 'STOPPED'
-        host_status = 'NORMAL'
-        cluster_status = 'OFFLINE'
-        notification_type = 'COMPUTE_HOST'
-        payload = {
-            "event": event,
-            "host_status": host_status,
-            "cluster_status": cluster_status
-        }
-
-        # re-design needed :
-        # TODO : https://platform9.atlassian.net/browse/IAAS-9015
-        notification_created = False
-        notification_finished = False
         try:
             # report host down event
-            self._report_event(event_details)
-
-            cluster = self._get_cluster_for_host(host)
-            db_api.update_cluster_task_state(cluster.id, states.TASK_MIGRATING)
-            cluster = db_api.get_cluster(cluster.id)
-            self._token = utils.get_token(self._tenant, self._username,
-                                          self._passwd, self._token)
-            notification_obj = None
-            try:
-                reportedby = event_details.get('reportedby', '')
-                LOG.debug('event reported by %s for host %s : %s',
-                          str(reportedby), str(host), event)
-
-                notification_obj = masakari.create_notification(self._token,
-                                                                notification_type,
-                                                                host,
-                                                                event_time,
-                                                                payload)
-                if notification_obj and notification_obj.get('notification',
-                                                             None):
-                    notification_created = True
-            except Exception:
-                LOG.error('failed to create masakari notification, error',
-                          exc_info=True)
-                return False
-
-            if not notification_created:
-                LOG.error('failed to create masakari notifiction : %s',
-                          str(notification_obj))
-                return False
-
-            LOG.debug('masakari notification is created : %s',
-                      str(notification_obj))
-            uid = notification_obj['notification']['notification_uuid']
-            state = notification_obj['notification']['status']
-            LOG.debug('masakari notification uid %s , status : %s',
-                      str(uid), str(state))
-
-            time_out = timedelta(
-                minutes=self._notification_waiting_timeout_minutes)
-            time_start = datetime.utcnow()
-            time_end = datetime.utcnow()
-
-            def _report_progress():
-                notification_finished = False
-                while not notification_finished:
-                    state = masakari.get_notification_status(self._token, uid)
-                    LOG.debug('masakari notification %s status : %s',
-                              str(uid), str(state))
-                    if state == "finished":
-                        notification_finished = True
-                    time.sleep(5)
-                    time_end = datetime.utcnow()
-                    if time_end - time_start > time_out:
-                        LOG.warn(
-                            'masakari notifiction %s timed out after %s '
-                            'minutes',
-                            str(uid), str(time_out))
-                        break
-                if notification_finished:
-                    LOG.debug('masakari notification %s has finished. ' \
-                              'started : %s,  completed : %s',
-                              str(uid), str(time_start), str(time_end))
-
-            periodic_task.add_task(_report_progress, 0, run_now=True,
-                                   run_once=True)
-
-            retval = True
+            retval = self._report_event(constants.EVENT_HOST_DOWN,
+                                        event_details)
         except Exception:
             LOG.exception('Error processing %s host down', host)
             retval = False
-        finally:
-            if notification_created:
-                # when notification was created, still think the operation was
-                # succeeded, so restore the cluster status, and return True
-                # to to ha-slave to stop it from sending the same event again
-                db_api.update_cluster_task_state(cluster.id,
-                                                 states.TASK_COMPLETED)
-                retval = True
-
         return retval
 
     def host_up(self, event_details):
         host = event_details['hostname']
         try:
             # also report host up event
-            self._report_event(event_details)
+            self._report_event(constants.EVENT_HOST_UP, event_details)
 
             if self._is_nova_service_active(host):
                 # When the cluster was reconfigured for host down event this
@@ -818,43 +934,91 @@ class NovaProvider(Provider):
             return False
         return True
 
-    def _report_event(self, event_details):
-        if event_details is None:
-            return
-        if 'host_id' in event_details and 'consul' in event_details:
-            host_id = event_details['host_id']
-            consul_event = event_details['consul']
-            self._on_change_event(host_id, consul_event)
+    def _report_event(self, event_type, event_details):
+        if not event_type or not event_details or 'host_id' not in \
+                event_details:
+            return False
 
-    def _on_change_event(self, host_id, events):
+        host_name = event_details['host_id']
+
         try:
-            LOG.debug('prepare to write change event, host %s, events %s',
-                host_id, events)
+            LOG.debug('prepare to write event, host %s, event %s , '
+                      'details %s',
+                      host_name, event_type, event_details)
             # find the cluster id from given host id
             clusters = db_api.get_all_active_clusters()
             LOG.debug('all active clusters : %s', str(clusters))
             if clusters is None:
-                LOG.warn(
-                    'unable to get active clusters to write change events : %s',
-                    str(events))
-                return
+                LOG.warn('unable to get active clusters to write event : %s',
+                         str(event_details))
+                return False
             client = self._get_client()
             target_cluster = None
             for cluster in clusters:
                 aggregate_id = cluster.name
                 aggregate = self._get_aggregate(client, aggregate_id)
                 hosts = set(aggregate.hosts)
-                if str(host_id) in hosts:
+                if str(host_name) in hosts:
                     target_cluster = cluster.id
                     break
+            if not target_cluster:
+                LOG.debug('unable to find cluster for host %s to write event',
+                          host_name)
+                return False
+
+            # suppress same events if it has been reported before within
+            # given threshold seconds
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(
+                seconds=self._event_report_threshold_seconds)
+            existing_changes = db_api.get_change_events_between_times(
+                target_cluster,
+                host_name,
+                event_type,
+                start_time,
+                end_time)
+            if existing_changes and len(existing_changes) > 0:
+                LOG.warn('ignore current event, as same change event has been '
+                         'reported '
+                         'within % '
+                         'seconds', self._event_report_threshold_seconds)
+                return
+
             # write change event into db
-            if target_cluster is not None:
-                db_api.create_change_event(target_cluster, events)
-                LOG.debug('change event is created for host %s in cluster %s',
-                    host_id, target_cluster)
-                return True
+            change_record = db_api.create_change_event(target_cluster,
+                                                       event_details)
+            LOG.debug('change event record is created for host %s in cluster '
+                      '%s', host_name, target_cluster)
+
+            # similarly, suppress events that has been recorded within given
+            # threshold seconds to avoid flooding
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(
+                seconds=self._event_report_threshold_seconds)
+            existing_events = db_api.get_processing_events_between_times(
+                event_type,
+                host_name,
+                target_cluster,
+                start_time,
+                end_time)
+            if existing_events and len(existing_events) > 0:
+                LOG.warn('ignore current event, as same processing event has '
+                         'been reported within % seconds',
+                         self._event_report_threshold_seconds)
+                return
+
+            # write events processing record
+            event_uuid = change_record.uuid
+            processing_record = db_api.create_processing_event(event_uuid,
+                                                               event_type,
+                                                               host_name,
+                                                               target_cluster)
+            LOG.debug('event processing record is created for host %s on '
+                      'event %s in cluster %s', host_name, event_type,
+                      target_cluster)
+            return True
         except Exception as e:
-            LOG.debug('failed to record change event : %s', str(e))
+            LOG.debug('failed to record event : %s', str(e))
         return False
 
 

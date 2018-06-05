@@ -27,6 +27,7 @@ from hamgr import ha_provider
 
 eventlet.monkey_patch()
 
+LOG = logging.getLogger(__name__)
 
 def _get_arg_parser():
     parser = argparse.ArgumentParser(
@@ -55,12 +56,19 @@ def start_server(conf, paste_ini):
         paste_file = paste_ini
     else:
         paste_file = conf.get("DEFAULT", "paste-ini")
+    LOG.debug('start periodic task')
     periodic_task.start()
+    LOG.debug('get ha provider')
+    provider = ha_provider.ha_provider()
+    LOG.debug('add task check_host_aggregate_changes')
+    periodic_task.add_task(provider.check_host_aggregate_changes, 120, run_now=True)
+    # dedicated task to handle host events
+    LOG.debug('add task host_events_processing')
+    periodic_task.add_task(provider.host_events_processing, 120, run_now=True)
+    LOG.debug('start wsgi server')
     wsgi_app = loadapp('config:%s' % paste_file, 'main')
     wsgi.server(eventlet.listen(('', conf.getint("DEFAULT", "listen_port"))),
                 wsgi_app)
-    provider = ha_provider.ha_provider()
-    periodic_task.add_task(provider.check_host_aggregate_changes, 120, run_now=True)
 
 
 if __name__ == '__main__':
