@@ -259,7 +259,7 @@ def get_change_events_between_times(cluster_id,
             query = query.filter(ChangeEvents.cluster == cluster_id)
             query = query.filter(
                 ChangeEvents.events.contains(host_name),
-                ChangeEvents.events.constants(etype))
+                ChangeEvents.events.contains(etype))
             query = query.filter(
                 ChangeEvents.timestamp - start_time >= 0,
                 ChangeEvents.timestamp - end_time <= 0
