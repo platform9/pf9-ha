@@ -86,7 +86,10 @@ class MasakariTest(unittest.TestCase):
         mock_resp.status_code = 202
         mock_resp.raise_for_status = lambda *args: None
         mock_post.return_value = mock_resp
-        masakari.create_notification(mock_token, "host-down", "fake-host-id", str(datetime.datetime.now().isoformat()),
+        masakari.create_notification(mock_token, "host-down", "fake-host-id",
+                                     str(datetime.datetime.utcnow(
+
+                                     ).isoformat()),
                                      {})
 
     @mock.patch("requests.get")

@@ -44,11 +44,11 @@ class PeriodicTask(object):
         while True:
             for task in self.task_list:
                 if task.last_called is None or \
-                        datetime.now() - task.last_called >= task.interval:
+                        datetime.utcnow() - task.last_called >= task.interval:
                     LOG.debug('Running task: %(task)s',
                               {'task': task.func.__name__})
                     eventlet.greenthread.spawn_n(task.func)
-                    task.last_called = datetime.now()
+                    task.last_called = datetime.utcnow()
             eventlet.greenthread.sleep(10)
 
 
@@ -67,7 +67,7 @@ def add_task(function, interval, run_now=False, run_once=False):
             ptask.task_list.append(task)
         if run_now:
             eventlet.greenthread.spawn_n(function)
-            task.last_called = datetime.now()
+            task.last_called = datetime.utcnow()
 
 
 def start():

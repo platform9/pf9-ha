@@ -8,7 +8,6 @@ from datetime import datetime
 from subprocess import call
 from time import daylight
 from time import sleep
-from time import tzname
 
 from ha.utils import consul_helper
 from ha.utils import log as logging
@@ -48,8 +47,8 @@ PF9_CONSUL_CONF_DIR = '/opt/pf9/etc/pf9-consul/'
 def expand_stats(cluster_stat):
     cluster_stat['type'] = 'rscGroup'
     cluster_stat['regionID'] = ""
-    cluster_stat['time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    cluster_stat['tzname'] = tzname[0]
+    cluster_stat['time'] = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    cluster_stat['tzname'] = 'UTC'
     cluster_stat['daylight'] = daylight
 
 

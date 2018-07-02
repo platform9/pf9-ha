@@ -536,7 +536,7 @@ class NovaProvider(Provider):
         headers = {'X-Auth-Token': token['id'],
                    'Content-Type': 'application/json'}
         for node in nodes:
-            start_time = datetime.now()
+            start_time = datetime.utcnow()
             LOG.info('Authorizing pf9-ha-slave role on node %s using IP %s',
                      node, ip_lookup[node])
             data = dict(join=ip, ip_address=ip_lookup[node],
@@ -555,7 +555,7 @@ class NovaProvider(Provider):
                 time.sleep(5)
                 resp = requests.put(auth_url, headers=headers,
                                     json=data, verify=False)
-                if datetime.now() - start_time > timedelta(minutes=2):
+                if datetime.utcnow() - start_time > timedelta(minutes=2):
                     break
             resp.raise_for_status()
 
@@ -733,7 +733,7 @@ class NovaProvider(Provider):
         url = 'http://localhost:8080/resmgr/v1/hosts/'
         json_resp = []
         for node in nodes:
-            start_time = datetime.now()
+            start_time = datetime.utcnow()
             auth_url = '/'.join([url, node])
             resp = requests.get(auth_url, headers=headers)
             resp.raise_for_status()
@@ -741,10 +741,10 @@ class NovaProvider(Provider):
                 time.sleep(30)
                 resp = requests.get(auth_url, headers=headers)
                 resp.raise_for_status()
-                if datetime.now() - start_time > timedelta(minutes=15):
+                if datetime.utcnow() - start_time > timedelta(minutes=15):
                     LOG.debug(
                         "host %s is not converged, starting from %s to %s ",
-                        str(node), str(start_time), str(datetime.now()))
+                        str(node), str(start_time), str(datetime.utcnow()))
                     raise ha_exceptions.RoleConvergeFailed(node)
             json_resp.append(resp.json())
         return json_resp
@@ -758,7 +758,7 @@ class NovaProvider(Provider):
 
         for node in nodes:
             LOG.info('De-authorizing pf9-ha-slave role on node %s', node)
-            start_time = datetime.now()
+            start_time = datetime.utcnow()
             auth_url = '/'.join([url, node, 'roles', 'pf9-ha-slave'])
             resp = requests.delete(auth_url, headers=headers)
             # Retry deauth if resmgr throws conflict error for upto 2 minutes
@@ -767,7 +767,7 @@ class NovaProvider(Provider):
                          'after 5 sec', node)
                 time.sleep(5)
                 resp = requests.delete(auth_url, headers=headers)
-                if datetime.now() - start_time > timedelta(minutes=2):
+                if datetime.utcnow() - start_time > timedelta(minutes=2):
                     break
             resp.raise_for_status()
 

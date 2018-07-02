@@ -185,7 +185,7 @@ class consul_status(object):
         except Exception as e:
             LOG.warn('failed to publish host id %s, error : %s', key, str(e))
 
-    def _get_cluster_status(self, current_time=datetime.now()):
+    def _get_cluster_status(self, current_time=datetime.utcnow()):
         cluster_report = {}
         for member in self.cc.agent.members():
             LOG.debug('member addr %s status %s', str(member.get('Addr')),
@@ -246,7 +246,7 @@ class consul_status(object):
         retval = None
         reported_cls = None
         for cluster in self.changed_clusters:
-            if datetime.now() - cluster.change_time > report_interval:
+            if datetime.utcnow() - cluster.change_time > report_interval:
                 current_state = self._get_cluster_status()
                 addr = cluster.change_info['cluster_port'].split(':')[0]
                 if addr in current_state and current_state[addr]['eventType'] \
@@ -268,7 +268,7 @@ class consul_status(object):
             else:
                 LOG.info('change has not exceed report grace period. '\
                           'now : %s , last change : %s, grace period : %s',
-                        str(datetime.now()), str(cluster.change_time),
+                        str(datetime.utcnow()), str(cluster.change_time),
                         str(report_interval))
         if reported_cls:
             ignore, data = self.cc.kv.get(retval['hostname'])
@@ -312,7 +312,7 @@ class consul_status(object):
         # refresh cache on leader role
         self.refresh_cache_from_consul()
 
-        current_time = datetime.now()
+        current_time = datetime.utcnow()
         report_change = self._should_report_change()
         if not report_change:
             return None
@@ -397,7 +397,7 @@ class consul_status(object):
             # if last record eventType is different than current
             # no matter what change it is, record it in cache if not already
             if self.last_status[addr].get('eventType') != data['eventType']:
-                cls_obj = cluster(datetime.now(), data)
+                cls_obj = cluster(datetime.utcnow(), data)
                 if cls_obj not in self.changed_clusters:
                     self.changed_clusters.append(cls_obj)
                     LOG.debug("found status of node %s changed from %s to %s",
@@ -406,7 +406,7 @@ class consul_status(object):
                               str(data['eventType']))
             if data['eventType'] == 2:
                 # Failed node
-                cls_obj = cluster(datetime.now(), data)
+                cls_obj = cluster(datetime.utcnow(), data)
                 if cls_obj not in self.changed_clusters:
                     # check whether this down node has been reported before
                     reported_before = False
@@ -461,7 +461,7 @@ class consul_status(object):
     def report_node_down_to_kv(self, hostid, node_info, report_time=None,
                                report_id=None):
         data = {
-            'notice_time': datetime.strftime(datetime.now(),
+            'notice_time': datetime.strftime(datetime.utcnow(),
                                              '%Y-%m-%d %H:%M:%S'),
             'report_time': report_time,
             'id': report_id,
@@ -488,7 +488,7 @@ class consul_status(object):
         return None
 
     def update_reported_status(self, cluster_status):
-        temp_cls = cluster(datetime.now(), cluster_status)
+        temp_cls = cluster(datetime.utcnow(), cluster_status)
         # after change is report to hamgr, remove it from cache
         # the report in kv store is cleaned when refresh cache
         self.changed_clusters.remove(temp_cls)
@@ -497,7 +497,7 @@ class consul_status(object):
             LOG.warn('status report for host %s does not exist in kv store',
                      str(cluster_status['hostname']))
             return
-        old_status['report_time'] = datetime.strftime(datetime.now(),
+        old_status['report_time'] = datetime.strftime(datetime.utcnow(),
                                                       '%Y-%m-%d %H:%M:%S')
         old_status['id'] = cluster_status['id']
 
@@ -526,7 +526,7 @@ class consul_status(object):
                     continue
                 report_time = datetime.strptime(report_time_str,
                                                 "%Y-%m-%d %H:%M:%S")
-                if datetime.now() - report_time > self.reap_interval:
+                if datetime.utcnow() - report_time > self.reap_interval:
                     self.cc.kv.delete(key)
             elif valid_cluster_port(key):
                 # Dealing with "<ip>:<port>" = <host_id>
