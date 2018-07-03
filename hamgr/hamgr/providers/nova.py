@@ -641,6 +641,12 @@ class NovaProvider(Provider):
         self._auth(ip_lookup, cluster_ip_lookup, self._token, agents, 'agent',
                    ip=leader_ip)
 
+    def __perf_meter(self, method, time_start):
+        time_end = datetime.utcnow()
+        LOG.debug('[metric] "%s" call : %s (start : %s , '
+                  'end : %s)', str(method), str(time_end - time_start),
+                  str(time_start), str(time_end))
+
     def _enable(self, aggregate_id, hosts=None,
                 next_state=states.TASK_COMPLETED):
         """Enable HA
@@ -655,10 +661,13 @@ class NovaProvider(Provider):
                             migrating i.e. enable operation is being performed
                             as part of a cluster migration operation.
         """
+        time_begin = datetime.utcnow()
         client = self._get_client()
+        self.__perf_meter('_get_client',  time_begin)
         str_aggregate_id = str(aggregate_id)
         cluster = None
         cluster_id = None
+        time_begin = datetime.utcnow()
         try:
             cluster = db_api.get_cluster(str_aggregate_id)
             cluster_id = cluster.id
@@ -678,35 +687,45 @@ class NovaProvider(Provider):
                              str_aggregate_id, cluster.task_state)
                     raise ha_exceptions.ClusterBusy(str_aggregate_id,
                                                     cluster.task_state)
-
+        self.__perf_meter('db_api.get_cluster', time_begin)
+        time_begin = datetime.utcnow()
         aggregate = self._get_aggregate(client, aggregate_id)
+        self.__perf_meter('_get_aggregate', time_begin)
         if not hosts:
             hosts = aggregate.hosts
         else:
             LOG.info('Enabling HA on some of the hosts %s of the %s aggregate',
                      str(hosts), aggregate_id)
+        time_begin = datetime.utcnow()
         current_roles = self._validate_hosts(hosts)
-
+        self.__perf_meter('_validate_hosts', time_begin)
+        time_begin = datetime.utcnow()
         self._token = utils.get_token(self._tenant, self._username,
                                       self._passwd, self._token)
-
+        self.__perf_meter('utils.get_token', time_begin)
         try:
+            time_begin = datetime.utcnow()
             # 1. Push roles
             self._assign_roles(client, hosts, current_roles)
-
+            self.__perf_meter('_assign_roles', time_begin)
+            time_begin = datetime.utcnow()
             # 2. Create cluster
             cluster = db_api.create_cluster_if_needed(str_aggregate_id,
                                                       states.TASK_CREATING)
             cluster_id = cluster.id
             LOG.info('Creating cluster with id %d', cluster_id)
-
+            self.__perf_meter('db_api.create_cluster_if_needed', time_begin)
+            time_begin = datetime.utcnow()
             # 3. Create fail-over segment
             masakari.create_failover_segment(self._token, str_aggregate_id,
                                              hosts)
-
+            self.__perf_meter('masakari.create_failover_segment', time_begin)
             LOG.info('Enabling cluster %d', cluster_id)
+            time_begin = datetime.utcnow()
             db_api.update_cluster(cluster_id, True)
+            self.__perf_meter('db_api.update_cluster', time_begin)
         except Exception as e:
+            time_begin = datetime.utcnow()
             LOG.error('Cannot enable HA on %s: %s, performing cleanup by '
                       'disabling', str_aggregate_id, e)
 
@@ -714,6 +733,7 @@ class NovaProvider(Provider):
                 db_api.update_cluster_task_state(cluster_id,
                                                  states.TASK_COMPLETED)
             self._disable(aggregate_id)
+            self.__perf_meter('exception handling', time_begin)
 
             if cluster_id is not None:
                 try:
@@ -723,7 +743,9 @@ class NovaProvider(Provider):
             raise
         else:
             if cluster_id is not None:
+                time_begin = datetime.utcnow()
                 db_api.update_cluster_task_state(cluster_id, next_state)
+                self.__perf_meter('db_api.update_cluster_task_state', time_begin)
 
     def _wait_for_role_to_ok(self, nodes):
         self._token = utils.get_token(self._tenant, self._username,

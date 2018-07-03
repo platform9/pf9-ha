@@ -68,7 +68,7 @@ def start_server(conf, paste_ini):
     LOG.debug('start wsgi server')
     wsgi_app = loadapp('config:%s' % paste_file, 'main')
     wsgi.server(eventlet.listen(('', conf.getint("DEFAULT", "listen_port"))),
-                wsgi_app)
+                wsgi_app, LOG)
 
 
 if __name__ == '__main__':
