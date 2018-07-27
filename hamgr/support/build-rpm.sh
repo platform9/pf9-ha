@@ -2,7 +2,7 @@
 
 set -e
 
-export PBR_VERSION=1.8.1
+export PBR_VERSION=3.1.1
 
 proj=hamgr
 githash=`git rev-parse --short HEAD`

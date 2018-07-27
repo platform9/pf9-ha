@@ -7,4 +7,4 @@ try:
 except ImportError:
     pass
 
-setup(setup_requires=['pbr==1.8.1'], pbr=True)
+setup(setup_requires=['pbr==3.1.1'], pbr=True)
