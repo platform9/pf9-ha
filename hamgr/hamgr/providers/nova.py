@@ -583,15 +583,10 @@ class NovaProvider(Provider):
             raise ha_exceptions.ClusterIpNotFound(host_id)
         return str(json_resp['cluster_ip'])
 
-    def _get_consul_ip(self, json_resp):
+    def _get_consul_ip(self, host_id, json_resp):
         if 'consul_ip' in json_resp and json_resp['consul_ip']:
             return str(json_resp['consul_ip'])
-        if ('novncproxy_base_url' in json_resp and
-                json_resp['novncproxy_base_url']):
-            vnc_url = json_resp['novncproxy_base_url']
-            LOG.info('vnc url %s', vnc_url)
-            return urlparse(vnc_url).hostname
-        return None
+        return self._get_cluster_ip(host_id, json_resp)
 
     def _get_ips(self, client, nodes, current_roles):
         all_hypervisors = client.hypervisors.list()
@@ -602,11 +597,11 @@ class NovaProvider(Provider):
             host_id = hyp.service['host']
             if host_id in lookup:
                 ip_lookup[host_id] = hyp.host_ip
-                # Overwrite host_ip value with consul_ip or novncproxy_base_url
-                # IP from ostackhost role
+                # Overwrite host_ip value with consul_ip or cluster_ip
+                # from ostackhost role
                 json_resp = self._fetch_role_details_for_host(
                     host_id, current_roles[host_id])
-                consul_ip = self._get_consul_ip(json_resp)
+                consul_ip = self._get_consul_ip(host_id, json_resp)
                 if consul_ip:
                     LOG.debug('Using consul ip %s from ostackhost role',
                               consul_ip)
