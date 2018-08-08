@@ -24,6 +24,7 @@ from eventlet import wsgi
 from hamgr import periodic_task
 from paste.deploy import loadapp
 from hamgr import ha_provider
+from hamgr import notification
 
 eventlet.monkey_patch()
 
@@ -56,19 +57,30 @@ def start_server(conf, paste_ini):
         paste_file = paste_ini
     else:
         paste_file = conf.get("DEFAULT", "paste-ini")
-    LOG.debug('start periodic task')
-    periodic_task.start()
-    LOG.debug('get ha provider')
-    provider = ha_provider.ha_provider()
-    LOG.debug('add task check_host_aggregate_changes')
-    periodic_task.add_task(provider.check_host_aggregate_changes, 120, run_now=True)
-    # dedicated task to handle host events
-    LOG.debug('add task host_events_processing')
-    periodic_task.add_task(provider.host_events_processing, 120, run_now=True)
-    LOG.debug('start wsgi server')
-    wsgi_app = loadapp('config:%s' % paste_file, 'main')
-    wsgi.server(eventlet.listen(('', conf.getint("DEFAULT", "listen_port"))),
-                wsgi_app, LOG)
+    try:
+        LOG.debug('start notification publisher')
+        notification.start(conf)
+        LOG.debug('start periodic task')
+        periodic_task.start()
+        LOG.debug('get ha provider')
+        provider = ha_provider.ha_provider()
+        LOG.debug('add task check_host_aggregate_changes')
+        periodic_task.add_task(provider.check_host_aggregate_changes, 120, run_now=True)
+        # dedicated task to handle host events
+        LOG.debug('add task host_events_processing')
+        periodic_task.add_task(provider.host_events_processing, 120, run_now=True)
+        LOG.debug('start wsgi server')
+        # background thread for handling HA enable/disable request
+        periodic_task.add_task(provider.ha_enable_disable_request_processing, 5,
+                               run_now=True)
+        wsgi_app = loadapp('config:%s' % paste_file, 'main')
+        wsgi.server(eventlet.listen(('', conf.getint("DEFAULT", "listen_port"))),
+                    wsgi_app, LOG)
+    finally:
+        # the wsgi.server is blocking call, if comes here mean it failed
+        # so we can clean up here
+        LOG.debug('stop notification publisher')
+        notification.stop()
 
 
 if __name__ == '__main__':

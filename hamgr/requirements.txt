@@ -13,3 +13,4 @@ eventlet==0.18.4
 sqlalchemy-migrate==0.9.5
 mysql-python
 enum34
+pika==0.12.0

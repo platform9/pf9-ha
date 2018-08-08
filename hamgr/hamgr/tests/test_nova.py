@@ -21,7 +21,7 @@ from hamgr.providers.nova import get_provider
 from hamgr import states
 
 import mock
-
+from hamgr.notification import publish
 
 class FakeNovaClient(object):
     class Hypervisors(object):
@@ -108,6 +108,10 @@ class NovaProviderTest(unittest.TestCase):
         mock_token.return_value = dict(id='1234sbds')
         self._provider.put(aggregate_id, 'enable')
 
+    def _repeat_it(self):
+        self._provider.put("fake1", "enable")
+        self._provider.ha_enable_disable_request_processing();
+
     @mock.patch('hamgr.common.utils.get_token')
     @mock.patch('requests.post')
     @mock.patch('requests.get')
@@ -116,6 +120,19 @@ class NovaProviderTest(unittest.TestCase):
     def test_enable(self, mock_del, mock_put, mock_get, mock_post, mock_token):
         self._enable_aggregate(mock_del, mock_put, mock_get, mock_post,
                                mock_token, aggregate_id='fake')
+        # before request is processed
+        aggregates = self._provider.get('fake')
+        self.assertIsNotNone(aggregates, 'no aggregates found')
+        self.assertTrue(len(aggregates) == 1, 'at least there is one aggregate')
+        aggregate = aggregates[0]
+        self.assertTrue(aggregate['enabled']== False)
+        # after request is processed
+        self._provider.ha_enable_disable_request_processing()
+        aggregates = self._provider.get('fake')
+        self.assertIsNotNone(aggregates)
+        aggregate = aggregates[0]
+        self.assertTrue(aggregate['enabled'] == True)
+
 
     @mock.patch('hamgr.common.utils.get_token')
     @mock.patch('requests.post')
@@ -130,9 +147,9 @@ class NovaProviderTest(unittest.TestCase):
         mock_resp.json = lambda *args: dict(role_status='ok')
         self._enable_aggregate(mock_del, mock_put, mock_get, mock_post,
                                mock_token, aggregate_id="fake")
+        self._provider.ha_enable_disable_request_processing();
         # Create 2nd aggregate with hosts from first cluster
-        self.assertRaises(exceptions.HostPartOfCluster,
-                          self._provider.put, "fake1", "enable")
+        self.assertRaises(exceptions.HostPartOfCluster, self._repeat_it)
 
     @mock.patch('hamgr.common.utils.get_token')
     @mock.patch('requests.get')

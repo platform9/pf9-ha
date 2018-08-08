@@ -35,6 +35,8 @@ from hamgr import states
 from hamgr import constants
 from novaclient import client
 from novaclient import exceptions
+from hamgr.notification import publish
+from hamgr.notification import notification as ha_notification
 
 LOG = logging.getLogger(__name__)
 eventlet.monkey_patch()
@@ -91,6 +93,9 @@ class NovaProvider(Provider):
         # thread lock
         self.events_processing_lock = threading.Lock()
         self.events_processing_running = False
+        # ha status thread lock
+        self.ha_status_processing_lock = threading.Lock()
+        self.ha_status_processing_running = False
 
     def _toggle_host_maintenance_state(self, host_id, aggregate_id,
                                        on_maintenance):
@@ -657,13 +662,9 @@ class NovaProvider(Provider):
                             migrating i.e. enable operation is being performed
                             as part of a cluster migration operation.
         """
-        time_begin = datetime.utcnow()
         client = self._get_client()
-        self.__perf_meter('_get_client',  time_begin)
         str_aggregate_id = str(aggregate_id)
-        cluster = None
         cluster_id = None
-        time_begin = datetime.utcnow()
         try:
             cluster = db_api.get_cluster(str_aggregate_id)
             cluster_id = cluster.id
@@ -683,15 +684,42 @@ class NovaProvider(Provider):
                              str_aggregate_id, cluster.task_state)
                     raise ha_exceptions.ClusterBusy(str_aggregate_id,
                                                     cluster.task_state)
-        self.__perf_meter('db_api.get_cluster', time_begin)
-        time_begin = datetime.utcnow()
+
+        # make sure no host exists in multiple host aggregation
         aggregate = self._get_aggregate(client, aggregate_id)
+        if not hosts:
+            hosts = aggregate.hosts
+        self._validate_hosts(hosts)
+
+        try:
+            cluster = db_api.create_cluster_if_needed(str_aggregate_id,
+                                                      states.TASK_CREATING)
+            # set the status to 'request-enable'
+            db_api.update_request_status(cluster.id, constants.HA_STATE_REQUEST_ENABLE)
+            # publish status
+            self._notify_status(constants.HA_STATE_REQUEST_ENABLE, "cluster", cluster.id)
+        except Exception as e:
+            print str(e)
+            db_api.update_cluster_task_state(cluster_id, next_state)
+            LOG.error('unhandled exception : %s' , str(e))
+
+
+    def _handle_enable_request(self, request, hosts=None, next_state=states.TASK_COMPLETED):
+        if not request:
+            return
+        client = self._get_client()
+        str_aggregate_id = request.name
+        cluster_id = request.id
+        time_begin = datetime.utcnow()
+        self.__perf_meter('db_api.get_cluster', time_begin),
+        time_begin = datetime.utcnow()
+        aggregate = self._get_aggregate(client, str_aggregate_id)
         self.__perf_meter('_get_aggregate', time_begin)
         if not hosts:
             hosts = aggregate.hosts
         else:
             LOG.info('Enabling HA on some of the hosts %s of the %s aggregate',
-                     str(hosts), aggregate_id)
+                     str(hosts), str_aggregate_id)
         time_begin = datetime.utcnow()
         current_roles = self._validate_hosts(hosts)
         self.__perf_meter('_validate_hosts', time_begin)
@@ -700,37 +728,56 @@ class NovaProvider(Provider):
                                       self._passwd, self._token)
         self.__perf_meter('utils.get_token', time_begin)
         try:
+            # 1. mark request as 'enabling' in status
+            LOG.info('updating status of cluster %d to %s', cluster_id, constants.HA_STATE_ENABLING)
             time_begin = datetime.utcnow()
-            # 1. Push roles
+            db_api.update_request_status(cluster_id, constants.HA_STATE_ENABLING)
+            self._notify_status(constants.HA_STATE_ENABLING, "cluster", cluster_id)
+            self.__perf_meter('db_api.update_enable_or_disable_request_status', time_begin)
+
+            # 2. Push roles
+            time_begin = datetime.utcnow()
             self._assign_roles(client, hosts, current_roles)
             self.__perf_meter('_assign_roles', time_begin)
+
+            # 3. Create masakari fail-over segment
             time_begin = datetime.utcnow()
-            # 2. Create cluster
-            cluster = db_api.create_cluster_if_needed(str_aggregate_id,
-                                                      states.TASK_CREATING)
-            cluster_id = cluster.id
-            LOG.info('Creating cluster with id %d', cluster_id)
-            self.__perf_meter('db_api.create_cluster_if_needed', time_begin)
-            time_begin = datetime.utcnow()
-            # 3. Create fail-over segment
-            masakari.create_failover_segment(self._token, str_aggregate_id,
+            masakari.create_failover_segment(self._token, str(cluster_id),
                                              hosts)
             self.__perf_meter('masakari.create_failover_segment', time_begin)
-            LOG.info('Enabling cluster %d', cluster_id)
+
+            # 4. mark request as 'enabled' in status
+            LOG.info('updating status of cluster %d to %s', cluster_id,
+                     constants.HA_STATE_ENABLED)
+            time_begin = datetime.utcnow()
+            db_api.update_request_status(cluster_id,
+                                         constants.HA_STATE_ENABLED)
+            self._notify_status(constants.HA_STATE_ENABLED, "cluster", cluster_id)
+            self.__perf_meter('db_api.update_enable_or_disable_request_status', time_begin)
+
+            # 5. finally mark the cluster as enabled
+            LOG.debug('update flag enabled to : %s', str(True))
             time_begin = datetime.utcnow()
             db_api.update_cluster(cluster_id, True)
             self.__perf_meter('db_api.update_cluster', time_begin)
         except Exception as e:
             time_begin = datetime.utcnow()
-            LOG.error('Cannot enable HA on %s: %s, performing cleanup by '
-                      'disabling', str_aggregate_id, e)
+            LOG.exception('Cannot enable HA on %s: %s, performing cleanup by '
+                      'disabling', cluster_id, e)
 
             if cluster_id is not None:
+                # mark the request status to 'error'
+                db_api.update_request_status(cluster_id,
+                                             constants.HA_STATE_ERROR)
+                self._notify_status(constants.HA_STATE_ERROR, "cluster", cluster_id)
+                # mark task as completed
                 db_api.update_cluster_task_state(cluster_id,
                                                  states.TASK_COMPLETED)
-            self._disable(aggregate_id)
-            self.__perf_meter('exception handling', time_begin)
 
+            # rollback above steps
+            self._handle_disable_request(request)
+
+            # if rollbacks succeeded , then flag 'enabled' as false
             if cluster_id is not None:
                 try:
                     db_api.update_cluster(cluster_id, False)
@@ -808,22 +855,55 @@ class NovaProvider(Provider):
         try:
             cluster = db_api.get_cluster(str_aggregate_id)
         except ha_exceptions.ClusterNotFound:
+            LOG.warn('cluster %s can not be found for disable',
+                     str_aggregate_id)
             pass
 
-        if cluster:
-            if cluster.task_state not in [states.TASK_COMPLETED,
-                                          states.TASK_ERROR_REMOVING]:
-                if cluster.task_state == states.TASK_MIGRATING and \
-                        next_state == states.TASK_MIGRATING:
-                    LOG.info('disabling HA as part of cluster migration')
-                else:
-                    LOG.info('Cluster %s is busy in %s state', cluster.name,
-                             cluster.task_state)
-                    raise ha_exceptions.ClusterBusy(cluster.name,
-                                                    cluster.task_state)
+        if not cluster:
+            LOG.warn('no cluster with id %s', str_aggregate_id)
+            return
 
+        if cluster.task_state not in [states.TASK_COMPLETED,
+                                      states.TASK_ERROR_REMOVING]:
+            if cluster.task_state == states.TASK_MIGRATING and \
+                    next_state == states.TASK_MIGRATING:
+                LOG.info('disabling HA as part of cluster migration')
+            else:
+                LOG.info('Cluster %s is busy in %s state', cluster.name,
+                         cluster.task_state)
+                raise ha_exceptions.ClusterBusy(cluster.name,
+                                                cluster.task_state)
+
+        try:
             db_api.update_cluster_task_state(cluster.id, states.TASK_REMOVING)
+            # mark the status as 'request-disable' for processing
+            db_api.update_request_status(cluster.id, constants.HA_STATE_REQUEST_DISABLE)
+            self._notify_status(constants.HA_STATE_REQUEST_DISABLE, "cluster", cluster.id)
+        except Exception as e:
+            LOG.error('unhandled exceptions : %s ', str(e))
 
+    def ha_enable_disable_request_processing(self):
+        with self.ha_status_processing_lock:
+            if self.ha_status_processing_running:
+                LOG.debug('ha status processing task is already running')
+                return
+            self.ha_status_processing_running = True
+
+        try:
+            LOG.debug('ha status thread is checking status')
+            requests = db_api.get_all_unhandled_enable_or_disable_requests()
+            for request in requests:
+                if request.status == constants.HA_STATE_REQUEST_ENABLE:
+                    self._handle_enable_request(request)
+                if request.status == constants.HA_STATE_REQUEST_DISABLE:
+                    self._handle_disable_request(request)
+        finally:
+            with self.ha_status_processing_lock:
+                self.ha_status_processing_running = False
+
+    def _handle_disable_request(self, request, next_state=states.TASK_COMPLETED):
+        cluster = request
+        aggregate_id = request.id
         try:
             self._token = utils.get_token(self._tenant, self._username,
                                           self._passwd, self._token)
@@ -845,13 +925,24 @@ class NovaProvider(Provider):
                 LOG.warn('Masakari segment for cluster: %s was not found, '
                          'skipping deauth', cluster.name)
 
+            # change status from 'request-disable' to 'disabling'
+            db_api.update_request_status(cluster.id
+                                         , constants.HA_STATE_DISABLING)
+            self._notify_status(constants.HA_STATE_DISABLING, "cluster", cluster.id)
             if hosts:
                 self._deauth(hosts)
-                if synchronize:
-                    _ = self._wait_for_role_to_ok(hosts)
-            masakari.delete_failover_segment(self._token, str_aggregate_id)
+                self._wait_for_role_to_ok(hosts)
+            masakari.delete_failover_segment(self._token, str(aggregate_id))
+            # change status from 'disabling' to 'disabled'
+            db_api.update_request_status(cluster.id
+                                         , constants.HA_STATE_DISABLED)
+            self._notify_status(constants.HA_STATE_DISABLED, "cluster", cluster.id)
         except Exception:
             if cluster:
+                # mark the status as 'error'
+                db_api.update_request_status(cluster.id
+                                             , constants.HA_STATE_ERROR)
+                self._notify_status(constants.HA_STATE_ERROR, "cluster", cluster.id)
                 db_api.update_cluster_task_state(cluster.id,
                                                  states.TASK_ERROR_REMOVING)
             raise
@@ -1039,6 +1130,9 @@ class NovaProvider(Provider):
             LOG.debug('failed to record event : %s', str(e))
         return False
 
+    def _notify_status(self, action, target, identifier):
+        obj = ha_notification.Notification(action, target, identifier)
+        publish(obj)
 
 def get_provider(config):
     db_api.init(config)

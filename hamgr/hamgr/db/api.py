@@ -48,7 +48,7 @@ class Cluster(Base):
 
     id = Column(Integer, primary_key=True)
     deleted = Column(Integer, default=None)
-    status = Column(String(36), default=1)
+    status = Column(String(36), default=None)
     enabled = Column(Boolean, default=False)
     updated_at = Column(DateTime, default=None)
     created_at = Column(DateTime, default=None)
@@ -160,6 +160,28 @@ def get_cluster(cluster_name_or_id, read_deleted=False):
             raise exceptions.ClusterNotFound(cluster_name_or_id)
         return clstr
 
+def get_all_unhandled_enable_or_disable_requests():
+    with dbsession() as session:
+        try:
+            query = session.query(Cluster)
+            # unhandled requests should be marked as 'request-enable' or
+            # 'request-disable'
+            query = query.filter(or_(
+                Cluster.status == constants.HA_STATE_REQUEST_ENABLE,
+                Cluster.status == constants.HA_STATE_REQUEST_DISABLE))
+            return query.all()
+        except SQLAlchemyError as se:
+            LOG.error('DB error when query unhandled cluster requests : %s', se)
+
+
+def update_request_status(cluster_id, status):
+    if not cluster_id:
+        raise ArgumentException('cluster_id is null or empty')
+    if not status or status not in constants.HA_STATE_ALL:
+        raise ArgumentException('status is null or empty or invalid')
+    with dbsession() as session:
+        db_cluster = _get_cluster(session, cluster_id)
+        db_cluster.status = status
 
 def _create_cluster(session, cluster_name, task_state):
     try:

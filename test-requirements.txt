@@ -33,4 +33,5 @@ SQLAlchemy==1.2.5
 stevedore==1.28.0
 urllib3==1.22
 wrapt==1.10.11
+pika==0.12.0
 

@@ -97,6 +97,7 @@ def delete_failover_segment(token, name):
 
 def create_failover_segment(token, name, hosts):
     try:
+        name = str(name)
         _ = get_failover_segment(token, name)
     except exceptions.SegmentNotFound:
         pass
