@@ -16,14 +16,13 @@
 
 import argparse
 import ConfigParser
-import logging
-import logging.handlers
 
 import eventlet
 from eventlet import wsgi
 from hamgr import periodic_task
 from paste.deploy import loadapp
 from hamgr import ha_provider
+from hamgr import logger as logging
 from hamgr import notification
 
 eventlet.monkey_patch()
@@ -39,20 +38,7 @@ def _get_arg_parser():
     return parser.parse_args()
 
 
-def _configure_logging(conf):
-    log_filename = conf.get("log", "location")
-    logger = logging.getLogger(log_filename)
-    logging.basicConfig(
-        filename=log_filename, level=logging.DEBUG,
-        format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s')
-    if not logger.handlers:
-        handler = logging.handlers.RotatingFileHandler(
-            log_filename, maxBytes=1024 * 1024 * 5, backupCount=5)
-        logger.addHandler(handler)
-
-
 def start_server(conf, paste_ini):
-    _configure_logging(conf)
     if paste_ini:
         paste_file = paste_ini
     else:
