@@ -422,10 +422,11 @@ class NovaProvider(Provider):
         services = client.services.list(binary=binary, host=host_id)
         if len(services) == 1:
             if services[0].state == 'up':
-                if services[0].status != 'enabled':
+                disabled_reason = 'Host disabled by PF9 HA manager'
+                if services[0].status != 'enabled' and services[0].disabled_reason == disabled_reason:
                     LOG.debug(
-                        'host %s state is up, status is disabled, so enable it',
-                        str(host_id))
+                        'host %s state is up, status is %s, disabled reason %s, so enable it',
+                        str(host_id), str(services[0].status), str(services[0].disabled_reason))
                     client.services.enable(binary=binary, host=host_id)
                 LOG.debug("nova host %s is up and enabled", str(host_id))
                 return True
