@@ -249,14 +249,18 @@ class consul_status(object):
             if datetime.now() - cluster.change_time > report_interval:
                 current_state = self._get_cluster_status()
                 addr = cluster.change_info['cluster_port'].split(':')[0]
+                LOG.debug('checking cluster : %s', str(cluster))
                 if addr in current_state and current_state[addr]['eventType'] \
                         == cluster.change_info['eventType']:
+                    if cluster.change_info['reported']:
+                        LOG.debug('ignore change that has been reported : %s', str(cluster))
+                        continue
                     reported_cls = cluster
                     retval = cluster.change_info
                     LOG.info('found one change %s', str(cluster))
                     break
                 elif addr not in current_state:
-                    LOG.info('host %s was removed consul cluster : %s',
+                    LOG.info('host %s was removed from consul cluster : %s',
                               str(addr), str(current_state))
                 elif current_state[addr]['eventType'] != \
                         cluster.change_info['eventType']:
