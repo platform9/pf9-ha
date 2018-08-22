@@ -107,9 +107,9 @@ def publish(notification):
     if not _enabled:
         return
 
-    if not notification and not isinstance(notification,
+    if not notification or not isinstance(notification,
                                            ha_notification.Notification):
-        LOG.debug('invalid notification to publish, ignoring it')
+        LOG.info('invalid notification to publish, ignoring it')
         return
 
     LOG.debug('publishing notification : %s', str(notification))
@@ -125,4 +125,4 @@ def publish(notification):
         return
 
     _publisher.publish(notification, routing=key)
-    LOG.debug("published notification %s" % str(notification))
+    LOG.info("published notification %s" % str(notification))

@@ -201,7 +201,7 @@ class NotificationPublisher(object):
         while not self._started:
             if self._thread_ioloop.is_alive and self._thread_publish.is_alive:
                 self._started = True
-        LOG.debug('published has started')
+        LOG.debug('Notification publisher has started')
 
     def thread_ioloop(self):
         while not self._stopping:

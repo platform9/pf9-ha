@@ -1132,6 +1132,7 @@ class NovaProvider(Provider):
 
     def _notify_status(self, action, target, identifier):
         obj = ha_notification.Notification(action, target, identifier)
+        LOG.info('Sending notification : %s', str(obj))
         publish(obj)
 
 def get_provider(config):
