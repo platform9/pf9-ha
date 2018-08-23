@@ -37,6 +37,10 @@ def getLogger(name, conf=None):
     log_level = conf.get("log", "level") if conf.has_option("log", "level") else hamgr.DEFAULT_LOG_LEVEL
     log_mode = 'a'
 
+    # the basic config for logging
+    log_format = '%(asctime)s %(name)-12s %(levelname)-8s %(message)s'
+    logging.basicConfig(filename=log_file, level=log_level, format=log_format)
+
     logger = logging.getLogger(name)
 
     try:
@@ -46,7 +50,7 @@ def getLogger(name, conf=None):
         logger.exception(e)
         raise
 
-    file_formatter = logging.Formatter('%(asctime)s %(name)-12s %(levelname)-8s %(message)s')
+    file_formatter = logging.Formatter(log_format)
     file_handler = logging.handlers.RotatingFileHandler(log_file, mode=log_mode, maxBytes=long(log_size),
                                                         backupCount=long(log_count))
     file_handler.setFormatter(file_formatter)
