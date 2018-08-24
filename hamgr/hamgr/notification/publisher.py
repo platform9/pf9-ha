@@ -20,6 +20,7 @@ import threading
 import pika
 import json
 import Queue
+import time
 
 LOG = logging.getLogger(__name__)
 
@@ -156,34 +157,38 @@ class NotificationPublisher(object):
     def publish(self, notification, routing=None):
         if not notification:
             return
-
+        LOG.debug('### publish method enter at : %s',
+                  str(datetime.datetime.utcnow()))
         try:
             message = json.dumps(notification, ensure_ascii=False)
-            with self._lock:
-                self._messages.put(
-                    {'routing': str(routing), 'body': str(message)})
+
+            self._messages.put(
+                {'routing': str(routing), 'body': str(message)})
+            LOG.debug('### message enqueued at : %s',
+                      str(datetime.datetime.utcnow()))
         except Exception as e:
-            LOG.warning(e)
+            LOG.exception('unhandled exception : %s' + str(e))
+        LOG.debug('### publish method exit at : %s',
+                  str(datetime.datetime.utcnow()))
 
     def thread_publish(self):
         while not self._stopping:
             if self._channel is None or not self._channel.is_open:
+                LOG.debug('###channel is not ready')
+                time.sleep(1)
                 continue
 
             try:
-                with self._lock:
+                message = self._messages.get()
 
-                    message = self._messages.get()
-                    if message is None:
-                        continue
-
+                if message is not None:
                     self._channel.basic_publish(exchange=self._exchange,
                                                 routing_key=str(
                                                     message['routing']),
                                                 body=str(message['body']))
-                    LOG.debug('message is published : ' + str(message))
+                LOG.debug('message is published : ' + str(message))
             except Exception as e:
-                LOG.exception(str(e))
+                LOG.exception('unhandled exception : ' + str(e))
         LOG.debug('publish thread has stopped')
 
     def start(self):
@@ -194,14 +199,16 @@ class NotificationPublisher(object):
                                                 name="publish thread")
         self._thread_publish.daemon = True
 
+        LOG.debug('start thread ioloop')
         self._thread_ioloop.start()
+        LOG.debug('start thread publish')
         self._thread_publish.start()
 
         LOG.debug('wait ioloop thread and publish thread become alive')
         while not self._started:
             if self._thread_ioloop.is_alive and self._thread_publish.is_alive:
                 self._started = True
-        LOG.debug('published has started')
+        LOG.debug('Notification publisher has started')
 
     def thread_ioloop(self):
         while not self._stopping:
