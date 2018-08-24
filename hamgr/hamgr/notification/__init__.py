@@ -119,9 +119,14 @@ def publish(notification):
         str(notification.identifier())
     ])
 
-    if _publisher is None or not _publisher.is_started():
+    if _publisher is None:
         LOG.warn(
-            'ha notification publisher needs to be started before call publish')
+            'ha notification publisher is not initialized')
+        return
+
+    if not _publisher.is_started():
+        LOG.warn(
+            'ha notification publisher has not started')
         return
 
     _publisher.publish(notification, routing=key)
