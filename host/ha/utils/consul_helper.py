@@ -633,7 +633,12 @@ class consul_status(object):
                     continue
                 report_time = datetime.strptime(report_time_str,
                                                 "%Y-%m-%d %H:%M:%S")
-                if datetime.now() - report_time > self.reap_interval:
+                utcnow = datetime.utcnow()
+                howold = utcnow - report_time
+                staled = True if howold > self.reap_interval else False
+                LOG.info('is report staled ? %s , reported at %s, now %s',
+                         str(staled), str(report_time), str(utcnow))
+                if staled:
                     LOG.info('remove from kv store for staled record '
                              'for key : %s , time in record: %s '
                              'time parsed : %s, current : %s',
