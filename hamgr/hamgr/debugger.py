@@ -18,13 +18,9 @@ import ConfigParser
 import argparse
 import time
 
-import eventlet
-from hamgr.notification.notification import Notification
-
 from hamgr import logger as logging
 from hamgr import notification
 
-eventlet.monkey_patch()
 
 LOG = logging.getLogger(__name__)
 
@@ -48,7 +44,7 @@ def start_server(conf, paste_ini):
         count = 0
         while True:
             msg = Notification("test", "add", str(count))
-            LOG.debug('### publish msg : ' + str(msg) )
+            LOG.debug('### debugger publish msg : ' + str(msg) )
             notification.publish(msg)
             count = count + 1
             time.sleep(1)

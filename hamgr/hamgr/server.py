@@ -62,7 +62,7 @@ def start_server(conf, paste_ini):
         wsgi_app = loadapp('config:%s' % paste_file, 'main')
         wsgi.server(eventlet.listen(('', conf.getint("DEFAULT", "listen_port"))),
                     wsgi_app, LOG)
-    finally:
+    except:
         # the wsgi.server is blocking call, if comes here mean it failed
         # so we can clean up here
         LOG.debug('stop notification publisher')

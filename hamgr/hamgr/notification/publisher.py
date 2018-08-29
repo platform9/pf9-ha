@@ -22,6 +22,7 @@ import json
 import Queue
 import time
 
+
 LOG = logging.getLogger(__name__)
 
 
@@ -148,6 +149,13 @@ class NotificationPublisher(object):
         LOG.debug('queue is banded, setup delivery confirmation')
         self._channel.confirm_delivery(self.on_received_or_rejected)
 
+        LOG.debug('### start publish thread : %s' , str(datetime.datetime.utcnow()))
+        self._thread_publish = threading.Thread(target=self.thread_publish,
+                                                name="publish thread")
+        self._thread_publish.daemon = True
+        self._thread_publish.start()
+        LOG.debug('### publish thread has started')
+
     def on_received_or_rejected(self, method_frame):
         confirmation_type = method_frame.method.NAME.split('.')[1].lower()
         LOG.debug('delivery received or rejected,  %s for delivery tag: %i',
@@ -157,58 +165,68 @@ class NotificationPublisher(object):
     def publish(self, notification, routing=None):
         if not notification:
             return
-        LOG.debug('### publish method enter at : %s',
-                  str(datetime.datetime.utcnow()))
+
         try:
             message = json.dumps(notification, ensure_ascii=False)
-
-            self._messages.put(
-                {'routing': str(routing), 'body': str(message)})
-            LOG.debug('### message enqueued at : %s',
-                      str(datetime.datetime.utcnow()))
+            LOG.debug('### [%s] enqueue message : %s',str(datetime.datetime.utcnow()), str(message))
+            obj = {'routing': str(routing), 'body': str(message)}            
+            self._messages.put(obj, False)
+            LOG.debug('### [%s] message enqueued', str(datetime.datetime.utcnow()))
         except Exception as e:
-            LOG.exception('unhandled exception : %s' + str(e))
-        LOG.debug('### publish method exit at : %s',
-                  str(datetime.datetime.utcnow()))
+            LOG.exception("unhandled exception : %s" , str(e))
 
     def thread_publish(self):
+        LOG.debug('### enter thread_publish')
         while not self._stopping:
-            if self._channel is None or not self._channel.is_open:
-                LOG.debug('###channel is not ready')
-                time.sleep(1)
-                continue
-
+            #if self._channel is None or not self._channel.is_open:
+            #    LOG.debug('### channel is not ready')
+            #    time.sleep(2)
+            #    continue
+            #LOG.debug('### channel is ready for using')
             try:
-                message = self._messages.get()
-
-                if message is not None:
-                    self._channel.basic_publish(exchange=self._exchange,
-                                                routing_key=str(
-                                                    message['routing']),
-                                                body=str(message['body']))
-                LOG.debug('message is published : ' + str(message))
+                    LOG.debug('### checking if queue is empty') 
+                    if self._messages.empty():
+                        LOG.debug('### queue is empty')
+                        continue
+                    LOG.debug('### dequeue message at : %s', str(datetime.datetime.utcnow()))
+                    message = self._messages.get(False)
+                    if message is None:
+                        time.sleep(.100)
+                        LOG.debug('### no message dequeued')
+                        continue
+                    LOG.debug('### send message on channel at : %s', str(datetime.datetime.utcnow()) )
+                    #self._channel.basic_publish(exchange=self._exchange,
+                    #                            routing_key=str(
+                    #                                message['routing']),
+                    #                            body=str(message['body']))
+                    LOG.debug('message is published : ' + str(message))
+                    time.sleep(.100)
             except Exception as e:
-                LOG.exception('unhandled exception : ' + str(e))
+                LOG.exception("unhandled exception : " + str(e))
         LOG.debug('publish thread has stopped')
 
     def start(self):
         self._thread_ioloop = threading.Thread(target=self.thread_ioloop,
                                                name="ioloop thread")
         self._thread_ioloop.daemon = True
-        self._thread_publish = threading.Thread(target=self.thread_publish,
-                                                name="publish thread")
-        self._thread_publish.daemon = True
-
-        LOG.debug('start thread ioloop')
         self._thread_ioloop.start()
-        LOG.debug('start thread publish')
-        self._thread_publish.start()
+        LOG.debug('### start ioloop thread : %s' , str(datetime.datetime.utcnow()))
 
-        LOG.debug('wait ioloop thread and publish thread become alive')
+
+        LOG.debug('### wait ioloop thread and publish thread become alive')
         while not self._started:
-            if self._thread_ioloop.is_alive and self._thread_publish.is_alive:
-                self._started = True
-        LOG.debug('Notification publisher has started')
+            if self._thread_ioloop is None or not self._thread_ioloop.is_alive():
+                time.sleep(.100)
+                LOG.debug('### wait thread ioloop to be alive')
+                continue
+          
+            if self._thread_publish is  None or not self._thread_publish.is_alive():
+                time.sleep(.100)
+                LOG.debug('### wait thread publish to be alive')
+                continue
+
+            self._started = True
+        LOG.debug('### notification publisher has started')
 
     def thread_ioloop(self):
         while not self._stopping:
@@ -216,11 +234,11 @@ class NotificationPublisher(object):
                 self._connection = None
                 self._connection = self.connect()
                 # ioloop is a blocking call
-                LOG.debug('start ioloop at ' + str(datetime.datetime.utcnow()))
+                LOG.debug('### start ioloop at ' + str(datetime.datetime.utcnow()))
                 self._connection.ioloop.start()
+                time.sleep(.500)
             except Exception as e:
-                LOG.warning(str(e))
-                self.stop()
+                LOG.exception("unhandled exception : %s", str(e))
                 if self._connection is not None and not self._connection.is_closed:
                     self._connection.ioloop.start()
 
@@ -229,11 +247,11 @@ class NotificationPublisher(object):
     def stop(self):
         LOG.debug('###stopping publisher')
         self._stopping = True
-        if self._thread_ioloop is not None:
+        if self._thread_ioloop is not None and self._thread_ioloop.is_alive():
             LOG.debug('abort ioloop thread')
             self._thread_ioloop.join(0.5)
             self._thread_ioloop = None
-        if self._thread_publish is not None:
+        if self._thread_publish is not None and self._thread_publish.is_alive():
             LOG.debug('abort publish thread')
             self._thread_publish.join(0.5)
             self._thread_publish = None
@@ -251,7 +269,7 @@ class NotificationPublisher(object):
         if self._connection is not None:
             LOG.debug('close connection')
             self._connection.ioloop.stop()
-            self._connection.close()
+            #self._connection.close()
 
     def is_started(self):
         return self._started
