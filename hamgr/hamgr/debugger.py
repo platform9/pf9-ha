@@ -20,7 +20,7 @@ import time
 
 from hamgr import logger as logging
 from hamgr import notification
-
+from hamgr.notification import notification as ha_notification
 
 LOG = logging.getLogger(__name__)
 
@@ -43,11 +43,11 @@ def start_server(conf, paste_ini):
         notification.start(conf)
         count = 0
         while True:
-            msg = Notification("test", "add", str(count))
+            msg = ha_notification.Notification("test", "add", str(count))
             LOG.debug('### debugger publish msg : ' + str(msg) )
             notification.publish(msg)
             count = count + 1
-            time.sleep(1)
+            time.sleep(0.100)
     except Exception as e:
         LOG.exception('## unhandled exception that went wrong : %s', str(e))
         # the wsgi.server is blocking call, if comes here mean it failed
