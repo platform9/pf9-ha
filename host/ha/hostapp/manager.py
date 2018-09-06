@@ -24,7 +24,7 @@ consul_grp = cfg.OptGroup('consul', title='Opt group for consul')
 consul_opts = [
     cfg.IntOpt('status_check_interval', default=10,
                help='Time interval in seconds between status checks'),
-    cfg.IPOpt('join', help='IP address of the server to connect to'),
+    cfg.StrOpt('join', help='Comma seperated IP address of the servers to connect to'),
     cfg.IntOpt('bootstrap_expect', default=0,
                help='Whether to start consul as server or agent. Valid '
                     'values are 0, 1, 3 and 5. 0 indicates that consul is '
@@ -139,11 +139,19 @@ def loop():
         if not cluster_setup:
             # Running join against oneself generates a warning message in
             # logs but does not cause consul to crash
-            LOG.debug('try to join cluster %s with cfg %s', str(CONF.consul.join), str(cfg.find_config_files()))
-            retcode = run_cmd('consul join {ip}'.format(ip=CONF.consul.join))
+            raw = CONF.consul.join
+            if not raw:
+                LOG.error('null or empty consul join ip list in config file')
+                sleep(sleep_time)
+                continue
+            LOG.debug('consul join addresses from config file :%s', str(raw))
+            ips = raw.split(',')
+            members = ' '.join([x.strip() for x in ips])
+            LOG.debug('try to join cluster members %s', members)
+            retcode = run_cmd('consul join {ip}'.format(ip=members))
             if retcode == 0:
-                LOG.info('Joined consul cluster server {ip}'.format(
-                    ip=CONF.consul.join))
+                LOG.info('joined consul cluster members {ip}'.format(
+                    ip=members))
                 cluster_setup = True
                 ch.log_kvstore()
         elif ch.am_i_cluster_leader():
@@ -166,7 +174,8 @@ def loop():
         # helper was created as the cluster was not yet formed. Since this
         # operation is idempotent calling it in a loop will not cause
         # multiple updates.
-        ch.publish_hostid()
+        if cluster_setup:
+            ch.publish_hostid()
 
         LOG.info('sleeping for %s seconds' % sleep_time)
         sleep(sleep_time)
