@@ -545,7 +545,9 @@ class NovaProvider(Provider):
             start_time = datetime.now()
             LOG.info('Authorizing pf9-ha-slave role on node %s using IP %s',
                      node, ip_lookup[node])
-            data = dict(join=ip, ip_address=ip_lookup[node],
+            ips = ','.join([str(v) for v in cluster_ip_lookup.values()])
+            LOG.debug('ips for consul members to join : %s', ips)
+            data = dict(join=ips, ip_address=ip_lookup[node],
                         cluster_ip=cluster_ip_lookup[node])
             data['bootstrap_expect'] = 3 if role == 'server' else 0
             auth_url = '/'.join([url, node, 'roles', 'pf9-ha-slave'])
@@ -635,6 +637,7 @@ class NovaProvider(Provider):
             raise ha_exceptions.HostNotFound(leader)
 
         leader_ip = ip_lookup[leader]
+
         self._token = utils.get_token(self._tenant, self._username,
                                       self._passwd, self._token)
         self._auth(ip_lookup, cluster_ip_lookup, self._token,
