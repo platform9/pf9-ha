@@ -56,6 +56,8 @@ def start(conf):
     queue_name = conf.get('amqp', 'queue_name')
     virtual_host = conf.get('amqp', 'virtual_host') \
         if conf.has_option('amqp', 'virtual_host') else '/'
+    routingkey = conf.get('amqp', 'routingkey') \
+        if conf.has_option('amqp', 'routingkey') else 'notifications.info'
 
     error = "empty value for %s in section amqp"
     if not host:
@@ -66,7 +68,7 @@ def start(conf):
         raise ConfigException(error % 'password')
     if not exchange:
         raise ConfigException(error % 'exchange_name')
-    if not exchange_type or exchange_type != "direct":
+    if not exchange_type:
         raise ConfigException(error % 'exchange_type')
     if not queue_name:
         raise ConfigException(error % 'queue_name')
@@ -88,7 +90,8 @@ def start(conf):
                                                  exchange=exchange,
                                                  exchange_type=exchange_type,
                                                  queue_name=queue_name,
-                                                 virtual_host=virtual_host)
+                                                 virtual_host=virtual_host,
+                                                 routing_key=routingkey)
 
     LOG.debug("start notification publisher")
     _publisher.start()
@@ -100,7 +103,8 @@ def stop():
         return
 
     LOG.debug("stop notification publisher")
-    _publisher.stop()
+    if _publisher is not None:
+        _publisher.stop()
 
 
 def publish(notification):
@@ -113,11 +117,6 @@ def publish(notification):
         return
 
     LOG.debug('publishing notification : %s', str(notification))
-    key = '.'.join([
-        str(notification.action()),
-        str(notification.target()),
-        str(notification.identifier())
-    ])
 
     if _publisher is None:
         LOG.warn(
@@ -129,5 +128,5 @@ def publish(notification):
             'ha notification publisher has not started')
         return
 
-    _publisher.publish(notification, routing=key)
+    _publisher.publish(notification)
     LOG.debug("published notification %s" % str(notification))

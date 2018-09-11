@@ -14,10 +14,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+# according to http://eventlet.net/doc/patching.html, eventlet will
+# patch python standard libs, but thread in eventlet
+# causes deadlock when use together with python's standard thread
+# methods. to avoid this, exclude the thread module from start
+# point of application to avoid thread deadlock problem.
+import eventlet
+eventlet.monkey_patch(thread=False)
 import argparse
 import ConfigParser
 
-import eventlet
 from eventlet import wsgi
 from hamgr import periodic_task
 from paste.deploy import loadapp
@@ -25,7 +31,6 @@ from hamgr import ha_provider
 from hamgr import logger as logging
 from hamgr import notification
 
-eventlet.monkey_patch()
 
 LOG = logging.getLogger(__name__)
 
@@ -65,7 +70,7 @@ def start_server(conf, paste_ini):
     except Exception:
         # the wsgi.server is blocking call, if comes here mean it failed
         # so we can clean up here
-        LOG.debug('stop notification publisher')
+        LOG.exception('unhandled exception, free resources(stop notification publisher)')
         notification.stop()
 
 

@@ -13,6 +13,14 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+# according to http://eventlet.net/doc/patching.html, eventlet will
+# patch python standard libs, but thread in eventlet
+# causes deadlock when use together with python's standard thread
+# methods. to avoid this, exclude the thread module from start
+# point of application to avoid thread deadlock problem.
+import eventlet
+eventlet.monkey_patch(thread=False)
+
 import datetime
 import sys
 import logging
@@ -43,7 +51,8 @@ class NotificationPublisher(object):
                  exchange,
                  exchange_type,
                  queue_name,
-                 virtual_host="/"):
+                 virtual_host="/",
+                 routing_key=''):
         # store parameters in local
         self._host = host
         self._port = port
@@ -53,6 +62,7 @@ class NotificationPublisher(object):
         self._exchange = exchange
         self._exchange_type = exchange_type
         self._queue_name = queue_name
+        self._routing_key = routing_key
 
         self._connection = None
         self._channel = None
@@ -167,6 +177,8 @@ class NotificationPublisher(object):
         try:
             message = json.dumps(notification, ensure_ascii=False)
             LOG.debug('enqueue message : %s', message)
+            if routing is None:
+                routing = self._routing_key
             obj = {'routing': str(routing), 'body': message}
             self._queue.put(obj, False)
         except Exception as e:
