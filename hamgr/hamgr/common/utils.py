@@ -12,35 +12,22 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import json
 import logging
 import time
-
-import requests
+from keystoneclient.v3 import  client as v3client
 
 LOG = logging.getLogger(__name__)
 
 
-def _get_auth_token(tenant, user, password):
-    data = {
-        "auth": {
-            "tenantName": tenant,
-            "passwordCredentials": {
-                "username": user,
-                "password": password
-            }
-        }
-    }
+def _get_auth_token(auth_url, tenant, user, password):
 
-    url = 'http://localhost:8080/keystone/v2.0/tokens'
-
-    r = requests.post(url, json.dumps(data), verify=False,
-                      headers={'Content-Type': 'application/json'})
-
-    if r.status_code != requests.codes.ok:
-        raise RuntimeError('Token request returned: %d' % r.status_code)
-
-    return r.json()['access']['token']
+    keystone = v3client.Client(
+        auth_url=auth_url,
+        username=user,
+        password=password,
+        project_name=tenant
+    )
+    return keystone.auth_token
 
 
 def _need_refresh(token):
@@ -57,12 +44,12 @@ def _need_refresh(token):
         else False
 
 
-def get_token(tenant, user, password, old_token):
+def get_token(auth_url, tenant, user, password, old_token):
 
     token = old_token
 
     if not old_token or _need_refresh(old_token):
         LOG.debug('Refreshing token...')
-        token = _get_auth_token(tenant, user, password)
+        token = _get_auth_token(auth_url, tenant, user, password)
 
     return token

@@ -6,6 +6,7 @@ import time
 
 from ha.utils import log as logging
 from oslo_config import cfg
+from keystoneclient.v3 import client as v3client
 
 import requests
 
@@ -20,6 +21,7 @@ keystone_auth_grp = cfg.OptGroup(
 keystone_opts = [
     cfg.BoolOpt('insecure', default=False,
                 help='Whether to use SSL when connecting to DU'),
+    cfg.StrOpt('auth_uri', help='The uri for keystone authentication'),
     cfg.StrOpt('admin_user', help='User to be used with Masakari requests'),
     cfg.StrOpt('admin_password', help='Password for masakari user'),
     cfg.StrOpt('admin_tenant_name',
@@ -33,29 +35,24 @@ CONF.register_opts(keystone_opts, keystone_auth_grp)
 class Reporter(object):
 
     def __init__(self):
-        self.keystone_token_url = '/'.join([DU_URL, 'keystone', 'v2.0',
-                                            'tokens'])
         self.insecure = CONF.keystone_authtoken.insecure
+        self.auth_uri = CONF.keystone_authtoken.auth_uri
         self.token = self._get_token()
 
     def _get_token(self):
-        headers = {'Content-Type': 'application/json'}
-        data = {
-            'auth': {
-                "tenantName": CONF.keystone_authtoken.admin_tenant_name,
-                "passwordCredentials": {
-                    "username": CONF.keystone_authtoken.admin_user,
-                    "password": CONF.keystone_authtoken.admin_password
-                }
-            }
-        }
-        data = json.dumps(data)
+
         try:
-            resp = requests.post(self.keystone_token_url, data=data,
-                                 headers=headers, verify=self.insecure)
-            if resp.status_code != requests.codes.ok:
-                return False
-            return resp.json()['access']['token']
+            auth_uri = self.auth_uri + '/v3'
+            tenant = CONF.keystone_authtoken.admin_tenant_name
+            username = CONF.keystone_authtoken.admin_password
+            password = CONF.keystone_authtoken.admin_password
+            keystone = v3client.Client(
+                auth_url=auth_uri,
+                username=username,
+                password=password,
+                project_name=tenant
+            )
+            return keystone.auth_token
         except Exception as e:
             LOG.warn('failed to request token, error : %s', str(e))
 

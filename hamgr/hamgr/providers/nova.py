@@ -35,6 +35,9 @@ from hamgr import states
 from hamgr import constants
 from novaclient import client
 from novaclient import exceptions
+from keystoneauth1 import loading
+from keystoneauth1 import session
+
 from hamgr.notification import publish
 from hamgr.notification import notification as ha_notification
 
@@ -48,6 +51,7 @@ class NovaProvider(Provider):
         self._username = config.get('keystone_middleware', 'admin_user')
         self._passwd = config.get('keystone_middleware', 'admin_password')
         self._auth_uri = config.get('keystone_middleware', 'auth_uri')
+        self._auth_uri_v3 = "%s/v3" % self._auth_uri
         self._tenant = config.get('keystone_middleware', 'admin_tenant_name')
         self._region = config.get('nova', 'region')
         self._token = None
@@ -160,7 +164,8 @@ class NovaProvider(Provider):
                 return
             LOG.info('found unhandled events : %s', str(events))
             # TODO : https://platform9.atlassian.net/browse/IAAS-9060
-            self._token = utils.get_token(self._tenant, self._username,
+            self._token = utils.get_token(self._auth_uri_v3,
+                                          self._tenant, self._username,
                                           self._passwd, self._token)
             nova_client = self._get_client()
             time_out = timedelta(minutes=self._notification_stale_minutes)
@@ -301,7 +306,8 @@ class NovaProvider(Provider):
                          'running')
                 return
             self.aggregate_task_running = True
-        self._token = utils.get_token(self._tenant, self._username,
+        self._token = utils.get_token(self._auth_uri_v3,
+                                      self._tenant, self._username,
                                       self._passwd, self._token)
         clusters = db_api.get_all_active_clusters()
         client = self._get_client()
@@ -405,7 +411,7 @@ class NovaProvider(Provider):
             except ha_exceptions.ClusterBusy:
                 pass
             except ha_exceptions.InsufficientHosts:
-                LOG.warn('Disabling HA since number of aggregate %s hosts is '
+                LOG.warn('Detected number of aggregate %s hosts is '
                          'insufficient', aggregate_id)
             except ha_exceptions.SegmentNotFound:
                 LOG.warn('Masakari segment for cluster: %s was not found',
@@ -446,14 +452,16 @@ class NovaProvider(Provider):
             raise ha_exceptions.HostNotFound(host_id)
 
     def _get_client(self):
-        return client.Client(2,
-                             self._username,
-                             self._passwd,
-                             self._tenant,
-                             self._auth_uri + '/v2.0',
-                             region_name=self._region,
-                             insecure=True,
-                             connection_pool=False)
+        # reference:
+        # https://docs.openstack.org/python-novaclient/latest/reference/api/index.html
+        loader = loading.get_plugin_loader('password')
+        auth = loader.load_from_options(auth_url=self._auth_uri,
+                                        username=self._username,
+                                        password=self._passwd,
+                                        project_name=self._tenant)
+        sess = session.Session(auth=auth)
+        nova = client.Client(2, session=sess)
+        return nova
 
     def _get_all(self, client):
         aggregates = client.aggregates.list()
@@ -576,7 +584,8 @@ class NovaProvider(Provider):
             raise ha_exceptions.InvalidHypervisorRoleStatus(host_id)
         rolename = roles[0]
         # Query consul_ip from resmgr ostackhost role settings
-        self._token = utils.get_token(self._tenant, self._username,
+        self._token = utils.get_token(self._auth_uri_v3,
+                                      self._tenant, self._username,
                                       self._passwd, self._token)
         headers = {'X-Auth-Token': self._token['id'],
                    'Content-Type': 'application/json'}
@@ -641,7 +650,8 @@ class NovaProvider(Provider):
 
         leader_ip = ip_lookup[leader]
 
-        self._token = utils.get_token(self._tenant, self._username,
+        self._token = utils.get_token(self._auth_uri_v3,
+                                      self._tenant, self._username,
                                       self._passwd, self._token)
         self._auth(ip_lookup, cluster_ip_lookup, self._token,
                    [leader] + servers, 'server', ip=leader_ip)
@@ -730,7 +740,8 @@ class NovaProvider(Provider):
         current_roles = self._validate_hosts(hosts)
         self.__perf_meter('_validate_hosts', time_begin)
         time_begin = datetime.utcnow()
-        self._token = utils.get_token(self._tenant, self._username,
+        self._token = utils.get_token(self._auth_uri_v3,
+                                      self._tenant, self._username,
                                       self._passwd, self._token)
         self.__perf_meter('utils.get_token', time_begin)
         try:
@@ -797,7 +808,8 @@ class NovaProvider(Provider):
                 self.__perf_meter('db_api.update_cluster_task_state', time_begin)
 
     def _wait_for_role_to_ok(self, nodes):
-        self._token = utils.get_token(self._tenant, self._username,
+        self._token = utils.get_token(self._auth_uri_v3,
+                                      self._tenant, self._username,
                                       self._passwd, self._token)
         headers = {'X-Auth-Token': self._token['id'],
                    'Content-Type': 'application/json'}
@@ -821,7 +833,8 @@ class NovaProvider(Provider):
         return json_resp
 
     def _deauth(self, nodes):
-        self._token = utils.get_token(self._tenant, self._username,
+        self._token = utils.get_token(self._auth_uri_v3,
+                                      self._tenant, self._username,
                                       self._passwd, self._token)
         headers = {'X-Auth-Token': self._token['id'],
                    'Content-Type': 'application/json'}
@@ -911,7 +924,8 @@ class NovaProvider(Provider):
         cluster = request
         aggregate_id = request.id
         try:
-            self._token = utils.get_token(self._tenant, self._username,
+            self._token = utils.get_token(self._auth_uri_v3,
+                                          self._tenant, self._username,
                                           self._passwd, self._token)
             hosts = None
             try:

@@ -36,6 +36,7 @@
             "config": {
                 "ha_slave_conf": {
                     "keystone_authtoken": {
+                        "auth_uri": "%(ha_slave.auth_uri)",
                         "admin_user": "%(ha_slave.auth_user)s",
                         "admin_password": "%(ha_slave.auth_password)s",
                         "admin_tenant_name": "%(ha_slave.auth_tenant_name)s",
