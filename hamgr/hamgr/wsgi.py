@@ -79,7 +79,7 @@ def update_host_status(host_id):
     event_details = request.get_json().get('event_details', {})
     event_details['host_id'] = str(host_id)
     postby = event_details.get('reportedby', '')
-    LOG.debug('received %s event from host %s : %s', str(event), str(postby), str(event_details))
+    LOG.info('received %s event from host %s : %s', str(event), str(postby), str(event_details))
     provider = get_provider()
     if event and event == 'host-down':
         masakari_notified = provider.host_down(event_details)
@@ -88,7 +88,7 @@ def update_host_status(host_id):
     else:
         LOG.warn('Invalid request')
         return jsonify(dict(success=False)), 422, CONTENT_TYPE_HEADER
-    LOG.debug('received %s event for host %s has been processed, result : %s',
+    LOG.info('received %s event for host %s has been processed, result : %s',
               event, str(host_id), str(masakari_notified))
     if masakari_notified:
         return jsonify(dict(success=True)), 200, CONTENT_TYPE_HEADER

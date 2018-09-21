@@ -98,7 +98,7 @@ class HaManagerReporter(Reporter):
         payload = json.dumps({'event': event, 'event_details': data})
         try:
             host_url = '/'.join([self.hamgr_url, data['hostname']])
-            LOG.debug('report to ha mgr : %s', str(payload))
+            LOG.info('report to HA manager : %s', str(payload))
             resp = requests.post(host_url, data=payload, headers=headers,
                                  verify=CONF.keystone_authtoken.insecure)
             if resp.status_code != requests.codes.ok:
@@ -108,5 +108,5 @@ class HaManagerReporter(Reporter):
                 LOG.info('Status reported successfully to HA manager')
                 return resp.json().get('success', False)
         except Exception:
-            LOG.error('Status report failed', exc_info=True)
+            LOG.error('Status report to HA manager failed', exc_info=True)
             return False

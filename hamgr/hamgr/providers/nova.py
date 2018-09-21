@@ -158,7 +158,7 @@ class NovaProvider(Provider):
             if not events or len(events) <= 0:
                 LOG.debug('no unhandled processing events to process')
                 return
-            LOG.debug('found unhandled events : %s', str(events))
+            LOG.info('found unhandled events : %s', str(events))
             # TODO : https://platform9.atlassian.net/browse/IAAS-9060
             self._token = utils.get_token(self._tenant, self._username,
                                           self._passwd, self._token)
@@ -211,7 +211,8 @@ class NovaProvider(Provider):
                         # since host is alive, mark it as aborted
                         db_api.update_processing_event_with_notification(
                             event_uuid, None, None, constants.STATE_ABORTED)
-                        LOG.info('event %s is marked as aborted', event_uuid)
+                        LOG.info('event %s is marked as aborted, '
+                                 'because host is alive', event_uuid)
                     else:
 
                         # host still dead, see whether reported to masakari
@@ -219,7 +220,7 @@ class NovaProvider(Provider):
                             notification_obj = self._report_event_to_masakari(
                                 event)
                             if notification_obj:
-                                LOG.debug('event %s is reported to masakari : '
+                                LOG.info('event %s is reported to masakari : '
                                           '%s', event_uuid,
                                           str(notification_obj))
                                 event.notification_uuid = \
@@ -227,12 +228,12 @@ class NovaProvider(Provider):
                                         'notification_uuid']
                                 state = self._tracking_masakari_notification(
                                     event)
-                                LOG.debug('event %s is updated with '
+                                LOG.info('event %s is updated with '
                                           'notification state %s', event_uuid,
                                           state)
                         else:
                             state = self._tracking_masakari_notification(event)
-                            LOG.debug('event %s is updated with '
+                            LOG.info('event %s is updated with '
                                       'notification state %s', event_uuid,
                                       state)
                 elif event_type == constants.EVENT_HOST_UP:
@@ -377,7 +378,7 @@ class NovaProvider(Provider):
 
                     if len(tmp_ids) > 0:
                         txt_ids = ','.join(list(tmp_ids))
-                        LOG.debug("assign ha-slave role for hosts : %s",
+                        LOG.info("assign ha-slave role for hosts : %s",
                                   txt_ids)
                         self._assign_roles(client, remaining_host_ids,
                                            current_roles)
@@ -428,10 +429,12 @@ class NovaProvider(Provider):
         if len(services) == 1:
             if services[0].state == 'up':
                 disabled_reason = 'Host disabled by PF9 HA manager'
-                if services[0].status != 'enabled' and services[0].disabled_reason == disabled_reason:
-                    LOG.debug(
-                        'host %s state is up, status is %s, disabled reason %s, so enable it',
-                        str(host_id), str(services[0].status), str(services[0].disabled_reason))
+                if services[0].status != 'enabled' and \
+                        services[0].disabled_reason == disabled_reason:
+                    LOG.info('host %s state is up, status is %s, '
+                              'disabled reason %s, so enable it',
+                              str(host_id), str(services[0].status),
+                              str(services[0].disabled_reason))
                     client.services.enable(binary=binary, host=host_id)
                 LOG.debug("nova host %s is up and enabled", str(host_id))
                 return True
@@ -546,7 +549,7 @@ class NovaProvider(Provider):
             LOG.info('Authorizing pf9-ha-slave role on node %s using IP %s',
                      node, ip_lookup[node])
             ips = ','.join([str(v) for v in cluster_ip_lookup.values()])
-            LOG.debug('ips for consul members to join : %s', ips)
+            LOG.info('ips for consul members to join : %s', ips)
             data = dict(join=ips, ip_address=ip_lookup[node],
                         cluster_ip=cluster_ip_lookup[node])
             data['bootstrap_expect'] = 3 if role == 'server' else 0
@@ -611,11 +614,11 @@ class NovaProvider(Provider):
                     host_id, current_roles[host_id])
                 consul_ip = self._get_consul_ip(host_id, json_resp)
                 if consul_ip:
-                    LOG.debug('Using consul ip %s from ostackhost role',
+                    LOG.info('Using consul ip %s from ostackhost role',
                               consul_ip)
                     ip_lookup[host_id] = consul_ip
                 cluster_ip = self._get_cluster_ip(host_id, json_resp)
-                LOG.debug('Using cluster ip %s from ostackhost role',
+                LOG.info('Using cluster ip %s from ostackhost role',
                           cluster_ip)
                 cluster_ip_lookup[host_id] = cluster_ip
         return ip_lookup, cluster_ip_lookup
@@ -810,7 +813,7 @@ class NovaProvider(Provider):
                 resp = requests.get(auth_url, headers=headers)
                 resp.raise_for_status()
                 if datetime.now() - start_time > timedelta(minutes=15):
-                    LOG.debug(
+                    LOG.info(
                         "host %s is not converged, starting from %s to %s ",
                         str(node), str(start_time), str(datetime.now()))
                     raise ha_exceptions.RoleConvergeFailed(node)
@@ -1099,7 +1102,7 @@ class NovaProvider(Provider):
             # write change event into db
             change_record = db_api.create_change_event(target_cluster,
                                                        event_details)
-            LOG.debug('change event record is created for host %s in cluster '
+            LOG.info('change event record is created for host %s in cluster '
                       '%s', host_name, target_cluster)
 
             # similarly, suppress events that has been recorded within given
@@ -1125,12 +1128,12 @@ class NovaProvider(Provider):
                                                                event_type,
                                                                host_name,
                                                                target_cluster)
-            LOG.debug('event processing record is created for host %s on '
+            LOG.info('event processing record is created for host %s on '
                       'event %s in cluster %s', host_name, event_type,
                       target_cluster)
             return True
-        except Exception as e:
-            LOG.debug('failed to record event : %s', str(e))
+        except Exception:
+            LOG.exception('failed to record event')
         return False
 
     def _notify_status(self, action, target, identifier):

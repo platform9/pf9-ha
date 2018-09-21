@@ -19,12 +19,13 @@ LOG = logging.getLogger('ha-manager')
 
 CONF = cfg.CONF
 
-
 consul_grp = cfg.OptGroup('consul', title='Opt group for consul')
 consul_opts = [
     cfg.IntOpt('status_check_interval', default=10,
                help='Time interval in seconds between status checks'),
-    cfg.StrOpt('join', help='Comma seperated IP address of the servers to connect to'),
+    cfg.StrOpt('join',
+               help='Comma separated list of IP addresses of the '
+                    'servers to connect to'),
     cfg.IntOpt('bootstrap_expect', default=0,
                help='Whether to start consul as server or agent. Valid '
                     'values are 0, 1, 3 and 5. 0 indicates that consul is '
@@ -37,7 +38,6 @@ default_opts = [
     cfg.StrOpt('host', default='',
                help='Platform9 Host ID')
 ]
-
 
 CONF.register_group(consul_grp)
 CONF.register_opts(consul_opts, consul_grp)
@@ -147,7 +147,7 @@ def loop():
             LOG.debug('consul join addresses from config file :%s', str(raw))
             ips = raw.split(',')
             members = ' '.join([x.strip() for x in ips])
-            LOG.debug('try to join cluster members %s', members)
+            LOG.info('try to join cluster members %s', members)
             retcode = run_cmd('consul join {ip}'.format(ip=members))
             if retcode == 0:
                 LOG.info('joined consul cluster members {ip}'.format(
@@ -156,17 +156,18 @@ def loop():
                 ch.log_kvstore()
         elif ch.am_i_cluster_leader():
             cluster_stat = ch.get_cluster_status()
-            LOG.debug('i am leader, found changes : %s', str(cluster_stat))
             if cluster_stat:
+                LOG.info('i am leader, found changes : %s', str(cluster_stat))
                 expand_stats(cluster_stat)
                 LOG.debug('cluster_stat: %s', cluster_stat)
                 if reporter.report_status(cluster_stat):
-                    LOG.debug('consul status is reported to hamgr: %s', cluster_stat)
+                    LOG.info('consul status is reported to hamgr: %s',
+                             cluster_stat)
                     ch.update_reported_status(cluster_stat)
                 else:
-                    LOG.debug('report consul status to hamgr failed')
+                    LOG.info('report consul status to hamgr failed')
             else:
-                LOG.debug('no consul status changes to report for now')
+                LOG.debug('i am leader, but no changes to report for now')
             ch.cleanup_consul_kv_store()
         else:
             LOG.debug('i am not leader so do nothing')
@@ -174,8 +175,7 @@ def loop():
         # helper was created as the cluster was not yet formed. Since this
         # operation is idempotent calling it in a loop will not cause
         # multiple updates.
-        if cluster_setup:
-            ch.publish_hostid()
+        ch.publish_hostid()
 
         LOG.info('sleeping for %s seconds' % sleep_time)
         sleep(sleep_time)
