@@ -24,11 +24,11 @@ echo "SRCROOT = $srcroot"
 virtualenv -p $python ${buildroot}/opt/pf9/pf9-ha
 prelink -u ${buildroot}/opt/pf9/pf9-ha/bin/python || true
 pushd ${srcroot}
-PBR_VERSION=1.8.1 \
+PBR_VERSION=3.1.1 \
 ${buildroot}/opt/pf9/pf9-ha/bin/python \
     ${srcroot}/setup.py install
 
-PBR_VERSION=1.8.1 \
+PBR_VERSION=3.1.1 \
 PIP_CACHE_DIR=~/.cache/pip-py27-netsvc ${buildroot}/opt/pf9/pf9-ha/bin/python \
     ${buildroot}/opt/pf9/pf9-ha/bin/pip install .
 

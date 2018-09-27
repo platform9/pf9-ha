@@ -15,6 +15,7 @@
 import logging
 import time
 from keystoneclient.v3 import  client as v3client
+from keystoneclient.v3.tokens import TokenManager
 
 LOG = logging.getLogger(__name__)
 
@@ -27,7 +28,12 @@ def _get_auth_token(auth_url, tenant, user, password):
         password=password,
         project_name=tenant
     )
-    return keystone.auth_token
+    raw = keystone.auth_token
+    mgr = TokenManager(keystone)
+    data = mgr.get_token_data(raw)
+    token = data['token']
+    token['id'] = raw
+    return token
 
 
 def _need_refresh(token):
@@ -35,8 +41,8 @@ def _need_refresh(token):
 
     # ToDo(pratik): check if token is valid by querying keystone
 
-    str_exp_time = token['expires']
-    token_time = time.strptime(str_exp_time, '%Y-%m-%dT%H:%M:%SZ')
+    str_exp_time = token['expires_at']
+    token_time = time.strptime(str_exp_time, '%Y-%m-%dT%H:%M:%S.%fZ')
     current_time = time.gmtime()
 
     # If the Token's expiry is in 300 secs or less, it needs refresh
