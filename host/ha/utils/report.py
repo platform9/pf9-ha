@@ -7,6 +7,9 @@ import time
 from ha.utils import log as logging
 from oslo_config import cfg
 from keystoneclient.v3 import client as v3client
+from keystoneclient.v3.tokens import TokenManager
+from keystoneauth1.identity import v3
+from keystoneauth1 import session
 
 import requests
 
@@ -35,31 +38,42 @@ CONF.register_opts(keystone_opts, keystone_auth_grp)
 class Reporter(object):
 
     def __init__(self):
+        # unless we change the url from ansible here
+        # 'ansible-stack/roles/hamgr-configure/tasks/main.yml#73'
+        # still use the local hardcoded base url
+        #self.auth_uri = CONF.keystone_authtoken.auth_uri
+        self.auth_uri = '/'.join([DU_URL, 'keystone', 'v3'])
         self.insecure = CONF.keystone_authtoken.insecure
-        self.auth_uri = CONF.keystone_authtoken.auth_uri
         self.token = self._get_token()
 
     def _get_token(self):
 
         try:
-            auth_uri = self.auth_uri + '/v3'
+            auth_uri = self.auth_uri
             tenant = CONF.keystone_authtoken.admin_tenant_name
-            username = CONF.keystone_authtoken.admin_password
+            username = CONF.keystone_authtoken.admin_user
             password = CONF.keystone_authtoken.admin_password
-            keystone = v3client.Client(
-                auth_url=auth_uri,
-                username=username,
-                password=password,
-                project_name=tenant
-            )
-            return keystone.auth_token
+            auth = v3.Password(auth_url=auth_uri,
+                               username=username,
+                               password=password,
+                               project_name=tenant,
+                               project_domain_name='default',
+                               user_domain_name='default'
+                               )
+            sess = session.Session(auth=auth)
+            id = sess.get_token()
+            keystone = v3client.Client(session=sess)
+            mgr = TokenManager(keystone)
+            data = mgr.get_token_data(id)
+            token = data['token']
+            token['id'] = id
         except Exception as e:
             LOG.warn('failed to request token, error : %s', str(e))
 
     def _need_refresh(self):
         """Return True if token should be refreshed."""
-        str_exp_time = self.token['expires']
-        token_time = time.strptime(str_exp_time, '%Y-%m-%dT%H:%M:%SZ')
+        str_exp_time = self.token['expires_at']
+        token_time = time.strptime(str_exp_time, '%Y-%m-%dT%H:%M:%S.%fZ')
         current_time = time.gmtime()
 
         # If the Token's expiry is in 300 secs or less, it needs refresh
