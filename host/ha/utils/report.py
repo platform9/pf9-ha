@@ -67,6 +67,7 @@ class Reporter(object):
             data = mgr.get_token_data(id)
             token = data['token']
             token['id'] = id
+            return token
         except Exception as e:
             LOG.warn('failed to request token, error : %s', str(e))
 
