@@ -3,9 +3,10 @@
 set -e
 
 export PBR_VERSION=3.1.1
-
+PF9_VERSION=3.8.0
 proj=hamgr
-githash=`git rev-parse --short HEAD`
+#githash=`git rev-parse --short HEAD`
+githash=9621ae9
 version=${PF9_VERSION:-1.5.0}
 spec=pf9-$proj.spec
 srcroot=$(dirname $(readlink -f $0))/..
@@ -15,6 +16,7 @@ echo $rpmbuild
 package=pf9-hamgr
 svcuser=hamgr
 svcgroup=hamgr
+BUILD_NUMBER=306
 release=${BUILD_NUMBER:-0}.${githash}
 
 # build rpm environment

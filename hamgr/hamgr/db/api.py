@@ -127,8 +127,13 @@ def _get_all_clusters(session, read_deleted=False):
 
 def _get_all_active_clusters(session):
     query = session.query(Cluster)
+    query = query.filter_by(enabled=True)
+    # when async operation of enable/disable, the 'enabled' is not
+    # updated until 'status' changed to desired status, so need to only
+    # return records where status is 'enabled'
+    query = query.filter_by(status=constants.HA_STATE_ENABLED)
     clusters = query.all()
-    return [cluster for cluster in clusters if cluster.enabled is True]
+    return clusters
 
 
 def get_all_active_clusters():
