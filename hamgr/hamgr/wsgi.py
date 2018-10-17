@@ -3,14 +3,15 @@
 #
 from ConfigParser import ConfigParser
 import logging
-
+import json
+from datetime import datetime
 from flask import Flask
 from flask import g
 from flask import jsonify
 from flask import request
 from hamgr.context import error_handler
 from hamgr import exceptions
-from hamgr import ha_provider
+from hamgr import provider_factory
 
 LOG = logging.getLogger(__name__)
 app = Flask(__name__)
@@ -19,7 +20,7 @@ CONTENT_TYPE_HEADER = {'Content-Type': 'application/json'}
 
 
 def get_provider():
-    return ha_provider.ha_provider()
+    return provider_factory.ha_provider()
 
 
 @app.route('/v1/ha', methods=['GET'])
@@ -75,11 +76,13 @@ def update_status(aggregate_id, action):
 @app.route('/v1/ha/<uuid:host_id>', methods=['POST'])
 @error_handler
 def update_host_status(host_id):
-    event = request.get_json().get('event', None)
-    event_details = request.get_json().get('event_details', {})
+    json_obj = request.get_json()
+    event = json_obj.get('event', None)
+    event_details = json_obj.get('event_details', {})
     event_details['host_id'] = str(host_id)
-    postby = event_details.get('reportedby', '')
-    LOG.info('received %s event from host %s : %s', str(event), str(postby), str(event_details))
+    postby = event_details['event'].get('reportedBy', '')
+    LOG.info('received %s event from host %s : %s', str(event), str(postby),
+             str(event_details))
     provider = get_provider()
     if event and event == 'host-down':
         masakari_notified = provider.host_down(event_details)
@@ -89,10 +92,68 @@ def update_host_status(host_id):
         LOG.warn('Invalid request')
         return jsonify(dict(success=False)), 422, CONTENT_TYPE_HEADER
     LOG.info('received %s event for host %s has been processed, result : %s',
-              event, str(host_id), str(masakari_notified))
+             event, str(host_id), str(masakari_notified))
     if masakari_notified:
         return jsonify(dict(success=True)), 200, CONTENT_TYPE_HEADER
     return jsonify(dict(success=False)), 403, CONTENT_TYPE_HEADER
+
+
+@app.route('/v1/consul/', methods=['GET'])
+@app.route('/v1/consul/<int:aggregate_id>', methods=['GET'])
+@error_handler
+def get_consul_status(aggregate_id=None):
+    ha_provider = provider_factory.ha_provider()
+    db_provider = provider_factory.db_provider()
+    records = db_provider.get_latest_consul_status(aggregate_id)
+    results = []
+    for record in records:
+        if record is None:
+            continue
+        # to make ui side simple, just return those fields
+        #  - 'zone name'
+        #  - 'host Id'
+        #  - 'host status'
+        #  - 'consul role'
+        #  - 'is leader'
+        #  - 'last update'
+
+        # get zone name by cluster id
+        aggregate = ha_provider.get_aggregate_info_for_cluster(record.clusterId)
+        aggregate_name = aggregate.name
+        aggregate_zone = aggregate.availability_zone
+        aggregate_host_ids = aggregate.hosts
+
+        leader = record.leader
+        members = json.loads(record.members)
+        for host_id in aggregate_host_ids:
+            member = filter(lambda x : x['Name'] == host_id, members)[0]
+            if not member:
+                LOG.warn('host %s exists in aggregate %s but does not '
+                            'in consul members report : %s',
+                            str(host_id),
+                            str(aggregate_id),
+                            str(members))
+                continue
+
+            # get host status in consul members
+            host_status = 'up' if member['Status'] == 1 else 'down'
+            # get consul role for host
+            host_role = 'server' if member['Tags']['role'] == 'consul' else 'agent'
+            is_leader = (leader ==
+                         ('%s:%s' % (member['Addr'], member['Tags']['port'])))
+
+            result = {
+                'aggregateName':aggregate_name,
+                'zoneName': aggregate_zone,
+                'hostId' : host_id,
+                'hostStatus' : host_status,
+                'consulRole': host_role,
+                'isLeader': is_leader,
+                'lastUpdate': datetime.strftime(record.lastUpdate,
+                                                '%Y-%m-%d %H:%M:%S')
+            }
+            results.append(result)
+    return jsonify(results)
 
 
 def app_factory(global_config, **local_conf):

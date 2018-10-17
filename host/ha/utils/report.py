@@ -103,13 +103,13 @@ class HaManagerReporter(Reporter):
             "Content-Type": "application/json",
             "X-Auth-Token": self.token['id']
         }
-        if data['eventType'] == 1:
+        if data.event['eventType'] == 1:
             event = 'host-up'
-        elif data['eventType'] == 2:
+        elif data.event['eventType'] == 2:
             event = 'host-down'
-        payload = json.dumps({'event': event, 'event_details': data})
+        payload = json.dumps({'event': event, 'event_details': data })
         try:
-            host_url = '/'.join([self.hamgr_url, data['hostname']])
+            host_url = '/'.join([self.hamgr_url, data.event['hostName']])
             LOG.info('report to HA manager : %s', str(payload))
             resp = requests.post(host_url, data=payload, headers=headers,
                                  verify=CONF.keystone_authtoken.insecure)

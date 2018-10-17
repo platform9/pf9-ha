@@ -27,7 +27,7 @@ import ConfigParser
 from eventlet import wsgi
 from hamgr import periodic_task
 from paste.deploy import loadapp
-from hamgr import ha_provider
+from hamgr import provider_factory
 from hamgr import logger as logging
 from hamgr import notification
 
@@ -54,7 +54,7 @@ def start_server(conf, paste_ini):
         LOG.debug('start periodic task')
         periodic_task.start()
         LOG.debug('get ha provider')
-        provider = ha_provider.ha_provider()
+        provider = provider_factory.ha_provider()
         LOG.debug('add task check_host_aggregate_changes')
         periodic_task.add_task(provider.check_host_aggregate_changes, 120, run_now=True)
         # dedicated task to handle host events

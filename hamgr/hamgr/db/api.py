@@ -84,6 +84,24 @@ class EventsProcessing(Base):
     notification_created = Column(Text)
     notification_status = Column(Text)
     notification_updated = Column(DateTime)
+    error_state = Column(Text)
+
+
+class ConsulStatusInfo(Base):
+    __tablename__ = 'consul_status'
+    __table_args__ = {'mysql_engine': 'InnoDB'}
+    __mapper_args__ = {'always_refresh': True}
+
+    id = Column(Integer, primary_key=True)
+    clusterId = Column('cluster_id', Integer)
+    clusterName = Column('cluster_name', Text)
+    leader = Column('leader', Text)
+    peers = Column('peers', Text)
+    members = Column('members', Text)
+    kvstore = Column('kvstore', Text)
+    joins = Column('joins', Text)
+    lastUpdate = Column('last_updated', DateTime)
+    lastEvent = Column('last_event', Text)
 
 
 def init(config, connection_string=None):
@@ -240,7 +258,7 @@ def update_cluster_task_state(cluster_id, state):
         db_cluster.task_state = state
 
 
-def create_change_event(cluster_id, events):
+def create_change_event(cluster_id, events, event_id= ''):
     if cluster_id is None:
         raise ArgumentException("cluster_id is null or empty")
     if events is None:
@@ -248,7 +266,7 @@ def create_change_event(cluster_id, events):
     with dbsession() as session:
         try:
             change = ChangeEvents()
-            change.uuid = str(uuid4())
+            change.uuid = str(uuid4()) if not event_id else event_id
             change.cluster = int(cluster_id)
             change.timestamp = datetime.datetime.utcnow()
             change.events = str(events)
@@ -380,7 +398,8 @@ def get_processing_events_between_times(event_type,
 # update event for notification fields
 def update_processing_event_with_notification(event_uuid, notification_uuid,
                                               notification_created,
-                                              notification_status):
+                                              notification_status,
+                                              error_state = ''):
     if event_uuid is None:
         raise ArgumentException('event_uuid is empty')
     with dbsession() as session:
@@ -395,8 +414,72 @@ def update_processing_event_with_notification(event_uuid, notification_uuid,
             ep.notification_uuid = notification_uuid
             ep.notification_created = notification_created
             ep.notification_status = notification_status
+            ep.error_state = error_state
             ep.notification_updated = datetime.datetime.utcnow()
             return ep
         except Exception:
             LOG.error('failed to update event with notification', exc_info=True)
         return None
+
+
+def get_latest_consul_status(aggregate_id=None):
+    with dbsession() as session:
+        try:
+            records = []
+            query = session.query(ConsulStatusInfo)
+            if aggregate_id is not None:
+                # the passed in aggregate_id maps to clusterName in hamgr db
+                query = query.filter_by(clusterName=str(aggregate_id))
+                query = query.order_by(ConsulStatusInfo.lastUpdate.desc())
+                records.append(query.first())
+            else:
+                # find distinct clusters, then returns most recent one
+                # from each group
+                ids = []
+                for e in query.distinct(ConsulStatusInfo.clusterName).all():
+                    if e is not None:
+                        ids.append(e.clusterName)
+                for id in ids:
+                    query = session.query(ConsulStatusInfo)
+                    query = query.filter_by(clusterName=str(id))
+                    query = query.order_by(ConsulStatusInfo.lastUpdate.desc())
+                    record = query.first()
+                    records.append(record)
+            return records
+        except Exception:
+            LOG.error('failed to get most recent consul status record',
+                      exc_info=True)
+        return []
+
+
+def add_consul_status(cluster_id,
+                      cluster_name,
+                      leader,
+                      peers,
+                      members,
+                      kv='',
+                      joins='',
+                      last_event=''):
+    if leader is None:
+        raise ArgumentException("leader is null or empty")
+    if peers is None:
+        raise ArgumentException("peers argument is null or empty")
+    if members is None:
+        raise ArgumentException("members argument is null or empty")
+    with dbsession() as session:
+        try:
+            status = ConsulStatusInfo()
+            status.clusterId = cluster_id
+            status.clusterName = cluster_name
+            status.leader = leader
+            status.peers = peers
+            status.members = members
+            status.kvstore = kv
+            status.joins = joins
+            status.lastUpdate = datetime.datetime.utcnow()
+            status.lastEvent = str(last_event)
+            session.add(status)
+            LOG.debug('successfully committed consul status : %s', str(status))
+            return status
+        except SQLAlchemyError as se:
+            LOG.error('DB error when create consul status : %s', se)

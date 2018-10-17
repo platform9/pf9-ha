@@ -199,7 +199,9 @@ class NovaProvider(Provider):
                 if datetime.utcnow() - event_time > time_out:
                     db_api.update_processing_event_with_notification(
                         event_uuid, None, None,
-                        constants.STATE_ABORTED)
+                        constants.STATE_ABORTED,
+                        'event happened long time ago : %s' % str(event_time)
+                    )
                     LOG.warn('event %s is aborted as it is too stale',
                              str(event_uuid))
                     continue
@@ -215,7 +217,9 @@ class NovaProvider(Provider):
                     if is_active:
                         # since host is alive, mark it as aborted
                         db_api.update_processing_event_with_notification(
-                            event_uuid, None, None, constants.STATE_ABORTED)
+                            event_uuid, None, None, constants.STATE_ABORTED,
+                            'host %s is alive so abort task' % host_name
+                        )
                         LOG.info('event %s is marked as aborted, '
                                  'because host is alive', event_uuid)
                     else:
@@ -1045,7 +1049,7 @@ class NovaProvider(Provider):
         db_api.update_cluster_task_state(cluster.id, states.TASK_COMPLETED)
 
     def host_down(self, event_details):
-        host = event_details['hostname']
+        host = event_details['event']['hostName']
         try:
             # report host down event
             retval = self._report_event(constants.EVENT_HOST_DOWN,
@@ -1056,7 +1060,7 @@ class NovaProvider(Provider):
         return retval
 
     def host_up(self, event_details):
-        host = event_details['hostname']
+        host = event_details['event']['hostName']
         try:
             # also report host up event
             self._report_event(constants.EVENT_HOST_UP, event_details)
@@ -1094,12 +1098,14 @@ class NovaProvider(Provider):
                 return False
             client = self._get_client()
             target_cluster_id = None
+            target_cluster_name = None
             for cluster in clusters:
                 aggregate_id = cluster.name
                 aggregate = self._get_aggregate(client, aggregate_id)
                 hosts = set(aggregate.hosts)
                 if str(host_name) in hosts:
                     target_cluster_id = cluster.id
+                    target_cluster_name = cluster.name
                     break
             if not target_cluster_id:
                 LOG.info('unable to find cluster for host %s to write event',
@@ -1125,8 +1131,10 @@ class NovaProvider(Provider):
                 return
 
             # write change event into db
+            change_id  = event_details['event']['eventId']
             change_record = db_api.create_change_event(target_cluster_id,
-                                                       event_details)
+                                                       event_details,
+                                                       change_id)
             LOG.info('change event record is created for host %s in cluster '
                       '%s', host_name, target_cluster_id)
 
@@ -1153,6 +1161,22 @@ class NovaProvider(Provider):
                                                                event_type,
                                                                host_name,
                                                                target_cluster_id)
+
+            # record the consul status
+            leader = event_details['consul'].get('leader', '')
+            peers = event_details['consul'].get('peers', '')
+            members = event_details['consul'].get('members', '')
+            kv = event_details['consul'].get('kv', '')
+            joins = event_details['consul'].get('joins', '')
+            db_api.add_consul_status(target_cluster_id,
+                                     target_cluster_name,
+                                     str(leader),
+                                     json.dumps(peers),
+                                     json.dumps(members),
+                                     json.dumps(kv),
+                                     joins,
+                                     event_uuid)
+
             LOG.info('event processing record is created for host %s on '
                       'event %s in cluster %s', host_name, event_type,
                       target_cluster_id)
@@ -1164,6 +1188,25 @@ class NovaProvider(Provider):
     def _notify_status(self, action, target, identifier):
         obj = ha_notification.Notification(action, target, identifier)
         publish(obj)
+
+    def get_aggregate_info_for_cluster(self, cluster_id):
+        try:
+            client = self._get_client()
+            clusters = db_api.get_all_active_clusters()
+            for cluster in clusters:
+                if cluster.id != cluster_id:
+                    continue
+
+                aggregate_id = cluster.name
+                aggregate = self._get_aggregate(client, aggregate_id)
+                LOG.debug('host aggregate details for cluster %s : %s',
+                          str(cluster_id), str(aggregate))
+                return aggregate
+            return None
+        except:
+            LOG.exception('unhandled exception when get aggregate info '
+                          'for cluster %s', str(cluster_id))
+        return None
 
 def get_provider(config):
     db_api.init(config)

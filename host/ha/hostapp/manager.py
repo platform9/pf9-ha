@@ -45,14 +45,6 @@ CONF.register_opts(default_opts)
 PF9_CONSUL_CONF_DIR = '/opt/pf9/etc/pf9-consul/'
 
 
-def expand_stats(cluster_stat):
-    cluster_stat['type'] = 'rscGroup'
-    cluster_stat['regionID'] = ""
-    cluster_stat['time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    cluster_stat['tzname'] = tzname[0]
-    cluster_stat['daylight'] = daylight
-
-
 def generate_consul_conf():
     ip_address = consul_helper.get_ip_address()
     bind_address = consul_helper.get_bind_address()
@@ -158,7 +150,6 @@ def loop():
             cluster_stat = ch.get_cluster_status()
             if cluster_stat:
                 LOG.info('i am leader, found changes : %s', str(cluster_stat))
-                expand_stats(cluster_stat)
                 LOG.debug('cluster_stat: %s', cluster_stat)
                 if reporter.report_status(cluster_stat):
                     LOG.info('consul status is reported to hamgr: %s',
