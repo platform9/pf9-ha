@@ -92,13 +92,13 @@ class NovaProvider(Provider):
         self.events_processing_lock = threading.Lock()
         self.events_processing_running = False
 
-    def _toggle_host_maintenance_state(self, host_id, aggregate_id,
+    def _toggle_host_maintenance_state(self, host_id, segment_name,
                                        on_maintenance):
         LOG.debug(
             'toggle masakari host %s in segment %s to maintenance state %s',
-            str(host_id), str(aggregate_id), str(on_maintenance))
+            str(host_id), str(segment_name), str(on_maintenance))
         try:
-            masakari.update_host_maintenance(self._token, host_id, aggregate_id,
+            masakari.update_host_maintenance(self._token, host_id, segment_name,
                                              on_maintenance)
 
         except Exception as e:
@@ -299,9 +299,11 @@ class NovaProvider(Provider):
         self._token = utils.get_token(self._tenant, self._username,
                                       self._passwd, self._token)
         clusters = db_api.get_all_active_clusters()
+        LOG.info('checking active clusters : %s', str([x.name for x in clusters]))
         client = self._get_client()
         for cluster in clusters:
             aggregate_id = cluster.name
+            segment_name = str(cluster.id)
             aggregate = self._get_aggregate(client, aggregate_id)
             current_host_ids = set(aggregate.hosts)
             new_host_ids = set()
@@ -311,7 +313,7 @@ class NovaProvider(Provider):
             remaining_host_ids = set()
             try:
                 nodes = masakari.get_nodes_in_segment(self._token,
-                                                      aggregate_id)
+                                                      segment_name)
                 db_node_ids = set([node['name'] for node in nodes])
 
                 LOG.debug("hosts records from nova : %s",
@@ -349,9 +351,11 @@ class NovaProvider(Provider):
                         xhosts = filter(lambda x: str(x['name']) == str(hid),
                                         nodes)
                         if len(xhosts) == 1 and xhosts[0]['on_maintenance']:
+                            LOG.info('toggle maintenance for host %s',
+                                     str(hid))
                             # need to unlock the host
                             self._toggle_host_maintenance_state(hid,
-                                                                aggregate_id,
+                                                                segment_name,
                                                                 False)
 
                 if len(new_host_ids) == 0 and len(removed_host_ids) == 0:
@@ -393,10 +397,12 @@ class NovaProvider(Provider):
                              'hosts or incomplete tasks'.format(
                         clsid=cluster.name))
                     continue
-
+                LOG.info('trying to disable HA aggregate %s', str(aggregate_id))
                 self._disable(aggregate_id, synchronize=True)
-                self._enable(aggregate_id,
-                             hosts=list(active_host_ids.union(new_host_ids)))
+                target = list(active_host_ids.union(new_host_ids))
+                LOG.info('trying to enable HA aggregate %s on hosts %s',
+                         str(aggregate_id), str(target))
+                self._enable(aggregate_id, hosts=target)
             except ha_exceptions.ClusterBusy:
                 pass
             except ha_exceptions.InsufficientHosts:
@@ -830,6 +836,8 @@ class NovaProvider(Provider):
 
             db_api.update_cluster_task_state(cluster.id, states.TASK_REMOVING)
 
+        # the name used to query db needs to be string, not int
+        aggregate_name = str(cluster.id)
         try:
             self._token = utils.get_token(self._tenant, self._username,
                                           self._passwd, self._token)
@@ -839,17 +847,17 @@ class NovaProvider(Provider):
                     # If aggregate has changed, we need to remove role from
                     # previous segment's nodes
                     nodes = masakari.get_nodes_in_segment(self._token,
-                                                          cluster.name)
+                                                          aggregate_name)
                     hosts = [n['name'] for n in nodes]
                 else:
                     # If cluster was not even created, but we are disabling HA
                     # to rollback enablement
                     client = self._get_client()
-                    aggregate = self._get_aggregate(client, aggregate_id)
+                    aggregate = self._get_aggregate(client, aggregate_name)
                     hosts = set(aggregate.hosts)
             except ha_exceptions.SegmentNotFound:
                 LOG.warn('Masakari segment for cluster: %s was not found, '
-                         'skipping deauth', cluster.name)
+                         'skipping deauth', aggregate_name)
 
             if hosts:
                 self._deauth(hosts)
@@ -977,16 +985,16 @@ class NovaProvider(Provider):
                          str(event_details))
                 return False
             client = self._get_client()
-            target_cluster = None
+            target_cluster_id = None
             for cluster in clusters:
                 aggregate_id = cluster.name
                 aggregate = self._get_aggregate(client, aggregate_id)
                 hosts = set(aggregate.hosts)
                 if str(host_name) in hosts:
-                    target_cluster = cluster.id
+                    target_cluster_id = cluster.id
                     break
-            if not target_cluster:
-                LOG.debug('unable to find cluster for host %s to write event',
+            if not target_cluster_id:
+                LOG.info('unable to find cluster for host %s to write event',
                           host_name)
                 return False
 
@@ -996,7 +1004,7 @@ class NovaProvider(Provider):
             start_time = end_time - timedelta(
                 seconds=self._event_report_threshold_seconds)
             existing_changes = db_api.get_change_events_between_times(
-                target_cluster,
+                target_cluster_id,
                 host_name,
                 event_type,
                 start_time,
@@ -1009,10 +1017,10 @@ class NovaProvider(Provider):
                 return
 
             # write change event into db
-            change_record = db_api.create_change_event(target_cluster,
+            change_record = db_api.create_change_event(target_cluster_id,
                                                        event_details)
             LOG.info('change event record is created for host %s in cluster '
-                      '%s', host_name, target_cluster)
+                      '%s', host_name, target_cluster_id)
 
             # similarly, suppress events that has been recorded within given
             # threshold seconds to avoid flooding
@@ -1022,7 +1030,7 @@ class NovaProvider(Provider):
             existing_events = db_api.get_processing_events_between_times(
                 event_type,
                 host_name,
-                target_cluster,
+                target_cluster_id,
                 start_time,
                 end_time)
             if existing_events and len(existing_events) > 0:
@@ -1036,10 +1044,10 @@ class NovaProvider(Provider):
             processing_record = db_api.create_processing_event(event_uuid,
                                                                event_type,
                                                                host_name,
-                                                               target_cluster)
+                                                               target_cluster_id)
             LOG.info('event processing record is created for host %s on '
                       'event %s in cluster %s', host_name, event_type,
-                      target_cluster)
+                      target_cluster_id)
             return True
         except Exception:
             LOG.exception('failed to record event')
