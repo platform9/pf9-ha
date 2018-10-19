@@ -493,7 +493,7 @@ class NovaProvider(Provider):
             task_state = 'completed' if cluster.task_state is None else \
                 cluster.task_state
         else:
-            task_state = None
+            task_state = cluster.task_state
         return dict(id=aggregate_id, enabled=enabled, task_state=task_state)
 
     def get(self, aggregate_id):
@@ -720,6 +720,8 @@ class NovaProvider(Provider):
         try:
             cluster = db_api.create_cluster_if_needed(str_aggregate_id,
                                                       states.TASK_CREATING)
+            if cluster.task_state != states.TASK_CREATING:
+                db_api.update_cluster_task_state(cluster.id, states.TASK_CREATING)
             # set the status to 'request-enable'
             db_api.update_request_status(cluster.id, constants.HA_STATE_REQUEST_ENABLE)
             # publish status
