@@ -470,7 +470,7 @@ class NovaProvider(Provider):
                                         password=self._passwd,
                                         project_name=self._tenant)
         sess = session.Session(auth=auth)
-        nova = client.Client(2, session=sess)
+        nova = client.Client(2, session=sess, region_name=self._region)
         return nova
 
     def _get_all(self, client):
