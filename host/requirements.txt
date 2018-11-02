@@ -4,3 +4,4 @@ python-consul==0.6.0
 netifaces==0.10.4
 # pike release required version
 python-keystoneclient===3.13.0
+pika==0.12.0

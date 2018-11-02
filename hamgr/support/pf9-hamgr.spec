@@ -43,6 +43,7 @@ virtualenv %{buildroot}/opt/pf9/%{project}
 
 # tests
 rm -rf %{buildroot}/opt/pf9/%{project}/lib/python2.?/site-packages/%{project}/tests
+rm -rf %{buildroot}/opt/pf9/%{project}/lib/python2.?/site-packages/shared/tests
 
 # Migrate repo config
 install -p -t  %{buildroot}/opt/pf9/%{project}/lib/python2.?/site-packages/%{project}/db/ %{_builddir}/%{project}/db/migrate.cfg

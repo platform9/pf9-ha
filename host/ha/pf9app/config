@@ -12,6 +12,7 @@ import sys
 HA_CONF_FILE = '/opt/pf9/etc/pf9-ha/conf.d/pf9-ha.conf'
 SERVICES = ['pf9-ha-slave']
 INT_OPTS = ['bootstrap_expect']
+BOOL_OPTS = ['role_rebalance_enabled']
 
 def get_config(option, opt_str, value, parser):
     cfg = {}
@@ -23,12 +24,16 @@ def get_config(option, opt_str, value, parser):
             value = cfgparser.get(section, option)
             if option in INT_OPTS:
                 value = int(value)
+            if option in BOOL_OPTS:
+                value = bool(value)
             cfg[section][option] = value
     if len(cfgparser.defaults()) > 0:
         cfg['DEFAULT'] = {}
     for opt, opt_val in cfgparser.defaults().items():
         if opt in INT_OPTS:
             opt_val = int(opt_val)
+        if opt in BOOL_OPTS:
+            opt_val = bool(opt_val)
         cfg['DEFAULT'][opt] = opt_val
     sys.stdout.write(json.dumps({"ha_slave_conf": cfg}))
     sys.exit(0)

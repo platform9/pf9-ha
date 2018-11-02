@@ -17,7 +17,7 @@ import logging
 
 import requests
 
-from hamgr import exceptions
+import shared.exceptions.ha_exceptions as exceptions
 
 LOG = logging.getLogger(__name__)
 _URL = 'http://localhost:8080/masakari/v1'
@@ -186,11 +186,11 @@ def get_notification_status(token, uuid):
 
 def update_host_maintenance(token, host_id, segment_name, on_maintenance):
     if not host_id :
-        raise ArgumentException('host_id is null or empty')
+        raise exceptions.ArgumentException('host_id is null or empty')
     if not segment_name:
-        raise ArgumentException('segment_name is null or empty')
+        raise exceptions.ArgumentException('segment_name is null or empty')
     if str(on_maintenance).lower() not in ['true', 'false']:
-        raise ArgumentException('on_maintenance can only be true or false')
+        raise exceptions.ArgumentException('on_maintenance can only be true or false')
 
     # confirm the given segment_id eixist
     target_segment = get_failover_segment(token, segment_name)

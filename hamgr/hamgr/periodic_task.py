@@ -17,7 +17,8 @@ import logging
 from datetime import datetime
 from datetime import timedelta
 
-import eventlet
+import threading
+import time
 
 PERIODIC_TASK = None
 LOG = logging.getLogger(__name__)
@@ -47,9 +48,11 @@ class PeriodicTask(object):
                         datetime.now() - task.last_called >= task.interval:
                     LOG.debug('Running task: %(task)s',
                               {'task': task.func.__name__})
-                    eventlet.greenthread.spawn_n(task.func)
+                    task_thread = threading.Thread(target=task.func)
+                    task_thread.start()
                     task.last_called = datetime.now()
-            eventlet.greenthread.sleep(10)
+            time.sleep(10)
+
 
 
 def _get_object():
@@ -66,10 +69,11 @@ def add_task(function, interval, run_now=False, run_once=False):
         if not run_once:
             ptask.task_list.append(task)
         if run_now:
-            eventlet.greenthread.spawn_n(function)
+            task_thread = threading.Thread(target=function)
+            task_thread.start()
             task.last_called = datetime.now()
 
 
 def start():
     ptask = _get_object()
-    eventlet.greenthread.spawn_n(ptask.run)
+    threading.Thread(target=ptask.run).start()

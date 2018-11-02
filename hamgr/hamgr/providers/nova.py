@@ -16,37 +16,31 @@ import json
 import logging
 import threading
 import time
-
 from collections import defaultdict
 from datetime import datetime
 from datetime import timedelta
-from urlparse import urlparse
 
-import eventlet
 import requests
+from keystoneauth1 import loading
+from keystoneauth1 import session
+from novaclient import client
+from novaclient import exceptions
 
 from hamgr.common import masakari
 from hamgr.common import utils
 from hamgr.db import api as db_api
-from hamgr import exceptions as ha_exceptions
-from hamgr import periodic_task
+from hamgr.notification.manager import get_notification_manager
+from hamgr.notification.model import Notification
 from hamgr.providers.provider import Provider
-from hamgr import states
-from hamgr import constants
-from novaclient import client
-from novaclient import exceptions
-from keystoneauth1 import loading
-from keystoneauth1 import session
-
-from hamgr.notification import publish
-from hamgr.notification import notification as ha_notification
+from hamgr.rebalance import get_rebalance_controller
+from shared import constants
+from shared.exceptions import ha_exceptions
+from shared.messages.rebalance_request import ConsulRoleRebalanceRequest
 
 LOG = logging.getLogger(__name__)
-eventlet.monkey_patch()
 
 
 class NovaProvider(Provider):
-
     def __init__(self, config):
         self._username = config.get('keystone_middleware', 'admin_user')
         self._passwd = config.get('keystone_middleware', 'admin_password')
@@ -55,6 +49,7 @@ class NovaProvider(Provider):
         self._tenant = config.get('keystone_middleware', 'admin_tenant_name')
         self._region = config.get('nova', 'region')
         self._token = None
+        self._config = config
         # make sure the waiting timeout for masakari to process notification
         # falls in reasonable range. normally it should finish in 5 minutes
         # in a cluster of 5 nodes, if 2 hosts are down at same time, normally
@@ -100,6 +95,9 @@ class NovaProvider(Provider):
         # ha status thread lock
         self.ha_status_processing_lock = threading.Lock()
         self.ha_status_processing_running = False
+        # lock for consul role rebalance processing
+        self.consul_role_rebalance_processing_lock = threading.Lock()
+        self.consul_role_rebalance_processing_running = False
 
     def _toggle_host_maintenance_state(self, host_id, segment_name,
                                        on_maintenance):
@@ -115,17 +113,15 @@ class NovaProvider(Provider):
                       'error : %s', host_id, str(on_maintenance), str(e))
 
     # thread is dedicated to handle recorded host events
-    def host_events_processing(self):
+    def process_host_events(self):
         # wait until current task complete
         with self.events_processing_lock:
             if self.events_processing_running:
                 LOG.debug('events processing task is already running')
                 return
             self.events_processing_running = True
-
+        LOG.debug('host events processing task starts to run at %s', str(datetime.utcnow()))
         try:
-            LOG.debug('handle host events now at %s', str(datetime.utcnow()))
-
             # ---------------------------------------------------------------------
             # because masakari only be able to handle one notification each time
             # for the same segment, so for the same segment need to
@@ -230,21 +226,21 @@ class NovaProvider(Provider):
                                 event)
                             if notification_obj:
                                 LOG.info('event %s is reported to masakari : '
-                                          '%s', event_uuid,
-                                          str(notification_obj))
+                                         '%s', event_uuid,
+                                         str(notification_obj))
                                 event.notification_uuid = \
                                     notification_obj['notification'][
                                         'notification_uuid']
                                 state = self._tracking_masakari_notification(
                                     event)
                                 LOG.info('event %s is updated with '
-                                          'notification state %s', event_uuid,
-                                          state)
+                                         'notification state %s', event_uuid,
+                                         state)
                         else:
                             state = self._tracking_masakari_notification(event)
                             LOG.info('event %s is updated with '
-                                      'notification state %s', event_uuid,
-                                      state)
+                                     'notification state %s', event_uuid,
+                                     state)
                 elif event_type == constants.EVENT_HOST_UP:
                     if is_active:
                         db_api.update_processing_event_with_notification(
@@ -265,6 +261,7 @@ class NovaProvider(Provider):
             # release thread lock
             with self.events_processing_lock:
                 self.events_processing_running = False
+        LOG.debug('host events processing task has finished at %s', str(datetime.utcnow()))
 
     def _report_event_to_masakari(self, event):
         if not event:
@@ -303,13 +300,14 @@ class NovaProvider(Provider):
                                                          state)
         return state
 
-    def check_host_aggregate_changes(self):
+    def process_host_aggregate_changes(self):
         with self.aggregate_task_lock:
             if self.aggregate_task_running:
                 LOG.info('Check host aggregates for changes task already '
                          'running')
                 return
             self.aggregate_task_running = True
+        LOG.debug('host aggregate change processing task starts to run at %s', str(datetime.utcnow()))
         self._token = utils.get_token(self._auth_uri_v3,
                                       self._tenant, self._username,
                                       self._passwd, self._token)
@@ -360,7 +358,7 @@ class NovaProvider(Provider):
                 LOG.info('Found %s removed hosts', str(removed_host_ids))
 
                 # only when the cluster state is completed
-                if cluster.task_state in [states.TASK_COMPLETED]:
+                if cluster.task_state in [constants.TASK_COMPLETED]:
                     for hid in remaining_host_ids:
                         # already know the host is active in nova
                         xhosts = filter(lambda x: str(x['name']) == str(hid),
@@ -393,7 +391,7 @@ class NovaProvider(Provider):
                     if len(tmp_ids) > 0:
                         txt_ids = ','.join(list(tmp_ids))
                         LOG.info("assign ha-slave role for hosts : %s",
-                                  txt_ids)
+                                 txt_ids)
                         self._assign_roles(client, remaining_host_ids,
                                            current_roles)
                         LOG.debug("ha-slave roles are assigned to : %s",
@@ -404,7 +402,7 @@ class NovaProvider(Provider):
                     continue
 
                 if inactive_host_ids or \
-                        cluster.task_state not in [states.TASK_COMPLETED]:
+                        cluster.task_state not in [constants.TASK_COMPLETED]:
                     # Host aggregate has changed but there are inactive hosts
                     # in the host aggregate or another thread is working on
                     # same cluster so do not reconfigure the cluster yet
@@ -436,6 +434,7 @@ class NovaProvider(Provider):
         with self.aggregate_task_lock:
             LOG.debug('Aggregate changes task completed')
             self.aggregate_task_running = False
+        LOG.debug('host aggregate change processing task has finished at %s', str(datetime.utcnow()))
 
     def _is_nova_service_active(self, host_id, client=None):
         if not client:
@@ -448,9 +447,9 @@ class NovaProvider(Provider):
                 if services[0].status != 'enabled' and \
                         services[0].disabled_reason == disabled_reason:
                     LOG.info('host %s state is up, status is %s, '
-                              'disabled reason %s, so enable it',
-                              str(host_id), str(services[0].status),
-                              str(services[0].disabled_reason))
+                             'disabled reason %s, so enable it',
+                             str(host_id), str(services[0].status),
+                             str(services[0].disabled_reason))
                     client.services.enable(binary=binary, host=host_id)
                 LOG.debug("nova host %s is up and enabled", str(host_id))
                 return True
@@ -481,7 +480,7 @@ class NovaProvider(Provider):
             if obj:
                 result.append(obj)
             else:
-               LOG.warning('no hamgr cluster db record for aggregate id %d', aggr.id)
+                LOG.warning('no hamgr cluster db record for aggregate id %d', aggr.id)
         return result
 
     def _get_one(self, client, aggregate_id):
@@ -567,6 +566,37 @@ class NovaProvider(Provider):
                   json.dumps(json_resp))
         return current_roles
 
+    def _customize_pf9_ha_slave_config(self, consul_join_ips, consul_host_ip, consul_cluster_ip):
+        # since the pf9-ha-slave role is controlled by hamgr, all the customizable settings for pf9-ha-slave role
+        # that need to be synced with hamgr should be list here to be passed down to resmgr for updating
+        # the settings for pf9-ha-slave on host.
+        # the keys needs to match the keys which are customizable in pf9-ha-slave config file
+        # first the basic settings
+        customize_cfg = dict(join=consul_join_ips, ip_address=consul_host_ip, cluster_ip=consul_cluster_ip)
+        # then other settings
+        is_enabled = self._config.getboolean("DEFAULT", "enable_consul_role_rebalance") \
+            if self._config.has_option("DEFAULT", "enable_consul_role_rebalance") else False
+
+        customize_cfg['role_rebalance_enabled'] = is_enabled
+        section = 'consul_rebalance'
+        if is_enabled and self._config.has_section(section):
+            exchange = self._config.get(section, 'exchange_name')
+            exchange_type = self._config.get(section, 'exchange_type')
+            routingkey_for_sending = self._config.get(section, 'routingkey_for_sending') \
+                if self._config.has_option(section, 'routingkey_for_sending') else 'sending'
+            routingkey_for_receiving = self._config.get(section, 'routingkey_for_receiving') \
+                if self._config.has_option(section, 'routingkey_for_receiving') else 'receiving'
+            # here no matter what the settings are used by hamgr, the pf9-ha-slave needs to matched settings
+            # in order to send and receive message on the same exchange
+            customize_cfg['amqp_exchange_name'] = exchange
+            customize_cfg['amqp_exchange_type'] = exchange_type
+            # the routing key for sending on controller is the routing key for receiving on hosts
+            customize_cfg['amqp_routingkey_sending'] = routingkey_for_receiving
+            # the routing key for receiving on controller is the routing key for sending on hosts
+            customize_cfg['amqp_routingkey_receiving'] = routingkey_for_sending
+
+        return customize_cfg
+
     def _auth(self, ip_lookup, cluster_ip_lookup, token, nodes, role, ip=None):
         assert role in ['server', 'agent']
         url = 'http://localhost:8080/resmgr/v1/hosts/'
@@ -578,8 +608,7 @@ class NovaProvider(Provider):
                      node, ip_lookup[node])
             ips = ','.join([str(v) for v in cluster_ip_lookup.values()])
             LOG.info('ips for consul members to join : %s', ips)
-            data = dict(join=ips, ip_address=ip_lookup[node],
-                        cluster_ip=cluster_ip_lookup[node])
+            data = self._customize_pf9_ha_slave_config(ips, ip_lookup[node], cluster_ip_lookup[node])
             data['bootstrap_expect'] = 3 if role == 'server' else 0
             auth_url = '/'.join([url, node, 'roles', 'pf9-ha-slave'])
             resp = requests.put(auth_url, headers=headers,
@@ -644,11 +673,11 @@ class NovaProvider(Provider):
                 consul_ip = self._get_consul_ip(host_id, json_resp)
                 if consul_ip:
                     LOG.info('Using consul ip %s from ostackhost role',
-                              consul_ip)
+                             consul_ip)
                     ip_lookup[host_id] = consul_ip
                 cluster_ip = self._get_cluster_ip(host_id, json_resp)
                 LOG.info('Using cluster ip %s from ostackhost role',
-                          cluster_ip)
+                         cluster_ip)
                 cluster_ip_lookup[host_id] = cluster_ip
         return ip_lookup, cluster_ip_lookup
 
@@ -685,7 +714,7 @@ class NovaProvider(Provider):
                   str(time_start), str(time_end))
 
     def _enable(self, aggregate_id, hosts=None,
-                next_state=states.TASK_COMPLETED):
+                next_state=constants.TASK_COMPLETED):
         """Enable HA
 
         :params aggregate_id: Aggregate ID on which HA is being enabled
@@ -711,9 +740,9 @@ class NovaProvider(Provider):
                           str(str_aggregate_id))
             raise
         else:
-            if cluster.task_state not in [states.TASK_COMPLETED]:
-                if cluster.task_state == states.TASK_MIGRATING and \
-                        next_state == states.TASK_MIGRATING:
+            if cluster.task_state not in [constants.TASK_COMPLETED]:
+                if cluster.task_state == constants.TASK_MIGRATING and \
+                        next_state == constants.TASK_MIGRATING:
                     LOG.info('Enabling HA has part of cluster migration')
                 else:
                     LOG.info('Cluster %s is running task %s, cannot enable',
@@ -729,9 +758,9 @@ class NovaProvider(Provider):
 
         try:
             cluster = db_api.create_cluster_if_needed(str_aggregate_id,
-                                                      states.TASK_CREATING)
-            if cluster.task_state != states.TASK_CREATING:
-                db_api.update_cluster_task_state(cluster.id, states.TASK_CREATING)
+                                                      constants.TASK_CREATING)
+            if cluster.task_state != constants.TASK_CREATING:
+                db_api.update_cluster_task_state(cluster.id, constants.TASK_CREATING)
             # set the status to 'request-enable'
             db_api.update_request_status(cluster.id, constants.HA_STATE_REQUEST_ENABLE)
             # publish status
@@ -739,10 +768,10 @@ class NovaProvider(Provider):
         except Exception as e:
             print str(e)
             db_api.update_cluster_task_state(cluster_id, next_state)
-            LOG.error('unhandled exception : %s' , str(e))
+            LOG.error('unhandled exception : %s', str(e))
 
-
-    def _handle_enable_request(self, request, hosts=None, next_state=states.TASK_COMPLETED):
+    def _handle_enable_request(self, request, hosts=None, next_state=constants.TASK_COMPLETED):
+        LOG.debug('handling enable request')
         if not request:
             return
         client = self._get_client()
@@ -802,7 +831,7 @@ class NovaProvider(Provider):
         except Exception as e:
             time_begin = datetime.utcnow()
             LOG.exception('Cannot enable HA on %s: %s, performing cleanup by '
-                      'disabling', cluster_id, e)
+                          'disabling', cluster_id, e)
 
             if cluster_id is not None:
                 # mark the request status to 'error'
@@ -811,7 +840,7 @@ class NovaProvider(Provider):
                 self._notify_status(constants.HA_STATE_ERROR, "cluster", cluster_id)
                 # mark task as completed
                 db_api.update_cluster_task_state(cluster_id,
-                                                 states.TASK_COMPLETED)
+                                                 constants.TASK_COMPLETED)
 
             # rollback above steps
             self._handle_disable_request(request)
@@ -878,7 +907,7 @@ class NovaProvider(Provider):
             resp.raise_for_status()
 
     def _disable(self, aggregate_id, synchronize=False,
-                 next_state=states.TASK_COMPLETED):
+                 next_state=constants.TASK_COMPLETED):
         """Disale HA
 
         :params aggregate_id: Host aggregate ID on which HA is being disabled
@@ -904,10 +933,10 @@ class NovaProvider(Provider):
             LOG.warn('no cluster with id %s', str_aggregate_id)
             return
 
-        if cluster.task_state not in [states.TASK_COMPLETED,
-                                      states.TASK_ERROR_REMOVING]:
-            if cluster.task_state == states.TASK_MIGRATING and \
-                    next_state == states.TASK_MIGRATING:
+        if cluster.task_state not in [constants.TASK_COMPLETED,
+                                      constants.TASK_ERROR_REMOVING]:
+            if cluster.task_state == constants.TASK_MIGRATING and \
+                    next_state == constants.TASK_MIGRATING:
                 LOG.info('disabling HA as part of cluster migration')
             else:
                 LOG.info('Cluster %s is busy in %s state', cluster.name,
@@ -916,22 +945,21 @@ class NovaProvider(Provider):
                                                 cluster.task_state)
 
         try:
-            db_api.update_cluster_task_state(cluster.id, states.TASK_REMOVING)
+            db_api.update_cluster_task_state(cluster.id, constants.TASK_REMOVING)
             # mark the status as 'request-disable' for processing
             db_api.update_request_status(cluster.id, constants.HA_STATE_REQUEST_DISABLE)
             self._notify_status(constants.HA_STATE_REQUEST_DISABLE, "cluster", cluster.id)
         except Exception as e:
             LOG.error('unhandled exceptions : %s ', str(e))
 
-    def ha_enable_disable_request_processing(self):
+    def process_ha_enable_disable_requests(self):
         with self.ha_status_processing_lock:
             if self.ha_status_processing_running:
                 LOG.debug('ha status processing task is already running')
                 return
             self.ha_status_processing_running = True
-
+        LOG.debug('ha status processing task starts to run at %s', str(datetime.utcnow()))
         try:
-            LOG.debug('ha status thread is checking status')
             requests = db_api.get_all_unhandled_enable_or_disable_requests()
             for request in requests:
                 if request.status == constants.HA_STATE_REQUEST_ENABLE:
@@ -941,8 +969,9 @@ class NovaProvider(Provider):
         finally:
             with self.ha_status_processing_lock:
                 self.ha_status_processing_running = False
+        LOG.debug('ha status processing task has finished at %s', str(datetime.utcnow()))
 
-    def _handle_disable_request(self, request, next_state=states.TASK_COMPLETED):
+    def _handle_disable_request(self, request, next_state=constants.TASK_COMPLETED):
         LOG.info('handling disable request : %s', str(request))
         cluster = request
         # the name used to query db needs to be string, not int
@@ -974,16 +1003,18 @@ class NovaProvider(Provider):
                                          , constants.HA_STATE_DISABLING)
             self._notify_status(constants.HA_STATE_DISABLING, "cluster", cluster.id)
             if hosts:
+                LOG.debug('de-authorize roles from hosts and wait for complation')
                 self._deauth(hosts)
                 self._wait_for_role_to_ok(hosts)
             else:
                 LOG.info('no hosts found in segment %s', str(aggregate_name))
-
+            LOG.debug('delete failover segment from masakari')
             masakari.delete_failover_segment(self._token, str(aggregate_name))
             # change status from 'disabling' to 'disabled'
             db_api.update_request_status(cluster.id
                                          , constants.HA_STATE_DISABLED)
             self._notify_status(constants.HA_STATE_DISABLED, "cluster", cluster.id)
+            LOG.debug('successfully processed disable request')
         except Exception:
             if cluster:
                 # mark the status as 'error'
@@ -991,7 +1022,7 @@ class NovaProvider(Provider):
                                              , constants.HA_STATE_ERROR)
                 self._notify_status(constants.HA_STATE_ERROR, "cluster", cluster.id)
                 db_api.update_cluster_task_state(cluster.id,
-                                                 states.TASK_ERROR_REMOVING)
+                                                 constants.TASK_ERROR_REMOVING)
             raise
         else:
             if cluster:
@@ -1044,9 +1075,9 @@ class NovaProvider(Provider):
                             set(self.hosts_down_per_cluster[cluster.id].keys())
                 # Task state will be managed by this function
                 self._disable(aggregate_id, synchronize=True,
-                              next_state=states.TASK_MIGRATING)
+                              next_state=constants.TASK_MIGRATING)
                 self._enable(aggregate_id, hosts=list(host_list),
-                             next_state=states.TASK_MIGRATING)
+                             next_state=constants.TASK_MIGRATING)
                 self.hosts_down_per_cluster.pop(cluster.id)
             else:
                 # TODO: Addtional tests to verify that multiple host failures
@@ -1058,7 +1089,7 @@ class NovaProvider(Provider):
                 'Could not process {host} host down. HA is not enabled '
                 'because of this error : {error}'.format(
                     host=host, error=e))
-        db_api.update_cluster_task_state(cluster.id, states.TASK_COMPLETED)
+        db_api.update_cluster_task_state(cluster.id, constants.TASK_COMPLETED)
 
     def host_down(self, event_details):
         host = event_details['event']['hostName']
@@ -1121,7 +1152,7 @@ class NovaProvider(Provider):
                     break
             if not target_cluster_id:
                 LOG.info('unable to find cluster for host %s to write event',
-                          host_name)
+                         host_name)
                 return False
 
             # suppress same events if it has been reported before within
@@ -1143,12 +1174,12 @@ class NovaProvider(Provider):
                 return
 
             # write change event into db
-            change_id  = event_details['event']['eventId']
+            change_id = event_details['event']['eventId']
             change_record = db_api.create_change_event(target_cluster_id,
                                                        event_details,
                                                        change_id)
             LOG.info('change event record is created for host %s in cluster '
-                      '%s', host_name, target_cluster_id)
+                     '%s', host_name, target_cluster_id)
 
             # similarly, suppress events that has been recorded within given
             # threshold seconds to avoid flooding
@@ -1190,16 +1221,88 @@ class NovaProvider(Provider):
                                      event_uuid)
 
             LOG.info('event processing record is created for host %s on '
-                      'event %s in cluster %s', host_name, event_type,
-                      target_cluster_id)
+                     'event %s in cluster %s', host_name, event_type,
+                     target_cluster_id)
+
+            # create a consul role rebalance record for this event, the rebalance thread will handle them later
+            before_rebalance = event_details['consul']
+            consul_servers = [x for x in members if x['Tags']['role'] == 'consul']
+            consul_servers_alive = [x for x in consul_servers if x['Status'] == 1]
+            consul_slaves = [x for x in members if x['Tags']['role'] == 'node']
+            consul_slaves_alive = [x for x in consul_slaves if x['Status'] == 1]
+            msg = 'found %s alive consul servers : %s' % (str(len(consul_servers_alive)), str(consul_servers_alive))
+            LOG.info(msg)
+            msg = 'found %s alive consul slaves : %s' % (str(len(consul_slaves_alive)), str(consul_slaves_alive))
+            LOG.info(msg)
+            # rebalance consul roles
+            server_threshold = 5
+            old_role = ""
+            new_role = ""
+            candicates = []
+            rebalance_type = ''
+            if len(consul_servers_alive) > server_threshold:
+                # move servers to slaves
+                rebalance_type = 'server role to slave role'
+                old_role = constants.CONSUL_ROLE_SERVER
+                new_role = constants.CONSUL_ROLE_CLIENT
+                start = server_threshold
+                end = len(consul_servers_alive)
+                for i in range(start, end):
+                    candicates.append(consul_servers_alive[i - start])
+                LOG.info('more than %s alive consul servers (found %s), rebalance those to consul slaves : %s',
+                         str(server_threshold),
+                         str(len(consul_servers_alive)),
+                         str(candicates))
+            elif len(consul_servers_alive) < server_threshold:
+                rebalance_type = 'slave role to server role'
+                wanted = server_threshold - len(consul_servers_alive)
+                LOG.info('not enough alive consul servers, found %s, required %s, wanted %s', str(len(consul_servers_alive)),
+                         str(server_threshold),
+                         str(wanted))
+                if wanted == server_threshold:
+                    LOG.error('ignore rebalance as there are no alive consul slaves to rebalance')
+                else:
+                    # move slaves to servers
+                    old_role = constants.CONSUL_ROLE_CLIENT
+                    new_role = constants.CONSUL_ROLE_SERVER
+                    start = 0
+                    end = 0
+
+                    if len(consul_slaves_alive) >= wanted:
+                        end = wanted
+                    elif len(consul_slaves_alive) < wanted:
+                        end = len(consul_slaves_alive)
+                    for i in range(start, end):
+                        candicates.append(consul_slaves_alive[i - start])
+                    LOG.info('less than %s alive consul servers (found %s), rebalance those to consul servers',
+                             str(server_threshold),
+                             str(len(consul_servers_alive)),
+                             str(candicates))
+            else:
+                LOG.info('no need to rebalance consul roles, num of alive consul servers %s meets required %s',
+                         str(len(consul_servers_alive)),
+                         str(server_threshold))
+
+            if len(candicates) > 0:
+                LOG.info('consul role rebalance needed (%s) for those hosts : %s', rebalance_type, str(candicates))
+            # create rebalance request for each target hosts, they should be processed one by one
+            for candidate in candicates:
+                host = candidate['Name']
+                rebalance_action = {'host': host, 'old_role': old_role, 'new_role': new_role}
+                LOG.info('create consul role rebalance request for host %s : %s', host, str(rebalance_action))
+                db_api.add_consul_role_rebalance_record(event_type,
+                                                        event_uuid,
+                                                        json.dumps(before_rebalance),
+                                                        json.dumps(rebalance_action)
+                                                        )
             return True
         except Exception:
             LOG.exception('failed to record event')
         return False
 
     def _notify_status(self, action, target, identifier):
-        obj = ha_notification.Notification(action, target, identifier)
-        publish(obj)
+        obj = Notification(action, target, identifier)
+        get_notification_manager(self._config).send_notification(obj)
 
     def get_aggregate_info_for_cluster(self, cluster_id):
         try:
@@ -1219,6 +1322,172 @@ class NovaProvider(Provider):
             LOG.exception('unhandled exception when get aggregate info '
                           'for cluster %s', str(cluster_id))
         return None
+
+    def process_consul_role_rebalance_requests(self):
+        # wait until current task complete
+        with self.consul_role_rebalance_processing_lock:
+            if self.consul_role_rebalance_processing_running:
+                LOG.debug('consul role rebalance processing task is already running')
+                return
+            self.consul_role_rebalance_processing_running = True
+        LOG.info('role rebalance processing task start to work at %s', str(datetime.utcnow()))
+        try:
+            # ----------------------------------------------------------------
+            # get all unhandled requests
+            # check whether the associated host event is actually finished
+            # use RPC to notify host the request
+            # wait for response from host to update the record
+            # ----------------------------------------------------------------
+            unhandled_requests = db_api.get_all_unhandled_consul_role_rebalance_requests()
+            if not unhandled_requests or len(unhandled_requests) <= 0:
+                LOG.debug('no unhandled consul role rebalance requests found from db for now')
+                return
+            for req in unhandled_requests:
+                LOG.info('processing rebalance request : %s', str(req))
+                # abort request if timestamp shows the request older than 15 minutes
+                if (datetime.utcnow() - req.last_updated) > timedelta(minutes=15):
+                    db_api.update_consul_role_rebalance(req.uuid,
+                                                        None,
+                                                        None,
+                                                        constants.REBALANCE_STATE_ABORTED,
+                                                        'ignore staled request created at %s' % req.last_updated)
+                    continue
+
+                event_uuid = req.event_uuid
+                host_event = db_api.get_processing_event_by_id(event_uuid)
+                if not host_event:
+                    # no such event, so abort this request
+                    db_api.update_consul_role_rebalance(req.uuid,
+                                                        None,
+                                                        None,
+                                                        constants.REBALANCE_STATE_ABORTED,
+                                                        'no such host event %s for rebalance' % event_uuid)
+                    continue
+
+                # check whether host event has finished
+                event_status = host_event.notification_status
+                if event_status != constants.STATE_FINISHED:
+                    LOG.warning('host event %s has not finished, current status: %s', event_uuid, event_status)
+                    # since the host event has not been handled, can not do rebalance, so keep the request
+                    continue
+
+                if event_status == constants.STATE_FINISHED:
+                    action_obj = json.loads(req.rebalance_action)
+                    target_host_id = action_obj['host']
+                    target_old_role = action_obj['old_role']
+                    target_new_role = action_obj['new_role']
+                    rebalance_request = ConsulRoleRebalanceRequest(host_id=target_host_id,
+                                                                   old_role=target_old_role,
+                                                                   new_role=target_new_role)
+                    # set db status to running
+                    db_api.update_consul_role_rebalance(req.uuid,
+                                                        None,
+                                                        None,
+                                                        constants.REBALABCE_STATE_RUNNING,
+                                                        None)
+                    # because the resmgr keeps the customerized settings for consul role, for pf9-ha-slave role
+                    # the difference between consul server and client is the 'bootstrap_expect' settings
+                    # for consul server role, the value is now 3, but for consul slave, the value is 0
+                    # after updated the settings for pf9-ha-slave role,  the consul config file won't be changed
+                    # until restart the pf9-ha-slave service, or manually change the config file, then run
+                    # consul join command
+                    # so need two steps
+                    # 1) change settings in resmgr
+                    # 2) send request to host
+                    #   on host, once received the request, it will
+                    #   a) when change from 'server' to 'client'
+                    #      - delete /opt/pf9/etc/pf9-consul/conf.d/server.json
+                    #      - create /opt/pf9/etc/pf9-consul/conf.d/client.json
+                    #      - run 'consul join xxx' command
+                    #   or
+                    #   b) just restart pf9-ha-slave service
+                    #
+                    url = 'http://localhost:8080/resmgr/v1/hosts'
+                    self._token = utils.get_token(self._auth_uri_v3,
+                                                  self._tenant,
+                                                  self._username,
+                                                  self._passwd,
+                                                  self._token)
+                    headers = {'X-Auth-Token': self._token['id'], 'Content-Type': 'application/json'}
+                    # get the target host info to make sure the role status is ok
+                    result = requests.get(url + "/" + target_host_id, headers=headers)
+                    data = result.json()
+                    assert result.status_code == requests.codes.ok and 'pf9-ha-slave' in data['roles']
+                    data = {}
+                    consul_status_before = json.loads(req.before_rebalance)
+                    LOG.info('getting new consul settings from previous status : %s', str(req.before_rebalance))
+                    consul_addresses = [x['Addr'] for x in consul_status_before['members']]
+                    target_consuls = [x for x in consul_status_before['members'] if x['Name'] == target_host_id]
+                    assert len(target_consuls) == 1
+                    join_ips = ','.join(consul_addresses)
+                    cluster_ip = target_consuls[0]['Addr']
+                    data = self._customize_pf9_ha_slave_config(join_ips, cluster_ip, cluster_ip)
+                    # step 1 : modify 'bootstrap_expect' base on the new role
+                    data['bootstrap_expect'] = 3 if target_new_role == constants.CONSUL_ROLE_SERVER else 0
+                    LOG.info('update resmgr for host %s with data %s', target_host_id, str(data))
+                    # update resmgr with the new settings
+                    req_url = '%s/%s/roles/pf9-ha-slave' % (url, target_host_id)
+                    result = requests.put(req_url,
+                                          headers=headers,
+                                          json=data)
+                    LOG.info('req_url : %s , result : %s', req_url, str(result))
+                    succeeced = (result.status_code == requests.codes.ok)
+                    if not succeeced:
+                        LOG.warn('failed to update resmgr for host %s with data %s, resp %s',
+                                 target_host_id,
+                                 str(data),
+                                 str(result))
+                        # update the status to aborted if unable to update resmgr
+                        db_api.update_consul_role_rebalance(req.uuid,
+                                                            None,
+                                                            None,
+                                                            constants.REBALANCE_STATE_ABORTED,
+                                                            'update resmgr failed for host %s ' % target_host_id)
+                    else:
+                        # step 2 : notify pf9-ha-slave with RPC message contains the rebalance request
+                        resp = get_rebalance_controller(self._config).rebalance_and_wait_for_result(rebalance_request)
+                        LOG.info('role rebalance response : %s', str(resp))
+                        if resp:
+                            if resp['status'] == constants.REBALANCE_STATE_FINISHED:
+                                LOG.info('role rebalance has successfully completed, resp %s', str(resp))
+                                db_api.update_consul_role_rebalance(req.uuid,
+                                                                    None,
+                                                                    None,
+                                                                    constants.REBALANCE_STATE_FINISHED,
+                                                                    None)
+                            else:
+                                msg = 'rebalance response status is not finished , but %s' % str(resp)
+                                LOG.info(msg)
+                                db_api.update_consul_role_rebalance(req.uuid,
+                                                                    None,
+                                                                    None,
+                                                                    constants.REBALABCE_STATE_ERROR,
+                                                                    msg)
+                        else:
+                            msg = 'empty rebalance response for request : %s' % str(rebalance_request)
+                            LOG.info(msg)
+                            db_api.update_consul_role_rebalance(req.uuid,
+                                                                None,
+                                                                None,
+                                                                constants.REBALABCE_STATE_ERROR,
+                                                                msg)
+                else:
+                    LOG.info('host event %s has unexpected status, ignore consul role rebase request',
+                             str(host_event))
+                    db_api.update_consul_role_rebalance(req.uuid,
+                                                        None,
+                                                        None,
+                                                        constants.REBALANCE_STATE_ABORTED,
+                                                        "unexpected status for host event %s : %s" % (event_uuid,
+                                                                                                      event_status))
+        except:
+            LOG.exception('unhandled exception in process_consul_role_rebalance_requests')
+        finally:
+            # release thread lock
+            with self.consul_role_rebalance_processing_lock:
+                self.consul_role_rebalance_processing_running = False
+        LOG.info('role rebalance processing task has finished at %s', str(datetime.utcnow()))
+
 
 def get_provider(config):
     db_api.init(config)

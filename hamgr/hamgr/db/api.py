@@ -17,9 +17,8 @@ import logging
 from contextlib import contextmanager
 
 import datetime
-from hamgr import exceptions
-from hamgr import states
-from hamgr import constants
+from shared.exceptions import ha_exceptions as exceptions
+from shared import constants
 from sqlalchemy import Boolean
 from sqlalchemy import Column
 from sqlalchemy import create_engine
@@ -102,6 +101,26 @@ class ConsulStatusInfo(Base):
     joins = Column('joins', Text)
     lastUpdate = Column('last_updated', DateTime)
     lastEvent = Column('last_event', Text)
+
+
+
+class ConsulRoleRebalanceRecord(Base):
+    __tablename__ = 'consul_role_rebalance'
+    __table_args__ = {'mysql_engine': 'InnoDB'}
+    __mapper_args__ = {'always_refresh': True}
+
+    id = Column(Integer, primary_key=True)
+    uuid = Column('uuid', Text)
+    event_name = Column('event_name', Text)
+    event_uuid = Column('event_uuid', Text)
+    before_rebalance = Column('before_rebalance', Text)
+    rebalance_action = Column('rebalance_action', Text)
+    after_rebalance = Column('after_rebalance', Text)
+    action_started = Column('action_started', DateTime)
+    action_finished = Column('action_finished', DateTime)
+    action_status = Column('action_status', Text)
+    last_updated = Column('last_updated', DateTime)
+    last_error = Column('last_error', Text)
 
 
 def init(config, connection_string=None):
@@ -198,9 +217,9 @@ def get_all_unhandled_enable_or_disable_requests():
 
 def update_request_status(cluster_id, status):
     if not cluster_id:
-        raise ArgumentException('cluster_id is null or empty')
+        raise exceptions.ArgumentException('cluster_id is null or empty')
     if not status or status not in constants.HA_STATE_ALL:
-        raise ArgumentException('status is null or empty or invalid')
+        raise exceptions.ArgumentException('status is null or empty or invalid')
     with dbsession() as session:
         db_cluster = _get_cluster(session, cluster_id)
         db_cluster.status = status
@@ -253,16 +272,16 @@ def update_cluster_task_state(cluster_id, state):
                 #       log a warning.
                 LOG.warn('Task state being updated from %s to %s', task_state,
                          state)
-        if state not in states.VALID_TASK_STATES:
+        if state not in constants.VALID_TASK_STATES:
             raise exceptions.InvalidTaskState(state)
         db_cluster.task_state = state
 
 
 def create_change_event(cluster_id, events, event_id= ''):
     if cluster_id is None:
-        raise ArgumentException("cluster_id is null or empty")
+        raise exceptions.ArgumentException("cluster_id is null or empty")
     if events is None:
-        raise ArgumentException("events argument is null or empty")
+        raise exceptions.ArgumentException("events argument is null or empty")
     with dbsession() as session:
         try:
             change = ChangeEvents()
@@ -285,13 +304,13 @@ def get_change_events_between_times(cluster_id,
                                     start_time,
                                     end_time):
     if cluster_id is None:
-        raise ArgumentException('cluster_id is null or empty')
+        raise exceptions.ArgumentException('cluster_id is null or empty')
     if host_name is None:
-        raise ArgumentException('host_name is null or empty')
+        raise exceptions.ArgumentException('host_name is null or empty')
     if start_time > end_time:
-        raise ArgumentException('start_time is bigger than end_time')
+        raise exceptions.ArgumentException('start_time is bigger than end_time')
     if event_type not in constants.VALID_EVENT_TYPES:
-        raise ArgumentException('event_type is null or empty or not valid')
+        raise exceptions.ArgumentException('event_type is null or empty or not valid')
     etype = ''
     if event_type == constants.EVENT_HOST_DOWN:
         etype = '\'eventType\': 2'
@@ -316,12 +335,12 @@ def get_change_events_between_times(cluster_id,
 # create event, return event created to caller
 def create_processing_event(event_uuid, event_type, host_name, cluster_id):
     if event_type not in constants.VALID_EVENT_TYPES:
-        raise ArgumentException('event_type not in %s' % \
+        raise exceptions.ArgumentException('event_type not in %s' % \
                                 str(constants.VALID_EVENT_TYPES))
     if host_name is None:
-        raise ArgumentException('host_name is empty')
+        raise exceptions.ArgumentException('host_name is empty')
     if cluster_id is None:
-        raise ArgumentException('cluster_id is empty')
+        raise exceptions.ArgumentException('cluster_id is empty')
     with dbsession() as session:
         try:
             ep = EventsProcessing()
@@ -357,7 +376,7 @@ def get_all_unhandled_processing_events():
 # query event by id
 def get_processing_event_by_id(event_uuid):
     if event_uuid is None:
-        raise ArgumentException('event_uuid is empty')
+        raise exceptions.ArgumentException('event_uuid is empty')
     with dbsession() as session:
         try:
             query = session.query(EventsProcessing)
@@ -376,9 +395,9 @@ def get_processing_events_between_times(event_type,
                                         start_time,
                                         end_time):
     if not event_type or event_type not in constants.VALID_EVENT_TYPES:
-        raise ArgumentException('event_type is null or empty or invalid')
+        raise exceptions.ArgumentException('event_type is null or empty or invalid')
     if host_name is None:
-        raise ArgumentException('host_name is empty')
+        raise exceptions.ArgumentException('host_name is empty')
     with dbsession() as session:
         try:
             query = session.query(EventsProcessing)
@@ -401,7 +420,7 @@ def update_processing_event_with_notification(event_uuid, notification_uuid,
                                               notification_status,
                                               error_state = ''):
     if event_uuid is None:
-        raise ArgumentException('event_uuid is empty')
+        raise exceptions.ArgumentException('event_uuid is empty')
     with dbsession() as session:
         try:
             query = session.query(EventsProcessing)
@@ -461,11 +480,11 @@ def add_consul_status(cluster_id,
                       joins='',
                       last_event=''):
     if leader is None:
-        raise ArgumentException("leader is null or empty")
+        raise exceptions.ArgumentException("leader is null or empty")
     if peers is None:
-        raise ArgumentException("peers argument is null or empty")
+        raise exceptions.ArgumentException("peers argument is null or empty")
     if members is None:
-        raise ArgumentException("members argument is null or empty")
+        raise exceptions.ArgumentException("members argument is null or empty")
     with dbsession() as session:
         try:
             status = ConsulStatusInfo()
@@ -483,3 +502,88 @@ def add_consul_status(cluster_id,
             return status
         except SQLAlchemyError as se:
             LOG.error('DB error when create consul status : %s', se)
+
+
+def add_consul_role_rebalance_record(event_name,
+                                     event_uuid,
+                                     before_rebalance,
+                                     rebalance_action):
+    with dbsession() as session:
+        try:
+            record = ConsulRoleRebalanceRecord()
+            record.uuid = str(uuid4())
+            record.event_name = event_name
+            record.event_uuid = str(event_uuid)
+            record.before_rebalance = before_rebalance
+            record.rebalance_action = rebalance_action
+            record.last_updated = datetime.datetime.utcnow()
+            session.add(record)
+            LOG.debug('successfully commited consul role rebalance record : %s', str(record))
+            return record.uuid
+        except SQLAlchemyError as se:
+            LOG.error('DB error when create consul role rebalance record : %s', se)
+        return None
+
+
+def get_consul_role_balance_record_by_uuid(uuid):
+    with dbsession() as session:
+        try:
+            query = session.query(ConsulRoleRebalanceRecord)
+            query = query.filter_by(uuid=uuid)
+            record = query.first()
+            return record
+        except SQLAlchemyError as se:
+            LOG.error('DB error when getting consul role rebalance record  %s : %s', uuid, se)
+        return None
+
+
+def get_consul_role_balance_records_for_event(event_uuid):
+    with dbsession() as session:
+        try:
+            query = session.query(ConsulRoleRebalanceRecord)
+            query = query.filter_by(event_uuid=event_uuid)
+            records = query.all()
+            return records
+        except SQLAlchemyError as se:
+            LOG.error('DB error when getting consul role rebalance records for event  %s : %s', event_uuid, se)
+        return None
+
+
+def get_all_unhandled_consul_role_rebalance_requests():
+    with dbsession() as session:
+        try:
+            query = session.query(ConsulRoleRebalanceRecord)
+            # only return records whose status are not set, ignore 'running', 'aborted', 'finished' records
+            query = query.filter_by(action_status=None)
+            records = query.all()
+            return records
+        except SQLAlchemyError as se:
+            LOG.error('DB error when getting unhandled consul role rebalance requests : %s', se)
+        return None
+
+def update_consul_role_rebalance(uuid,
+                                 after_rebalance,
+                                 action_finished,
+                                 action_status,
+                                 last_error):
+    with dbsession() as session:
+        try:
+            query = session.query(ConsulRoleRebalanceRecord)
+            query = query.filter_by(uuid=uuid)
+            record = query.first()
+            if not record:
+                LOG.warning('no consul role rebalance record with uuid %s found')
+                return None
+            if after_rebalance:
+                record.after_rebalance = after_rebalance
+            if action_finished:
+                record.action_finished = action_finished
+            if action_status:
+                record.action_status = action_status
+            if last_error:
+                record.last_error = last_error
+            record.last_updated = datetime.datetime.utcnow()
+            return record
+        except SQLAlchemyError as se:
+            LOG.error('DB error when getting consul role rebalance record  %s : %s', uuid, se)
+        return None

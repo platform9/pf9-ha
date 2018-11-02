@@ -1,56 +1,83 @@
 {
-    "role_name": "pf9-ha-slave",
-    "display_name": "Platform9 HA cluster manager",
-    "description": "Manage consul cluster for VM-HA in Platform9 KVM deployments",
-    "customizable_settings": {
-        "join": {
-            "default": "",
-            "path": "config/ha_slave_conf/consul"
-        },
-        "bootstrap_expect": {
-            "path": "config/ha_slave_conf/consul",
-            "default": 0
-        },
-        "ip_address": {
-            "path": "config/ha_slave_conf/node",
-            "default": ""
-        },
-        "cluster_ip": {
-            "path": "config/ha_slave_conf/node",
-            "default": ""
-        }
+  "role_name": "pf9-ha-slave",
+  "display_name": "Platform9 HA cluster manager",
+  "description": "Manage consul cluster for VM-HA in Platform9 KVM deployments",
+  "customizable_settings": {
+    "join": {
+      "default": "",
+      "path": "config/ha_slave_conf/consul"
     },
-    "rabbit_permissions": {
-        "config": "",
-        "read": "",
-        "write": ""
+    "bootstrap_expect": {
+      "path": "config/ha_slave_conf/consul",
+      "default": 0
     },
-    "role_version": "__VERSION__",
-    "config": {
-        "pf9-ha-slave": {
-            "version": "__VERSION__",
-            "service_states": {
-                "pf9-ha-slave": true
-            },
-            "url": "%(download_protocol)s://%(host_relative_amqp_fqdn)s:%(download_port)s/private/__RPMNAME__",
-            "config": {
-                "ha_slave_conf": {
-                    "keystone_authtoken": {
-                        "auth_uri": "%(ha_slave.auth_uri)s",
-                        "admin_user": "%(ha_slave.auth_user)s",
-                        "admin_password": "%(ha_slave.auth_password)s",
-                        "admin_tenant_name": "%(ha_slave.auth_tenant_name)s",
-                        "insecure": "True"
-                    },
-                    "DEFAULT": {
-                        "host": "%(host_id)s"
-                    },
-                    "consul": {
-                        "report_interval": "180"
-                    },
-                    "node": {}
-                }
-            }
-        }
+    "ip_address": {
+      "path": "config/ha_slave_conf/node",
+      "default": ""
+    },
+    "cluster_ip": {
+      "path": "config/ha_slave_conf/node",
+      "default": ""
+    },
+    "role_rebalance_enabled": {
+      "path": "config/ha_slave_conf/consul_role_rebalance",
+      "default": false
+    },
+    "amqp_exchange_name": {
+      "path": "config/ha_slave_conf/consul_role_rebalance",
+      "default": "consul-role-rebalance-exchange"
+    },
+    "amqp_exchange_type": {
+      "path": "config/ha_slave_conf/consul_role_rebalance",
+      "default": "topic"
+    },
+    "amqp_routingkey_sending": {
+      "path": "config/ha_slave_conf/consul_role_rebalance",
+      "default": "receiving"
+    },
+    "amqp_routingkey_receiving": {
+      "path": "config/ha_slave_conf/consul_role_rebalance",
+      "default": "sending"
     }
+  },
+  "rabbit_permissions": {
+    "config": "^(.*)$",
+    "read": "^(.*)$",
+    "write": "^(.*)$"
+  },
+  "role_version": "__VERSION__",
+  "config": {
+    "pf9-ha-slave": {
+      "version": "__VERSION__",
+      "service_states": {
+        "pf9-ha-slave": true
+      },
+      "url": "%(download_protocol)s://%(host_relative_amqp_fqdn)s:%(download_port)s/private/__RPMNAME__",
+      "config": {
+        "ha_slave_conf": {
+          "keystone_authtoken": {
+            "auth_uri": "%(ha_slave.auth_uri)s",
+            "admin_user": "%(ha_slave.auth_user)s",
+            "admin_password": "%(ha_slave.auth_password)s",
+            "admin_tenant_name": "%(ha_slave.auth_tenant_name)s",
+            "insecure": "True"
+          },
+          "DEFAULT": {
+            "host": "%(host_id)s"
+          },
+          "consul": {
+            "report_interval": "180"
+          },
+          "node": {},
+          "consul_role_rebalance": {
+            "amqp_host": "localhost",
+            "amqp_port": "5672",
+            "amqp_user": "%(rabbit_userid)s",
+            "amqp_password": "%(rabbit_password)s",
+            "amqp_virtualhost": "/"
+          }
+        }
+      }
+    }
+  }
 }

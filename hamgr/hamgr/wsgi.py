@@ -5,17 +5,15 @@ from ConfigParser import ConfigParser
 import logging
 import json
 from datetime import datetime
-from flask import Flask
-from flask import g
 from flask import jsonify
 from flask import request
+from hamgr import app
 from hamgr.context import error_handler
-from hamgr import exceptions
+from shared.exceptions import ha_exceptions as exceptions
 from hamgr import provider_factory
 
 LOG = logging.getLogger(__name__)
-app = Flask(__name__)
-app.debug = True
+
 CONTENT_TYPE_HEADER = {'Content-Type': 'application/json'}
 
 
@@ -139,8 +137,10 @@ def get_consul_status(aggregate_id=None):
             host_status = 'up' if member['Status'] == 1 else 'down'
             # get consul role for host
             host_role = 'server' if member['Tags']['role'] == 'consul' else 'agent'
-            is_leader = (leader ==
-                         ('%s:%s' % (member['Addr'], member['Tags']['port'])))
+            is_leader = False
+            if host_role == "server":
+                # only server role will have port 8300 in Tags
+                is_leader = (leader == ('%s:%s' % (member['Addr'], member['Tags']['port'])))
 
             result = {
                 'aggregateName':aggregate_name,

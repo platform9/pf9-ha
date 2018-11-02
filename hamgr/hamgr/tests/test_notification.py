@@ -1,10 +1,17 @@
 import unittest
 import logging
-from ConfigParser import ConfigParser
-from hamgr import notification
-from hamgr.notification.notification import Notification
 
-LOG = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+handler = logging.StreamHandler()
+handler.setLevel(logging.DEBUG)
+handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+logger.addHandler(handler)
+
+from ConfigParser import ConfigParser
+from hamgr.notification.manager import NotificationManager
+from hamgr.notification.model import Notification
 
 
 @unittest.skip('tests requires rabbitmq server runs locally')
@@ -18,17 +25,18 @@ class NotificationPublishTest(unittest.TestCase):
         config.add_section('amqp')
         config.set('amqp', 'host', 'localhost')
         config.set('amqp', 'port', '5672')
-        config.set('amqp', 'username', 'test')
-        config.set('amqp', 'password', 'test')
-        config.set('amqp', 'exchange_name', 'pf9-changes')
-        config.set('amqp', 'exchange_type', 'direct')
-        config.set('amqp', 'queue_name', 'pf9-changes-q')
+        config.set('amqp', 'username', 'guest')
+        config.set('amqp', 'password', 'guest')
+        config.add_section('notification')
+        config.set('notification', 'exchange_name', 'pf9-changes')
+        config.set('notification', 'exchange_type', 'topic')
 
-        notification.start(config)
+        self.manager = NotificationManager(config)
 
     def tearDown(self):
-        notification.stop()
+        self.manager = None
+        del self.manager
 
     def test_publish(self):
-        notification.publish(Notification('add', 'cluster', '123'))
-        LOG.debug("test is done")
+        self.manager.send_notification(Notification('add', 'cluster', '123'))
+        logger.debug("test is done")

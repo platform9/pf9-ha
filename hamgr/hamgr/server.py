@@ -19,11 +19,11 @@
 # causes deadlock when use together with python's standard thread
 # methods. to avoid this, exclude the thread module from start
 # point of application to avoid thread deadlock problem.
-import eventlet
-eventlet.monkey_patch(thread=False)
+
 import argparse
 import ConfigParser
 
+from eventlet import listen
 from eventlet import wsgi
 from hamgr import periodic_task
 from paste.deploy import loadapp
@@ -49,30 +49,29 @@ def start_server(conf, paste_ini):
     else:
         paste_file = conf.get("DEFAULT", "paste-ini")
     try:
-        LOG.debug('start notification publisher')
-        notification.start(conf)
         LOG.debug('start periodic task')
         periodic_task.start()
         LOG.debug('get ha provider')
         provider = provider_factory.ha_provider()
-        LOG.debug('add task check_host_aggregate_changes')
-        periodic_task.add_task(provider.check_host_aggregate_changes, 120, run_now=True)
+        LOG.debug('add task process_host_aggregate_changes')
+        periodic_task.add_task(provider.process_host_aggregate_changes, 120, run_now=True)
         # dedicated task to handle host events
-        LOG.debug('add task host_events_processing')
-        periodic_task.add_task(provider.host_events_processing, 120, run_now=True)
-        LOG.debug('start wsgi server')
+        LOG.debug('add task process_host_events')
+        periodic_task.add_task(provider.process_host_events, 120, run_now=True)
+        # task to handle consul role rebalance
+        LOG.debug('add task process_consul_role_rebalance_requests')
+        periodic_task.add_task(provider.process_consul_role_rebalance_requests, 120, run_now=True)
         # background thread for handling HA enable/disable request
-        periodic_task.add_task(provider.ha_enable_disable_request_processing, 5,
-                               run_now=True)
+        LOG.debug('add task process_ha_enable_disable_requests')
+        periodic_task.add_task(provider.process_ha_enable_disable_requests, 5, run_now=True)
+        LOG.debug('start wsgi server')
         wsgi_app = loadapp('config:%s' % paste_file, 'main')
-        wsgi.server(eventlet.listen(('', conf.getint("DEFAULT", "listen_port"))),
+        wsgi.server(listen(('', conf.getint("DEFAULT", "listen_port"))),
                     wsgi_app, LOG)
     except Exception:
         # the wsgi.server is blocking call, if comes here mean it failed
         # so we can clean up here
-        LOG.exception('unhandled exception, free resources(stop notification publisher)')
-        notification.stop()
-
+        LOG.exception('unhandled exception from server')
 
 if __name__ == '__main__':
     parser = _get_arg_parser()

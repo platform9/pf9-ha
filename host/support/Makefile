@@ -6,7 +6,7 @@ UID ?= $(shell id -u)
 GID ?= $(shell id -g)
 SRCROOT = $(abspath $(dir $(CURDIR)))
 BUILD = $(SRCROOT)/../build
-STAGE = $(SRCROOT)/../stage
+STAGE = $(SRCROOT)/../build/stage
 
 all: wrapper
 
