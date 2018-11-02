@@ -12,8 +12,12 @@ echo "** hamgr version : ${version}"
 echo "** hamgr build : ${PF9_BUILD_NUMBER}"
 spec=pf9-$proj.spec
 srcroot=$(dirname $(readlink -f $0))/..
+echo "### srcroot = ${srcroot}"
 rpmbuild=$srcroot/../build/$proj
-echo $rpmbuild
+echo "### rpmbuild = ${rpmbuild}"
+shared=$(readlink -f ../../shared)
+echo "### shared = ${shared}"
+
 
 package=pf9-hamgr
 svcuser=hamgr
@@ -29,14 +33,28 @@ done
 cp -f $spec $rpmbuild/SPECS/
 
 # build a source tarball
-cd ../ && tar -c --exclude='*.pyc' -f $rpmbuild/SOURCES/source.tar \
+cd ../
+cp -rf $proj $rpmbuild/SOURCES/
+cp -rf ${shared} $rpmbuild/SOURCES/
+cp -rf etc $rpmbuild/SOURCES/
+cp -rf bin $rpmbuild/SOURCES/
+cp -f setup.py $rpmbuild/SOURCES/
+cp -f setup.cfg $rpmbuild/SOURCES/
+cp -f requirements.txt $rpmbuild/SOURCES/
+cp -f README.md $rpmbuild/SOURCES/
+
+cd $rpmbuild/SOURCES/
+tar -c --exclude='*.pyc' -f source.tar \
         $proj \
+        shared \
         etc \
         bin \
         setup.py \
         setup.cfg \
         requirements.txt \
         README.md
+
+cd ${srcroot}
 
 # make sure PYTHONPATH is unset so we don't accidentally satisfy a dependency
 # using a package outside the virtualenv

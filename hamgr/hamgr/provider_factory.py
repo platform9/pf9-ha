@@ -3,11 +3,11 @@
 #
 import logging
 from ConfigParser import ConfigParser
-from flask import Flask
+from hamgr import app
 from flask import g
 
-app = Flask(__name__)
 LOG = logging.getLogger(__name__)
+
 
 def ha_provider():
     with app.app_context():
@@ -37,4 +37,3 @@ def db_provider():
             g._db_provider = provider
         LOG.info('db provider : %s', str(provider))
         return provider
-

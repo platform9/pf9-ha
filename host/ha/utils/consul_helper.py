@@ -92,6 +92,14 @@ def get_ip_address():
     except Exception:
         return ''
 
+def get_consul_role_for_host(hostid):
+    cc = consul.Consul()
+    members = cc.agent.members()
+    targets = [x for x in members if x['Name']==hostid]
+    if len(targets) ==1:
+        return targets[0]['Tags']['role']
+    return None
+
 
 class report_object(dict):
     # the report send to hamgr should be like this

@@ -17,13 +17,29 @@ else
     mkdir -p $buildroot
 fi
 
-srcroot=$(cd $(dirname $buildroot)/../host; pwd)
+echo "buildroot=${buildroot}"
+
+srcroot=$(cd $(dirname $buildroot)/../../host; pwd)
 echo "SRCROOT = $srcroot"
+shared=$(cd $(dirname $buildroot)/../../shared; pwd)
 
 # virtualenv and setup
 virtualenv -p $python ${buildroot}/opt/pf9/pf9-ha
 prelink -u ${buildroot}/opt/pf9/pf9-ha/bin/python || true
-pushd ${srcroot}
+
+# copy to tmp folder
+mkdir -p $buildroot/tmp
+cp -rf ${srcroot}/ha $buildroot/tmp/
+cp -rf ${shared} $buildroot/tmp/
+cp -f ${srcroot}/README.md $buildroot/tmp/
+cp -f ${srcroot}/requirements.txt $buildroot/tmp/
+cp -f ${srcroot}/setup.cfg $buildroot/tmp/
+cp -f ${srcroot}/setup.py $buildroot/tmp/
+
+# remove tests
+rm -rf $buildroot/tmp/shared/tests
+
+pushd $buildroot/tmp
 PBR_VERSION=3.1.1 \
 ${buildroot}/opt/pf9/pf9-ha/bin/python \
     ${srcroot}/setup.py install

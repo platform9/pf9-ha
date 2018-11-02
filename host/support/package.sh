@@ -20,6 +20,8 @@ outdir=`cd $4; pwd`
 pkgtype=$5
 thisdir=`cd $(dirname $0); pwd`
 
+echo "### version=${version} , buildnum=${buildnum} , srcdir=${srcdir} , outdir=${outdir} , pkgtype=${pkgtype} , thisdir=${thisdir}"
+
 name=pf9-ha-slave
 githash=`git rev-parse --short HEAD`
 arch=x86_64

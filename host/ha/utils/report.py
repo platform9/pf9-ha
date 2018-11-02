@@ -73,6 +73,10 @@ class Reporter(object):
 
     def _need_refresh(self):
         """Return True if token should be refreshed."""
+        if self.token is None or self.token.get('expires_at', None) is None:
+            LOG.warn('token is null, need to refresh token : %s', str(self.token))
+            return True
+
         str_exp_time = self.token['expires_at']
         token_time = time.strptime(str_exp_time, '%Y-%m-%dT%H:%M:%S.%fZ')
         current_time = time.gmtime()
@@ -96,19 +100,21 @@ class HaManagerReporter(Reporter):
         super(HaManagerReporter, self).__init__()
 
     def report_status(self, data):
-        if self._need_refresh():
-            LOG.debug("Fetching new token as the old token has almost expired")
-            self._refresh_token()
-        headers = {
-            "Content-Type": "application/json",
-            "X-Auth-Token": self.token['id']
-        }
+
         if data.event['eventType'] == 1:
             event = 'host-up'
         elif data.event['eventType'] == 2:
             event = 'host-down'
         payload = json.dumps({'event': event, 'event_details': data })
         try:
+            if self._need_refresh():
+                LOG.debug("Fetching new token as the old token has almost expired")
+                self._refresh_token()
+            headers = {
+                "Content-Type": "application/json",
+                "X-Auth-Token": self.token['id']
+            }
+
             host_url = '/'.join([self.hamgr_url, data.event['hostName']])
             LOG.info('report to HA manager : %s', str(payload))
             resp = requests.post(host_url, data=payload, headers=headers,
