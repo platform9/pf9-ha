@@ -477,17 +477,25 @@ class NovaProvider(Provider):
         aggregates = client.aggregates.list()
         result = []
         for aggr in aggregates:
-            result.append(self._get_one(client, aggr.id))
+            obj = self._get_one(client, aggr.id)
+            if obj:
+                result.append(obj)
+            else:
+               LOG.warning('no hamgr cluster db record for aggregate id %d', aggr.id)
         return result
 
     def _get_one(self, client, aggregate_id):
         _ = self._get_aggregate(client, aggregate_id)
         cluster = None
         try:
-            cluster = db_api.get_cluster(str(aggregate_id))
+            # host aggregate id is the 'name' field in hamgr cluster table
+            name = str(aggregate_id)
+            cluster = db_api.get_cluster(name)
         except ha_exceptions.ClusterNotFound:
-            pass
-
+            LOG.warning('no hamgr cluster record for host aggregate id %d', aggregate_id)
+            return None
+        if cluster is None:
+            return None
         enabled = cluster.enabled if cluster is not None else False
         if enabled is True:
             task_state = 'completed' if cluster.task_state is None else \
@@ -498,9 +506,11 @@ class NovaProvider(Provider):
 
     def get(self, aggregate_id):
         client = self._get_client()
-
-        return [self._get_one(client, aggregate_id)] \
-            if aggregate_id is not None else self._get_all(client)
+        if aggregate_id is not None:
+            obj = self._get_one(client, aggregate_id)
+            return [obj] if obj is not None else []
+        else:
+            return self._get_all(client)
 
     def _get_aggregate(self, client, aggregate_id):
         try:
