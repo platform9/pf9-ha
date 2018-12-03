@@ -50,6 +50,30 @@ def get_nodes_in_segment(token, name):
     return resp.json()['hosts']
 
 
+def is_failover_segment_under_recovery(token, name):
+    # find all hosts in current segment
+    hosts = get_nodes_in_segment(token, name)
+    # get notifications for those hosts
+    for host in hosts:
+        notifications = get_notifications(token, host['uuid'])['notifications']
+        # if for any host there are associated notifications in
+        # 'new', 'error', 'running' state, then it means this
+        # failover segment is locked for recovery
+        recovery_states = ['new', 'error', 'running']
+        has_target_status = [x for x in notifications if
+                             x['status'] in recovery_states]
+        if len(has_target_status) > 0:
+            LOG.info('failover segment %s is under recovery, as host %s '
+                     'has notifications in recovery state %s : %s',
+                     name,
+                     host['uuid'],
+                     str(recovery_states),
+                     str(has_target_status))
+            return True
+
+    return False
+
+
 def delete_failover_segment(token, name):
     headers = {'X-Auth-Token': token['id']}
     seg = None
@@ -80,7 +104,7 @@ def delete_failover_segment(token, name):
                 resp.raise_for_status()
     except Exception:
         LOG.warn('error when delete host from segment %s', str(name),
-                  exc_info=True)
+                 exc_info=True)
         raise
 
     url = '/'.join([_URL, 'segments', seg['uuid']])
@@ -184,8 +208,9 @@ def get_notification_status(token, uuid):
     obj = resp.json()
     return obj['notification']['status']
 
+
 def update_host_maintenance(token, host_id, segment_name, on_maintenance):
-    if not host_id :
+    if not host_id:
         raise ArgumentException('host_id is null or empty')
     if not segment_name:
         raise ArgumentException('segment_name is null or empty')
@@ -198,7 +223,7 @@ def update_host_maintenance(token, host_id, segment_name, on_maintenance):
     segment_uuid = target_segment['uuid']
     # confirm host exist in target segment
     hosts = get_nodes_in_segment(token, segment_name)
-    xhosts = filter(lambda x:x['name'] == str(host_id), hosts)
+    xhosts = filter(lambda x: x['name'] == str(host_id), hosts)
     if len(xhosts) != 1:
         LOG.error('host %s does not exist in masakari segment %s', host_id,
                   segment_name)
@@ -220,4 +245,3 @@ def update_host_maintenance(token, host_id, segment_name, on_maintenance):
     resp.raise_for_status()
     LOG.debug('host %s in segment %s is updated with maintenance status : '
               '%s', host_id, segment_name, str(on_maintenance))
-

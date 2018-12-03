@@ -969,6 +969,19 @@ class NovaProvider(Provider):
                 LOG.warn('Masakari segment for cluster: %s was not found, '
                          'skipping deauth', aggregate_name)
 
+            # need to check whether masakari is working on this failover
+            # segment for any notifications. if there is such notification
+            # in 'new', 'running', 'error' state, then it is locked down
+            # until the notification is not in those state, then we can
+            # delete the failover segment, otherwise there will be
+            # 409 conflict error
+            need_to_wait = masakari.is_failover_segment_under_recovery(
+                    self._token, aggregate_name)
+            if need_to_wait:
+                LOG.info('masakari failover segment %s is under recovery, '
+                         'will retry disabling request later', aggregate_name)
+                return
+
             # change status from 'request-disable' to 'disabling'
             db_api.update_request_status(cluster.id
                                          , constants.HA_STATE_DISABLING)
