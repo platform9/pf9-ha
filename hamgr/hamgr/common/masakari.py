@@ -51,8 +51,13 @@ def get_nodes_in_segment(token, name):
 
 
 def is_failover_segment_under_recovery(token, name):
-    # find all hosts in current segment
-    hosts = get_nodes_in_segment(token, name)
+    hosts = []
+    try:
+        # find all hosts in current segment
+        hosts = get_nodes_in_segment(token, name)
+    except exceptions.SegmentNotFound:
+        return False
+
     # get notifications for those hosts
     for host in hosts:
         notifications = get_notifications(token, host['uuid'])['notifications']
