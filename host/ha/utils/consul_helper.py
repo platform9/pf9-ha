@@ -70,6 +70,9 @@ def _valid_consul_port(string):
 
 
 def valid_cluster_port(string):
+    idx = string.find(':')
+    if idx == -1:
+        return False
     ip_address, port = string.split(':', 1)
     return _valid_ip_address(ip_address) and _valid_consul_port(port)
 
@@ -169,23 +172,35 @@ class consul_status(object):
         try:
             if self.cluster_alive():
                 # KV store is not available when quorum is lost
-                _, data = self.cc.kv.get(key)
+                _, data = self.kv_fetch(key)
                 if not data:
                     LOG.info('Adding {key}={id}'.format(key=key,
                                                         id=self.host_id))
-                    self.cc.kv.put(key, self.host_id)
+                    self.kv_update(key, self.host_id)
                 else:
                     if data['Value'] != self.host_id:
                         LOG.info('Updating {key} to {id}'.format(
                             key=key, id=self.host_id))
-                        self.cc.kv.put(key, self.host_id)
+                        self.kv_update(key, self.host_id)
             else:
                 LOG.warn('Not adding {id} to KV since cluster is '
                          'unavailable'.format(id=self.host_id))
         except Exception as e:
             LOG.warn('failed to publish host id %s, error : %s', key, str(e))
 
-    def _get_cluster_status(self, current_time=datetime.now()):
+    def get_consul_status_report(self):
+        _, kv_list = self.kv_fetch('', recurse=True)
+        consul_report = {
+            'leader': self.cc.status.leader(),
+            'peers': self.cc.status.peers(),
+            'members': self.cc.agent.members(),
+            'kv': kv_list,
+            'joins': str(CONF.consul.join),
+        }
+
+        return consul_report
+
+    def get_cluster_report(self, current_time=datetime.now()):
         cluster_report = {}
         for member in self.cc.agent.members():
             LOG.debug('member addr %s status %s', str(member.get('Addr')),
@@ -199,7 +214,7 @@ class consul_status(object):
 
             key = "%s:%s" % (member.get('Addr'), member.get('Port'))
 
-            ignore, data = self.cc.kv.get(key)
+            ignore, data = self.kv_fetch(key)
             LOG.debug('get kv data for %s : %s', key, str(data))
             if not data:
                 # Cannot get the host id, which means that ha-slave is not
@@ -209,7 +224,7 @@ class consul_status(object):
                 continue
             hostname = data['Value']
 
-            _, kv_list = self.cc.kv.get('', recurse=True)
+            _, kv_list = self.kv_fetch('', recurse=True)
             consul_obj = {
                 'leader': self.cc.status.leader(),
                 'peers': self.cc.status.peers(),
@@ -245,7 +260,7 @@ class consul_status(object):
         for change in self.changed_clusters:
             detectedAt = datetime.strptime(change.event['detectedAt'], "%Y-%m-%d %H:%M:%S")
             if datetime.now() - detectedAt > report_interval:
-                current_state = self._get_cluster_status()
+                current_state = self.get_cluster_report()
                 addr = change.event['hostAddr']
                 LOG.debug('checking cluster : %s', str(change))
                 if addr in current_state and current_state[addr].event['eventType'] \
@@ -276,14 +291,14 @@ class consul_status(object):
         if reported_cls:
             LOG.info('examining founded change for reporting : %s',
                      str(reported_cls))
-            ignore, data = self.cc.kv.get(retval.event['hostName'])
+            ignore, data = self.kv_fetch(retval.event['hostName'])
             if not data:
                 LOG.info('founded change is not reported to kv store, '
                          'now store it. change : %s ', str(reported_cls))
                 # only store host down report in kv store
                 if retval.event['eventType'] == 2:
                     LOG.info('report host down to kv store : %s ', json.dumps(reported_cls))
-                    self.cc.kv.put(retval.event['hostName'], json.dumps(reported_cls))
+                    self.kv_update(retval.event['hostName'], json.dumps(reported_cls))
             else:
                 LOG.info('founded change already exist in kv store, '
                          'change : %s, report : %s',
@@ -340,6 +355,13 @@ class consul_status(object):
         self.last_status = self.current_status
         return report_change
 
+    def cluster_leader(self):
+        if not self.cluster_alive():
+            # There is no cluster so no leader
+            return None
+        leader = self.cc.status.leader()
+        return leader
+
     def am_i_cluster_leader(self):
         if not self.cluster_alive():
             # There is no cluster so no leader
@@ -390,7 +412,7 @@ class consul_status(object):
         #
         # ----------------------------------------------------------------------
         member_ids_in_kvstore = []
-        _, kv_list = self.cc.kv.get('', recurse=True)
+        _, kv_list = self.kv_fetch('', recurse=True)
         if kv_list is None:
             kv_list = []
         for kv in kv_list:
@@ -420,7 +442,7 @@ class consul_status(object):
         # record some other failed nodes in KV store. Check the current status
         # and add any failed nodes in the changed_status array that are not
         # present in it already. Addresses bug: IAAS-7044
-        current_status = self._get_cluster_status()
+        current_status = self.get_cluster_report()
 
         LOG.info('finding changes by comparing consul current status with '
                  'last status, current:%s , last:%s',
@@ -461,7 +483,7 @@ class consul_status(object):
                     # check whether this down node has been reported before
                     reported_before = False
                     hostid = data.event['hostName']
-                    _, existing_data = self.cc.kv.get(hostid)
+                    _, existing_data = self.kv_fetch(hostid)
                     LOG.info('host % status is down, check if report exist',
                              addr)
                     # if report exist, check whether reported
@@ -505,13 +527,13 @@ class consul_status(object):
                         # no need to cache reported change
                         self.changed_clusters.remove(node)
                         # no need to store reported event in kv store
-                        _, existing_data = self.cc.kv.get(hostid)
+                        _, existing_data = self.kv_fetch(hostid)
                         if existing_data:
                             LOG.info('host %s status up, and previous report '
                                      'has been reported, so remove from '
                                      'kv store. report %s : %s',
                                      addr, hostid, str(existing_data))
-                            self.cc.kv.delete(hostid)
+                            self.kv_delete(hostid)
                         else:
                             LOG.info('host %s status up, previous report was '
                                      'reported, but report does not exist in '
@@ -534,10 +556,18 @@ class consul_status(object):
         except Exception:
             return False
 
-    def update_kv(self, key, value):
+    def kv_fetch(self, key, recurse=False):
+        try:
+            k, v = self.cc.kv.get(key, recurse=recurse)
+            return k, v
+        except Exception as e:
+            LOG.warn('error when fetch value for key %s : %s', key, e)
+        return None, None
+
+    def kv_update(self, key, value):
         self.cc.kv.put(key, value)
 
-    def delete_from_kv(self, key):
+    def kv_delete(self, key):
         try:
             LOG.info('remove from kv store for key : %s', key)
             self.cc.kv.delete(key)
@@ -546,7 +576,7 @@ class consul_status(object):
                 id=self.host_id, key=key, error=str(e)))
 
     def get_report_status(self, hostid):
-        ignore, data = self.cc.kv.get(hostid)
+        ignore, data = self.kv_fetch(hostid)
         if data:
             return json.loads(data['Value'])
         LOG.warn('{id} tried to access report status for {host} which '
@@ -567,14 +597,14 @@ class consul_status(object):
         # mark this event as reported and store to kv store
         old_status['event']['reported'] = True
         old_status['event']['reportedAt'] = datetime.strftime(datetime.now(), '%Y-%m-%d %H:%M:%S')
-        self.update_kv(cluster_status.event['hostName'], json.dumps(old_status))
+        self.kv_update(cluster_status.event['hostName'], json.dumps(old_status))
 
         LOG.info('update reported change for host %s in kv store : %s',
                  str(cluster_status.event['hostName']),
-                 str(self.cc.kv.get(str(cluster_status.event['hostName']))))
+                 str(self.kv_fetch(str(cluster_status.event['hostName']))))
 
     def cleanup_consul_kv_store(self):
-        _, kv_list = self.cc.kv.get('', recurse=True)
+        _, kv_list = self.kv_fetch('', recurse=True)
         LOG.info('vk store to clean up : %s', str(kv_list))
         for kv in kv_list:
             key = kv['Key']
@@ -595,7 +625,7 @@ class consul_status(object):
                              'time parsed : %s, current : %s',
                              key, report_time_str, str(report_time),
                              str(datetime.now()))
-                    self.cc.kv.delete(key)
+                    self.kv_delete(key)
             elif valid_cluster_port(key):
                 # Dealing with "<ip>:<port>" = <host_id>
                 ip_addr = key.split(':')[0]
@@ -605,11 +635,11 @@ class consul_status(object):
                     LOG.info('remove from kv store for unknown host %s '
                              'by key %s , current members : %s',
                              ip_addr, key, str(members))
-                    self.cc.kv.delete(key)
+                    self.kv_delete(key)
 
     def log_kvstore(self):
         try:
-            _, kv_list = self.cc.kv.get('', recurse=True)
+            _, kv_list = self.kv_fetch('', recurse=True)
             LOG.info('kv store after join: %s', str(kv_list))
         except Exception as e:
             LOG.error(str(e))

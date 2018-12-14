@@ -40,6 +40,13 @@ def get_failover_segment(token, name):
     return expected_seg[0]
 
 
+def is_failover_segment_exist(token, segment_name):
+    try:
+        get_failover_segment(token, segment_name)
+    except exceptions.SegmentNotFound:
+        return False
+    return True
+
 def get_nodes_in_segment(token, name):
     segment = get_failover_segment(token, name)
     url = '/'.join([_URL, 'segments', segment['uuid'], 'hosts'])
@@ -68,7 +75,7 @@ def is_failover_segment_under_recovery(token, name):
         has_target_status = [x for x in notifications if
                              x['status'] in recovery_states]
         if len(has_target_status) > 0:
-            LOG.info('failover segment %s is under recovery, as host %s '
+            LOG.info('masakari segment %s is under recovery, as host %s '
                      'has notifications in recovery state %s : %s',
                      name,
                      host['uuid'],
@@ -88,7 +95,7 @@ def delete_failover_segment(token, name):
         LOG.error('error when get segment info for %s : %s', str(name), str(e))
         return
     if seg is None:
-        LOG.debug('failover segment %s does not exist ', str(name))
+        LOG.debug('masakari segment %s does not exist ', str(name))
         return
 
     try:
@@ -121,37 +128,57 @@ def delete_failover_segment(token, name):
                   str(name))
         resp.raise_for_status()
     else:
-        LOG.info('successfully deleted failover segment %s', str(name))
+        LOG.info('successfully deleted masakari segment %s', str(name))
 
 
 def create_failover_segment(token, name, hosts):
+    existing_segment = None
     try:
         name = str(name)
-        _ = get_failover_segment(token, name)
+        existing_segment = get_failover_segment(token, name)
     except exceptions.SegmentNotFound:
-        pass
-    else:
-        LOG.warn('Segment %s already exists', name)
-        delete_failover_segment(token, name)
+        existing_segment = None
 
     headers = {'X-Auth-Token': token['id'], 'Content-Type': 'application/json'}
     url = '/'.join([_URL, 'segments'])
-    data = dict(name=name, service_type='COMPUTE', recovery_method='auto',
-                description='Created by HA Manager')
-    resp = requests.post(url, headers=headers,
-                         data=json.dumps(dict(segment=data)))
-    resp.raise_for_status()
+    data = dict(name=name, service_type='COMPUTE', recovery_method='auto', description='Created by HA Manager')
+    if existing_segment:
+        LOG.warn('Segment %s already exists, now try to update it if needed : %s', name, str(existing_segment))
+        # update it rather than delete then re-create
+        if existing_segment['service_type'] != data['service_type'] or \
+                existing_segment['recovery_method'] != data['recovery_method'] or \
+                existing_segment['description'] != data['description']:
+            LOG.info('update existing masakari segment %s with properties : %s',  name, str(data))
+            resp = requests.put(url + "/" + str(existing_segment['id']), headers=headers, data=json.dumps(dict(segment=data)))
+            resp.raise_for_status()
 
-    seg = resp.json()['segment']
-    url = '/'.join([_URL, 'segments', seg['uuid'], 'hosts'])
-    for h in hosts:
-        data = dict(host=dict(name=h,
-                              type='COMPUTE',
-                              reserved='False',
-                              on_maintenance='False',
-                              control_attributes=''))
-        resp = requests.post(url, headers=headers, data=json.dumps(data))
+        # now update hosts
+        existing_hosts = get_nodes_in_segment(token, name)
+        existing_host_names = [x['name'] for x in existing_hosts ]
+        common = set(existing_host_names).intersection(set(hosts))
+        hosts_deleted = set(existing_host_names) - set(common)
+        hosts_added = set(hosts) - set(common)
+        if len(hosts_deleted):
+            LOG.info('remove hosts for existing masakari segment %s : %s', name, str(hosts_deleted))
+            delete_hosts_from_failover_segment(token, name, list(hosts_deleted))
+        if len(hosts_added):
+            LOG.info('add hosts for existing masakari segment %s : %s', name, str(hosts_added))
+            add_hosts_to_failover_segment(token, name, list(hosts_added))
+    else:
+        LOG.warn('Segment %s not exists, now try to create one', name)
+        resp = requests.post(url, headers=headers, data=json.dumps(dict(segment=data)))
         resp.raise_for_status()
+
+        seg = resp.json()['segment']
+        url = '/'.join([_URL, 'segments', seg['uuid'], 'hosts'])
+        for h in hosts:
+            data = dict(host=dict(name=h,
+                                  type='COMPUTE',
+                                  reserved='False',
+                                  on_maintenance='False',
+                                  control_attributes=''))
+            resp = requests.post(url, headers=headers, data=json.dumps(data))
+            resp.raise_for_status()
 
 
 def create_notification(token, ntype, hostname, time, payload):
@@ -250,3 +277,44 @@ def update_host_maintenance(token, host_id, segment_name, on_maintenance):
     resp.raise_for_status()
     LOG.debug('host %s in segment %s is updated with maintenance status : '
               '%s', host_id, segment_name, str(on_maintenance))
+
+def add_hosts_to_failover_segment(token, segment_name, host_ids):
+    segment = None
+    try:
+        segment = get_failover_segment(token, str(segment_name))
+    except exceptions.SegmentNotFound:
+        LOG.warn('masakari segment %s does not exist for adding hosts %s', segment_name, str(host_ids))
+        pass
+
+    url = '/'.join([_URL, 'segments', segment['uuid'], 'hosts'])
+    headers = {'X-Auth-Token': token['id'], 'Content-Type': 'application/json'}
+    for hid in host_ids:
+        data = dict(host=dict(name=hid,
+                              type='COMPUTE',
+                              reserved='False',
+                              on_maintenance='False',
+                              control_attributes=''))
+        resp = requests.post(url, headers=headers, data=json.dumps(data))
+        resp.raise_for_status()
+
+
+def delete_hosts_from_failover_segment(token, segment_name, host_ids):
+    segment = None
+    try:
+        segment = get_failover_segment(token, str(segment_name))
+    except exceptions.SegmentNotFound:
+        LOG.warn('masakari segment %s does not exist for adding hosts %s', segment_name, str(host_ids))
+        pass
+
+    # when delete a host, requires host uuid, not host name (id)
+    headers = {'X-Auth-Token': token['id']}
+    segment_uuid = segment['uuid']
+    hosts = get_nodes_in_segment(token, segment_name)
+    for hid in host_ids:
+        matched = [x for x in hosts if x['name'] == hid]
+        if len(matched) != 1:
+            continue
+        uuid = matched[0]['uuid']
+        url = '/'.join([_URL, 'segments', segment_uuid, 'hosts', uuid])
+        resp = requests.delete(url, headers=headers)
+        resp.raise_for_status()

@@ -17,7 +17,7 @@ limitations under the License.
 
 import json
 import logging
-
+from datetime import datetime
 from shared.rpc.rpc_base import RpcBase
 
 LOG = logging.getLogger(__name__)
@@ -88,7 +88,8 @@ class RpcProducer(RpcBase):
             routing = self._routing_key
 
         payload = json.dumps(message, ensure_ascii=False)
+        LOG.debug('start to publish message at %s : %s', str(datetime.utcnow()), payload)
         self.get_channel().basic_publish(self._exchange,
                                          routing,
                                          payload)
-        LOG.debug('producer published message : %s', payload)
+        LOG.debug('producer published message at %s : %s', str(datetime.utcnow()), payload)

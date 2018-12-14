@@ -17,6 +17,7 @@ limitations under the License.
 
 import logging
 import json
+from datetime import datetime
 from shared.rpc.rpc_base import RpcBase
 
 LOG = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ class RpcConsumer(RpcBase):
         self._is_setup_ready = False
 
     def _on_message_received(self, unused_channel, basic_deliver, properties, body):
-        LOG.debug('consumer received message from server : %s', str(body))
+        LOG.debug('consumer received message from server at %s: %s', str(datetime.utcnow()), str(body))
         tag = basic_deliver.delivery_tag
         LOG.info('consumer acknowledging received message # %s : %s', tag, body)
         self.get_channel().basic_ack(tag)

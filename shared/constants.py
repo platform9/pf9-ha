@@ -17,6 +17,10 @@ limitations under the License.
 # the host events
 EVENT_HOST_UP = 'host-up'
 EVENT_HOST_DOWN = 'host-down'
+EVENT_HOST_ADDED = 'host-added'
+EVENT_HOST_REMOVED = 'host-removed'
+
+HOST_EVENTS = [EVENT_HOST_UP , EVENT_HOST_DOWN, EVENT_HOST_ADDED, EVENT_HOST_REMOVED]
 
 # the status of processing events
 STATE_ABORTED = 'aborted'

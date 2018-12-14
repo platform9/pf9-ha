@@ -7,6 +7,7 @@ import io
 import threading
 from ConfigParser import ConfigParser
 from datetime import datetime
+from datetime import timedelta
 from subprocess import call
 from time import daylight
 from time import sleep
@@ -19,6 +20,8 @@ from oslo_config import cfg
 from shared import constants
 from shared.rebalance.manager import RebalanceManager
 from shared.messages.rebalance_response import ConsulRoleRebalanceResponse
+from shared.messages.consul_response import ConsulRefreshResponse
+from shared.messages import message_types
 
 LOG = logging.getLogger('ha-manager')
 
@@ -340,25 +343,128 @@ def switch_to_new_consul_role(rebalance_mgr, request, current_host_id, join_ips)
     rebalance_mgr.send_role_rebalance_response(resp)
     return True
 
+def handle_consul_refresh_request(rebalance_mgr, hostid, request = None):
+    try:
+        key_prefix = 'request-'
+        ch = consul_helper.consul_status(hostid)
+        # all hosts will receive this broadcast request, so there are two scenarios:
+        # - receiver is consul leader:
+        #     when it is alive : it can reply immediately
+        #     when leader election happening : no one reply
+        # - receiver is not consul leader :
+        #     won't reply
+        # so better to save the request in consul, with flag for if it is reported.
+        if request:
+            msg_type = request['type']
+            req_id = request['id']
+
+            if msg_type != message_types.MSG_CONSUL_REFRESH_REQUEST:
+                LOG.info('not a consul refresh request : %s', str(request))
+                resp = ConsulRefreshResponse(req_id,
+                                             status=constants.REBALANCE_STATE_ABORTED,
+                                             report='',
+                                             message='not a consul refresh request')
+                rebalance_mgr.send_role_rebalance_response(resp, type=message_types.MSG_CONSUL_REFRESH_RESPONSE)
+                return
+
+            # for valid request , store in kv first if not exist
+            key = key_prefix + request['id']
+            _, existing = ch.kv_fetch(key)
+            if existing is None:
+                data = json.dumps({'request':request,
+                                   'processed': False,
+                                   'timestamp': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                                   'createdBy': hostid
+                                   })
+                ch.kv_update(key, data)
+                LOG.info('consul refresh request %s is stored in kv store : %s', req_id, data)
+            else:
+                LOG.info('consul refresh request %s already exist in kv store : %s', req_id, str(existing))
+
+        # only leader can act on the request
+        is_leader = ch.am_i_cluster_leader()
+        if not is_leader:
+            LOG.info('i am not leader, so not response for consul refresh request. leader %s', str(ch.cluster_leader()))
+            return
+
+        # scan kv to see whether there are valid consul refresh requests
+        valid_requests = []
+        _, kv_list = ch.kv_fetch('', recurse=True)
+        if kv_list is None:
+            kv_list = []
+        for kv in kv_list:
+            key = str(kv['Key'])
+            if key.startswith(key_prefix):
+                value = json.loads(kv['Value'])
+                if not value['processed']:
+                    timestamp = datetime.strptime(value['timestamp'],'%Y-%m-%d %H:%M:%S')
+                    if (datetime.utcnow() - timestamp) < timedelta(seconds=120):
+                        valid_requests.append(value['request'])
+                    else:
+                        LOG.info('delete stabled processed consul refresh request from kv store')
+                        ch.kv_delete(key)
+                else:
+                    LOG.info('delete already processed consul refresh request from kv store')
+                    ch.kv_delete(key)
+
+        if len(valid_requests) > 0:
+            LOG.info('found valid consul refresh requests : %s', str(valid_requests))
+
+        for req in valid_requests:
+            LOG.info('i am leader, now response for consul refresh request : %s', str(req))
+            req_id = req['id']
+            req_type = req['type']
+            if req_type == message_types.MSG_CONSUL_REFRESH_REQUEST:
+                report = ch.get_consul_status_report()
+                report['reportedBy'] = hostid
+                resp = ConsulRefreshResponse(req_id,
+                                             status=constants.REBALANCE_STATE_FINISHED,
+                                             report = json.dumps(report),
+                                             message='')
+                rebalance_mgr.send_role_rebalance_response(resp, type=message_types.MSG_CONSUL_REFRESH_RESPONSE)
+                LOG.info('consul refresh response is sent at %s : %s', str(datetime.utcnow()), str(resp))
+            else:
+                LOG.info('no valid consul refresh request')
+            LOG.info('delete consul refresh requst from kv store')
+            key = key_prefix + req_id
+            ch.kv_delete(key)
+    except Exception as e:
+        LOG.exception('unhandled exception when process consul refresh request : %s', str(e))
+
 
 def processing_rebalance_requests(rebalance_mgr, hostid, join_ips):
     global STOPPING
     global REBALANCE_IN_PROGRESS
     while not STOPPING:
         try:
-            if rebalance_mgr:
-                LOG.debug('check consul role rebalance request at %s', str(datetime.utcnow()))
-                req = rebalance_mgr.get_role_rebalance_request()
-                LOG.info('found consul role rebalance request : %s', str(req))
-                if req and req['host_id'] == hostid:
-                    REBALANCE_IN_PROGRESS = True
-                    LOG.debug('received consul role rebalance request for me %s : %s', hostid, str(req))
-                    cluster_setup = switch_to_new_consul_role(rebalance_mgr, req, hostid, join_ips)
-                    LOG.debug('is consul role rebalance succeeded ? %s', str(cluster_setup))
-                    REBALANCE_IN_PROGRESS = False
-                else:
-                    REBALANCE_IN_PROGRESS = False
-                    LOG.debug('received consul role rebalance request is None or not for me : %s', str(req))
+            if not rebalance_mgr:
+                sleep(1)
+                continue
+
+            # check for any rebalance requests
+            LOG.debug('check consul role rebalance request at %s', str(datetime.utcnow()))
+            req = rebalance_mgr.get_role_rebalance_request(request_type=message_types.MSG_ROLE_REBALANCE_REQUEST)
+            LOG.info('found consul role rebalance request : %s', str(req))
+            if req:
+                msg_type = req['type']
+                LOG.info('received consul role rebalance request : %s', str(req))
+
+                # is the payload a rebalance request ?
+                if msg_type == message_types.MSG_ROLE_REBALANCE_REQUEST:
+                    if req['host_id'] == hostid:
+                        REBALANCE_IN_PROGRESS = True
+                        LOG.debug('received consul role rebalance request for me %s : %s', hostid, str(req))
+                        cluster_setup = switch_to_new_consul_role(rebalance_mgr, req, hostid, join_ips)
+                        LOG.debug('is consul role rebalance succeeded ? %s', str(cluster_setup))
+                        REBALANCE_IN_PROGRESS = False
+                    else:
+                        LOG.warn('received consul role rebalance request is not for me : %s', str(req))
+
+            # check for any consul refresh requests
+            req = rebalance_mgr.get_role_rebalance_request(request_type=message_types.MSG_CONSUL_REFRESH_REQUEST)
+            if req:
+                LOG.info('received consul refresh request at %s : %s', str(datetime.utcnow()), str(req))
+            handle_consul_refresh_request(rebalance_mgr, hostid, request=req)
         except:
             REBALANCE_IN_PROGRESS = False
             LOG.exception('unhandled exception in processing_rebalance_requests')
@@ -490,8 +596,8 @@ def loop():
 
             LOG.info('sleeping for %s seconds' % sleep_time)
             sleep(sleep_time)
-    except:
-        LOG.exception('unhandled exception in pf9-ha-slave, exiting now')
+    except Exception as e:
+        LOG.exception('unhandled exception in pf9-ha-slave, exiting now : %s', str(e))
     if rebalance_thread and rebalance_thread.is_alive():
         STOPPING = True
         rebalance_thread.join(5)

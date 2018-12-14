@@ -18,22 +18,19 @@ from shared.messages.message_base import MessageBase
 from shared.messages import message_types as message_types
 
 
-class ConsulRoleRebalanceResponse(MessageBase):
-    def __init__(self, request_id, host_id, status, message, *args, **kwargs):
+class ConsulRefreshResponse(MessageBase):
+    def __init__(self, request_id, status, report, message, *args, **kwargs):
         self._req_id = request_id
-        self._host_id = host_id
         self._status = status
+        self._report = report
         self._message = message
-        super(ConsulRoleRebalanceResponse, self).__init__(type=message_types.MSG_ROLE_REBALANCE_RESPONSE,
-                                                          req_id=self._req_id,
-                                                          host_id=self._host_id,
-                                                          status=self._status,
-                                                          message=self._message,
-                                                          *args,
-                                                          **kwargs)
-
-    def host_id(self):
-        return self._host_id
+        super(ConsulRefreshResponse, self).__init__(type=message_types.MSG_CONSUL_REFRESH_RESPONSE,
+                                                    req_id=self._req_id,
+                                                    status=self._status,
+                                                    report = self._report,
+                                                    message=self._message,
+                                                    *args,
+                                                    **kwargs)
 
     def status(self):
         return self._status
@@ -44,3 +41,5 @@ class ConsulRoleRebalanceResponse(MessageBase):
     def message(self):
         return self._message
 
+    def report(self):
+        return self._report

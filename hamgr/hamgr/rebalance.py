@@ -4,6 +4,7 @@ import traceback
 
 from shared.exceptions import ha_exceptions
 from shared.rebalance.manager import RebalanceManager
+from shared.messages import message_types
 
 LOG = logging.getLogger(__name__)
 
@@ -101,6 +102,18 @@ class RebalanceController(object):
         self.rebalancer_manager.send_role_rebalance_request(request)
         resp = self.rebalancer_manager.get_role_rebalance_response(req_id)
         LOG.info('response for request %s : %s', req_id, str(resp))
+        return resp
+
+    def ask_for_consul_cluster_status(self, request):
+        # send a consul cluster status update request and wait for response
+        if not self.rebalancer_manager:
+            return {}
+        LOG.info('refresh request begin at %s', str(datetime.datetime.utcnow()))
+        self.rebalancer_manager.send_role_rebalance_request(request, type=message_types.MSG_CONSUL_REFRESH_REQUEST)
+        resp = self.rebalancer_manager.get_role_rebalance_response(request.id(),
+                                                                   response_type=message_types.MSG_CONSUL_REFRESH_RESPONSE,
+                                                                   timeout_seconds=120)
+        LOG.info('refresh response received at %s : %s', str(datetime.datetime.utcnow()), str(resp))
         return resp
 
 
