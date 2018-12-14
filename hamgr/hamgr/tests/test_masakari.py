@@ -61,7 +61,7 @@ class MasakariTest(unittest.TestCase):
     @mock.patch('hamgr.common.utils.get_token')
     def test_create_failover_segment(self, mock_token, mock_get_failover_segment, mock_delete_failover_segment,
                                      mock_post):
-        mock_get_failover_segment.return_value = {"name": "fake-segments", "uuid": "fake-uuid", "hosts": []}
+        mock_get_failover_segment.return_value = None
         mock_delete_failover_segment.return_value = None
         masakari.create_failover_segment(mock_token, "fake-segment", [{"name": "fake-host-name"}])
 

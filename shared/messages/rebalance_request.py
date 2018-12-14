@@ -7,9 +7,7 @@ class ConsulRoleRebalanceRequest(MessageBase):
         self._host_id = host_id
         self._old_role = old_role
         self._new_role = new_role
-        payload = { "host_id": host_id, "old_role": old_role, "new_role":new_role}
         super(ConsulRoleRebalanceRequest, self).__init__(type=message_types.MSG_ROLE_REBALANCE_REQUEST,
-                                                         payload=payload,
                                                          host_id=self._host_id,
                                                          old_role=self._old_role,
                                                          new_role=self._new_role,

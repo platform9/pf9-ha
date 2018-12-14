@@ -84,7 +84,7 @@ class NovaProviderTest(unittest.TestCase):
             return ip_lookup, cluster_ip_lookup
 
         self._provider._get_client = get_client
-        self._provider._get_ips = get_ips
+        self._provider._get_ips_for_hosts = get_ips
 
     def tearDown(self):
         db_api.Base.metadata.drop_all(db_api._engine)

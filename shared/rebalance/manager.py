@@ -6,8 +6,10 @@ from shared.exceptions import ha_exceptions
 from shared.rpc.rpc_producer import RpcProducer
 from shared.rpc.rpc_consumer import RpcConsumer
 from shared.messages import message_types
+from shared.messages import message_schemas
 from shared.messages.rebalance_request import ConsulRoleRebalanceRequest
 from shared.messages.rebalance_response import ConsulRoleRebalanceResponse
+from shared.messages.consul_request import ConsulRefreshRequest
 
 LOG = logging.getLogger(__name__)
 
@@ -16,8 +18,7 @@ class RebalanceManager(object):
     role_rebalance_rpc_producer = None
     role_rebalance_rpc_consumer = None
     rpc_client = None
-    role_rebalance_requests_buffer = None
-    role_rebalance_responses_buffer = None
+    message_buffers = None
 
     def __init__(self,
                  host,
@@ -30,8 +31,10 @@ class RebalanceManager(object):
                  routingkey_for_sending,
                  queue_for_receiving,
                  routingkey_for_receiving):
-        self.role_rebalance_requests_buffer = Queue.Queue()
-        self.role_rebalance_responses_buffer = Queue.Queue()
+
+        self.message_buffers = dict()
+        for msg_type in message_schemas.valid_message_types():
+            self.message_buffers[msg_type] = Queue.Queue()
 
         error = "empty value for %s"
         if not host:
@@ -95,8 +98,7 @@ class RebalanceManager(object):
         if self.role_rebalance_rpc_consumer and self.role_rebalance_rpc_consumer.is_connected():
             self.role_rebalance_rpc_consumer.stop()
             self.role_rebalance_rpc_consumer = None
-        self.role_rebalance_requests_buffer = None
-        self.role_rebalance_responses_buffer = None
+        self.message_buffers = None
 
     def _on_consul_role_rebalance_messages(self, message):
         LOG.info('received role rebalance message %s', str(message))
@@ -107,18 +109,19 @@ class RebalanceManager(object):
         payload = message['body']
         if payload:
             type = payload['type']
-            LOG.info('payload of type %s : %s', type, str(payload))
-            if type == message_types.MSG_ROLE_REBALANCE_REQUEST:
-                self.role_rebalance_requests_buffer.put(message)
-            if type == message_types.MSG_ROLE_REBALANCE_RESPONSE:
-                self.role_rebalance_responses_buffer.put(message)
+            LOG.info('received message with payload type %s : %s', type, str(payload))
+            if type in message_schemas.valid_message_types():
+                self.message_buffers[type].put(message)
+            else:
+                LOG.warn('unknown message type received %s : %s', type, str(message))
 
-    def send_role_rebalance_request(self, request):
+    def send_role_rebalance_request(self, request, type=message_types.MSG_ROLE_REBALANCE_REQUEST):
         if request is None:
             LOG.warn('ignore rebalance request as it is null or empty')
             return
-        if not request or not isinstance(request, ConsulRoleRebalanceRequest):
-            LOG.warn('ignore rebalance request as it is not type of ConsulRoleRebalanceRequest')
+
+        if not message_schemas.is_validate_request(request, type):
+            LOG.warn('ignore rebalance request as it is not valid as it is declared')
             return
 
         producer = self.role_rebalance_rpc_producer
@@ -131,12 +134,13 @@ class RebalanceManager(object):
         producer.publish(request)
         LOG.info('successfully sent rebalance request')
 
-    def send_role_rebalance_response(self, response):
+    def send_role_rebalance_response(self, response, type=message_types.MSG_ROLE_REBALANCE_RESPONSE):
         if response is None:
             LOG.warn('ignore sending rebalance response as the response is null or empty')
             return
-        if not response or not isinstance(response, ConsulRoleRebalanceResponse):
-            LOG.warn('ignore sending rebalance response as the response is not type of ConsulRoleRebalanceResponse')
+
+        if not message_schemas.is_validate_response(response, type):
+            LOG.warn('ignore sending rebalance response as it is not valid as it is declared')
             return
 
         producer = self.role_rebalance_rpc_producer
@@ -149,15 +153,17 @@ class RebalanceManager(object):
         producer.publish(response)
         LOG.info('successfully sent rebalance response')
 
-    def get_role_rebalance_request(self):
+    def get_role_rebalance_request(self, request_type=message_types.MSG_ROLE_REBALANCE_REQUEST):
+        if request_type not in message_schemas.valid_request_types():
+            request_type = message_types.MSG_ROLE_REBALANCE_REQUEST
         # wait 30 seconds for message if not arrived
         time_start = datetime.datetime.utcnow()
         time_delta = datetime.timedelta(seconds=30)
         while True:
             if datetime.datetime.utcnow() - time_start > time_delta:
                 break
-            if not self.role_rebalance_requests_buffer.empty():
-                item = self.role_rebalance_requests_buffer.get(block=False)
+            if not self.message_buffers[request_type].empty():
+                item = self.message_buffers[request_type].get(block=False)
                 if item:
                     tag = item['tag']
                     payload = item['body']
@@ -165,15 +171,21 @@ class RebalanceManager(object):
         LOG.info('no request found')
         return None
 
-    def get_role_rebalance_response(self, request_id):
+    def get_role_rebalance_response(self, request_id, response_type=message_types.MSG_ROLE_REBALANCE_RESPONSE,
+                                    timeout_seconds=30):
+        if response_type not in message_schemas.valid_response_types():
+            LOG.info('response type %s for request %s is unknown, default to %s', response_type,
+                     str(request_id),
+                     message_types.MSG_ROLE_REBALANCE_RESPONSE)
+            response_type = message_types.MSG_ROLE_REBALANCE_REQUEST
         # wait 30 seconds for message if not arrived
         time_start = datetime.datetime.utcnow()
-        time_delta = datetime.timedelta(seconds=30)
+        time_delta = datetime.timedelta(seconds=timeout_seconds)
         while True:
-            if not self.role_rebalance_responses_buffer.empty():
+            if not self.message_buffers[response_type].empty():
                 # responses received are put into queue in order, so dequeue not any previously received
                 # until the one matches the request
-                item = self.role_rebalance_responses_buffer.get(block=False)
+                item = self.message_buffers[response_type].get(block=False)
                 if not item:
                     time.sleep(0.100)
                     continue
@@ -188,16 +200,17 @@ class RebalanceManager(object):
                     # put the unmatched response back , or delete if time out
                     timestamp = datetime.datetime.strptime(payload['timestamp'], '%Y-%m-%d %H:%M:%S')
                     if (datetime.datetime.utcnow() - timestamp) < datetime.timedelta(seconds=120):
-                        self.role_rebalance_responses_buffer.put(item, block=False)
+                        self.message_buffers[response_type].put(item, block=False)
                         LOG.info('response %s is not for request id %s, so put it back until timeout',
                                  str(item),
                                  request_id)
                     else:
-                        LOG.info('response %s is not for request id %s, removed from receive buffer as it is timedout')
-
+                        LOG.info('response %s is not for request id %s, removed from receive buffer as it is timedout',
+                                 str(item), request_id)
             else:
                 if datetime.datetime.utcnow() - time_start > time_delta:
-                    LOG.info('rebalance response not received after 30 seconds')
+                    LOG.info('rebalance response not received after %s seconds for request %s', str(timeout_seconds),
+                             str(request_id))
                     break
         LOG.info('no response found for request id %s', str(request_id))
         return None

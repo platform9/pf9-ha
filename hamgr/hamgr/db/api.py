@@ -192,11 +192,11 @@ def get_all_clusters(read_deleted=False):
         return _get_all_clusters(session, read_deleted=read_deleted)
 
 
-def get_cluster(cluster_name_or_id, read_deleted=False):
+def get_cluster(cluster_name_or_id, read_deleted=False, raise_exception=False):
     with dbsession() as session:
         clstr = _get_cluster(session, cluster_name_or_id,
                              read_deleted=read_deleted)
-        if clstr is None:
+        if clstr is None and raise_exception:
             raise exceptions.ClusterNotFound(cluster_name_or_id)
         return clstr
 
@@ -244,6 +244,12 @@ def create_cluster(cluster_name, task_state):
             raise exceptions.ClusterExists(cluster_name)
         return _create_cluster(session, cluster_name, task_state)
 
+def is_cluster_exist(cluster_name):
+    with dbsession() as session:
+        existing = _get_cluster(session, str(cluster_name))
+        if existing is None:
+            return False
+        return True
 
 def create_cluster_if_needed(cluster_name, task_state):
     with dbsession() as session:
