@@ -29,6 +29,7 @@ from sqlalchemy import Integer
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import String
 from sqlalchemy import Text
+from sqlalchemy import LargeBinary
 from sqlalchemy import or_
 from uuid import uuid4
 
@@ -65,7 +66,7 @@ class ChangeEvents(Base):
     uuid = Column(Text)
     cluster = Column(Integer)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow())
-    events = Column(Text, nullable=True)
+    events = Column(LargeBinary, nullable=True)
 
 
 class EventsProcessing(Base):
@@ -95,9 +96,9 @@ class ConsulStatusInfo(Base):
     clusterId = Column('cluster_id', Integer)
     clusterName = Column('cluster_name', Text)
     leader = Column('leader', Text)
-    peers = Column('peers', Text)
-    members = Column('members', Text)
-    kvstore = Column('kvstore', Text)
+    peers = Column('peers', LargeBinary)
+    members = Column('members', LargeBinary)
+    kvstore = Column('kvstore', LargeBinary)
     joins = Column('joins', Text)
     lastUpdate = Column('last_updated', DateTime)
     lastEvent = Column('last_event', Text)
@@ -112,9 +113,9 @@ class ConsulRoleRebalanceRecord(Base):
     uuid = Column('uuid', Text)
     event_name = Column('event_name', Text)
     event_uuid = Column('event_uuid', Text)
-    before_rebalance = Column('before_rebalance', Text)
+    before_rebalance = Column('before_rebalance', LargeBinary)
     rebalance_action = Column('rebalance_action', Text)
-    after_rebalance = Column('after_rebalance', Text)
+    after_rebalance = Column('after_rebalance', LargeBinary)
     action_started = Column('action_started', DateTime)
     action_finished = Column('action_finished', DateTime)
     action_status = Column('action_status', Text)

@@ -590,7 +590,7 @@ class NovaProvider(Provider):
             self.aggregate_task_running = False
         LOG.debug('host aggregate change processing task has finished at %s', str(datetime.utcnow()))
 
-    def _rebalance_consul_roles_if_needed(self, event_type):
+    def _rebalance_consul_roles_if_needed(self, event_type, event_uuid=None):
         if event_type not in constants.HOST_EVENTS:
             LOG.warn('ignore invalided rebalance consul role for requested event type %s', event_type)
             return
@@ -604,7 +604,7 @@ class NovaProvider(Provider):
             # rather than directly rebalance, just create the rebalance requests and let rebalance processor
             # drive the whole process
             LOG.info('report consul rebalance for event %s with consul report : %s', event_type, str(report))
-            self._report_consul_rebalance(event_type, None, report)
+            self._report_consul_rebalance(event_type, event_uuid, report)
         else:
             LOG.warn('null consul cluster report or the request has not been processed by host : %s', str(status))
 
@@ -906,7 +906,8 @@ class NovaProvider(Provider):
         LOG.info('find role details for host %s with role map %s', str(host_id), str(host_roles))
         roles = filter(lambda x: x.startswith('pf9-ostackhost'), host_roles)
         if len(roles) != 1:
-            raise ha_exceptions.InvalidHypervisorRoleStatus(host_id)
+            LOG.warn('pf9-ostackhost role not found in roles from resgmr for host %s : %s', str(host_id), str(host_roles))
+            return None
         rolename = roles[0]
         # Query consul_ip from resmgr ostackhost role settings
         self._token = utils.get_token(self._auth_uri_v3,
@@ -929,6 +930,8 @@ class NovaProvider(Provider):
         return str(json_resp['cluster_ip'])
 
     def _get_consul_ip(self, host_id, json_resp):
+        if not json_resp:
+            return None
         if 'consul_ip' in json_resp and json_resp['consul_ip']:
             return str(json_resp['consul_ip'])
         return self._get_cluster_ip(host_id, json_resp)
@@ -1508,7 +1511,7 @@ class NovaProvider(Provider):
                                  event_type, host_name)
                         self._report_consul_rebalance(event_type, event_uuid, event_details['consul'])
                     else:
-                        LOG.warn('ingnore reporting event %s for host %s, as it is already reported within %s seconds',
+                        LOG.warn('ignore reporting event %s for host %s, as it is already reported within %s seconds',
                                  event_type, host_name, self._event_report_threshold_seconds)
                 else:
                     LOG.warn('ignore reporting event for host %s , as it is not found in any active nova aggregates',
@@ -1680,8 +1683,8 @@ class NovaProvider(Provider):
                 LOG.info('processing consul role rebalance request %s : %s', req.uuid, str(req.rebalance_action))
                 # first check by time, abort request if timestamp shows the request older than 15 minutes
                 if (datetime.utcnow() - req.last_updated) > timedelta(minutes=15):
-                    error = 'ignore staled consul role rebalance request created at %s' % req.last_updated
-                    LOG.warn(error)
+                    error = 'request created at %s is staled' % req.last_updated
+                    LOG.warn('ignore consul role rebalance request %s, as %s', str(req_id), error)
                     db_api.update_consul_role_rebalance(req.uuid,
                                                         None,
                                                         None,
@@ -1705,7 +1708,8 @@ class NovaProvider(Provider):
                 event_type = req.event_name
 
                 if event_type not in constants.HOST_EVENTS:
-                    error = 'invalided event type %s' % event_type
+                    error = 'invalid event type %s' % event_type
+                    LOG.warn('ignore consul role rebalance request %s, as %s', event_uuid, error)
                     db_api.update_consul_role_rebalance(req.uuid,
                                                         None,
                                                         None,
@@ -1718,6 +1722,7 @@ class NovaProvider(Provider):
                 if event_type in [constants.EVENT_HOST_UP, constants.EVENT_HOST_DOWN]:
                     if not event_uuid:
                         error = 'no valid event uuid for this event type : %s' % event_type
+                        LOG.warn('ignore consul role rebalance request %s, as %s', event_uuid, error)
                         db_api.update_consul_role_rebalance(req.uuid,
                                                             None,
                                                             None,
@@ -1728,9 +1733,8 @@ class NovaProvider(Provider):
                     host_event = db_api.get_processing_event_by_id(event_uuid)
                     if not host_event:
                         # no such event, so abort this request
-                        error = 'ignore consul role rebalance request as no matched host event %s (%s)' % (
-                        event_uuid, event_type)
-                        LOG.warn(error)
+                        error = 'no matched host event %s (%s)' % (event_uuid, event_type)
+                        LOG.warn('ignore consul role rebalance request %s, as %s', event_uuid, error)
                         db_api.update_consul_role_rebalance(req.uuid,
                                                             None,
                                                             None,
@@ -1765,11 +1769,11 @@ class NovaProvider(Provider):
                         continue
 
                     if event_status != constants.STATE_FINISHED:
-                        LOG.info('ignore consul role rebase request as host event %s (%s) has unexpected status %s',
+                        error = "unexpected status for host event %s : %s" % (event_uuid, event_status)
+                        LOG.warn('ignore consul role rebase request %s (%s), as %s',
                                  host_event.event_uuid,
                                  host_event.event_type,
-                                 event_status)
-                        error = "unexpected status for host event %s : %s" % (event_uuid, event_status)
+                                 error)
                         db_api.update_consul_role_rebalance(req.uuid,
                                                             None,
                                                             None,
@@ -1781,9 +1785,8 @@ class NovaProvider(Provider):
                     # is the target host still alive since the original request was created ?
                     if not self._is_nova_service_active(target_host_id):
                         error = 'host %s is inactive ' % target_host_id
-                        LOG.warn('ignore consul role rebalance request %s for host %s, as %s',
+                        LOG.warn('ignore consul role rebalance request %s, as %s',
                                  req.uuid,
-                                 target_host_id,
                                  error)
                         db_api.update_consul_role_rebalance(req.uuid,
                                                             None,
@@ -1812,7 +1815,7 @@ class NovaProvider(Provider):
                 target_consuls = [x for x in consul_status_before['members'] if x['Name'] == target_host_id]
                 if len(target_consuls) != 1:
                     error = 'no consul status for target host %s' % target_host_id
-                    LOG.warn('ignore consul role rebalance request, as %s', error)
+                    LOG.warn('ignore consul role rebalance request %s, as %s', req.uuid, error)
                     db_api.update_consul_role_rebalance(req.uuid,
                                                         None,
                                                         None,
@@ -1836,6 +1839,13 @@ class NovaProvider(Provider):
                                                     None,
                                                     error_code,
                                                     error_msg)
+                # if the error code is not none , means something happened (most cases are the target host is down
+                # before the above process happened, so get empty response), let's just create new rebalance
+                # request
+                if error_code:
+                    LOG.info('rebalance request %s failed for event %s (%s), re-try rebalance for this event if needed',
+                             str(req.uuid), event_uuid,  event_type)
+                    self._rebalance_consul_roles_if_needed(req.event_name, event_uuid=event_uuid)
         except Exception as ex:
             error = 'exception : %s' % str(ex)
             LOG.exception('unhandled exception in process_consul_role_rebalance_requests, %s', error)

@@ -107,13 +107,14 @@ class RebalanceController(object):
     def ask_for_consul_cluster_status(self, request):
         # send a consul cluster status update request and wait for response
         if not self.rebalancer_manager:
+            LOG.warn('unable to ask for consul cluster status, as rebalancer manager is null')
             return {}
-        LOG.info('refresh request begin at %s', str(datetime.datetime.utcnow()))
+        LOG.info('send consul refresh request begin at %s', str(datetime.datetime.utcnow()))
         self.rebalancer_manager.send_role_rebalance_request(request, type=message_types.MSG_CONSUL_REFRESH_REQUEST)
         resp = self.rebalancer_manager.get_role_rebalance_response(request.id(),
                                                                    response_type=message_types.MSG_CONSUL_REFRESH_RESPONSE,
                                                                    timeout_seconds=120)
-        LOG.info('refresh response received at %s : %s', str(datetime.datetime.utcnow()), str(resp))
+        LOG.info('consul refresh response received at %s : %s', str(datetime.datetime.utcnow()), str(resp))
         return resp
 
 

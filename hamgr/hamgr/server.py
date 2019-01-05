@@ -60,7 +60,7 @@ def start_server(conf, paste_ini):
         periodic_task.add_task(provider.process_host_events, 120, run_now=True)
         # task to handle consul role rebalance
         LOG.debug('add task process_consul_role_rebalance_requests')
-        periodic_task.add_task(provider.process_consul_role_rebalance_requests, 120, run_now=True)
+        periodic_task.add_task(provider.process_consul_role_rebalance_requests, 30, run_now=True)
         # background thread for handling HA enable/disable request
         LOG.debug('add task process_ha_enable_disable_requests')
         periodic_task.add_task(provider.process_ha_enable_disable_requests, 5, run_now=True)

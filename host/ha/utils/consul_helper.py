@@ -194,7 +194,7 @@ class consul_status(object):
             'leader': self.cc.status.leader(),
             'peers': self.cc.status.peers(),
             'members': self.cc.agent.members(),
-            'kv': kv_list,
+            'kv': '', # don't take kv store to avoid too large string
             'joins': str(CONF.consul.join),
         }
 
@@ -229,7 +229,7 @@ class consul_status(object):
                 'leader': self.cc.status.leader(),
                 'peers': self.cc.status.peers(),
                 'members': self.cc.agent.members(),
-                'kv': kv_list,
+                'kv': '', # don't take kv store to avoid too large string
                 'joins': str(CONF.consul.join),
             }
 
@@ -565,7 +565,10 @@ class consul_status(object):
         return None, None
 
     def kv_update(self, key, value):
-        self.cc.kv.put(key, value)
+        try:
+            self.cc.kv.put(key, value)
+        except Exception as e:
+            LOG.warn('error when update key %s with value %s : %s', str(key), str(value), str(e))
 
     def kv_delete(self, key):
         try:

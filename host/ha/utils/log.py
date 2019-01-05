@@ -30,7 +30,7 @@ def setup_log_dir_and_file(filename, mode='a', encoding=None, owner=None):
         if not exists(filename):
             open(filename, mode).close()
         return logging.handlers.RotatingFileHandler(
-            filename, mode=mode, maxBytes=10*1024*1024, backupCount=10)
+            filename, mode=mode, maxBytes=500*1024*1024, backupCount=10)
     except Exception:
         return logging.NullHandler()
 

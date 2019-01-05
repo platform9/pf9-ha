@@ -79,7 +79,7 @@ def update_host_status(host_id):
     event_details = json_obj.get('event_details', {})
     event_details['host_id'] = str(host_id)
     postby = event_details['event'].get('reportedBy', '')
-    LOG.info('received %s event from host %s : %s', str(event), str(postby),
+    LOG.info('received event %s from host %s : %s', str(event), str(postby),
              str(event_details))
     provider = get_provider()
     if event and event == 'host-down':

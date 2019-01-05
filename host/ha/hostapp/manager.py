@@ -550,49 +550,53 @@ def loop():
 
         # the main thread handling host down events
         while start_loop:
-            if not cluster_setup:
-                # Running join against oneself generates a warning message in
-                # logs but does not cause consul to crash
-                if not join_ips:
-                    LOG.error('null or empty consul join ip list in config file')
-                    sleep(sleep_time)
-                    continue
-                LOG.info('try to join cluster members %s', join_ips)
-                retcode = run_cmd('consul join {ip}'.format(ip=join_ips))
-                if retcode == 0:
-                    LOG.info('joined consul cluster members {ip}'.format(
-                        ip=join_ips))
-                    cluster_setup = True
-                    ch.log_kvstore()
-                else:
-                    LOG.info('join consul cluster %s failed', join_ips)
-            else:
-                if REBALANCE_IN_PROGRESS:
-                    LOG.info('consul role rebalance is in progress, need to wait for it complete')
-                else:
-                    if ch.am_i_cluster_leader():
-                        cluster_stat = ch.get_cluster_status()
-                        if cluster_stat:
-                            LOG.info('i am leader, found changes : %s', str(cluster_stat))
-                            LOG.debug('cluster_stat: %s', cluster_stat)
-                            if reporter.report_status(cluster_stat):
-                                LOG.info('consul status is reported to hamgr: %s',
-                                         cluster_stat)
-                                ch.update_reported_status(cluster_stat)
-                            else:
-                                LOG.info('report consul status to hamgr failed')
-                        else:
-                            LOG.debug('i am leader, but no changes to report for now')
-                        ch.cleanup_consul_kv_store()
+            try:
+                if not cluster_setup:
+                    # Running join against oneself generates a warning message in
+                    # logs but does not cause consul to crash
+                    if not join_ips:
+                        LOG.error('null or empty consul join ip list in config file')
+                        sleep(sleep_time)
+                        continue
+                    LOG.info('try to join cluster members %s', join_ips)
+                    retcode = run_cmd('consul join {ip}'.format(ip=join_ips))
+                    if retcode == 0:
+                        LOG.info('joined consul cluster members {ip}'.format(
+                            ip=join_ips))
+                        cluster_setup = True
+                        ch.log_kvstore()
                     else:
-                        LOG.debug('i am not leader so do nothing')
+                        LOG.info('join consul cluster %s failed', join_ips)
+                else:
+                    if REBALANCE_IN_PROGRESS:
+                        LOG.info('consul role rebalance is in progress, need to wait for it complete')
+                    else:
+                        leader = ch.cluster_leader()
+                        if ch.am_i_cluster_leader():
+                            cluster_stat = ch.get_cluster_status()
+                            if cluster_stat:
+                                LOG.info('i am leader %s, found changes : %s', str(leader), str(cluster_stat))
+                                LOG.debug('cluster_stat: %s', cluster_stat)
+                                if reporter.report_status(cluster_stat):
+                                    LOG.info('consul status is reported to hamgr: %s',
+                                             cluster_stat)
+                                    ch.update_reported_status(cluster_stat)
+                                else:
+                                    LOG.info('report consul status to hamgr failed')
+                            else:
+                                LOG.debug('i am leader %s, but no changes to report for now', str(leader))
+                            ch.cleanup_consul_kv_store()
+                        else:
+                            LOG.debug('i am not leader so do nothing, leader : %s', str(leader))
 
-            # It is possible that host ID was not published when the consul
-            # helper was created as the cluster was not yet formed. Since this
-            # operation is idempotent calling it in a loop will not cause
-            # multiple updates.
-            LOG.info('publish current host id %s', hostid)
-            ch.publish_hostid()
+                # It is possible that host ID was not published when the consul
+                # helper was created as the cluster was not yet formed. Since this
+                # operation is idempotent calling it in a loop will not cause
+                # multiple updates.
+                LOG.info('publish current host id %s', hostid)
+                ch.publish_hostid()
+            except Exception as e:
+                LOG.exception('unhandled exception in pf9-ha-slave loop : %s', str(e))
 
             LOG.info('sleeping for %s seconds' % sleep_time)
             sleep(sleep_time)
