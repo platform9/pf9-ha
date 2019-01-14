@@ -14,6 +14,9 @@
 
 import logging
 import time
+# import _striptime to avoid deaklock when call time.striptime
+# in multiple thread environment
+import _strptime
 from keystoneclient.v3 import  client as v3client
 from keystoneclient.v3.tokens import TokenManager
 from keystoneauth1.identity import v3

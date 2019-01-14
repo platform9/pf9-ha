@@ -9,9 +9,8 @@ from ConfigParser import ConfigParser
 from datetime import datetime
 from datetime import timedelta
 from subprocess import call
-from time import daylight
 from time import sleep
-from time import tzname
+from base64 import b64decode
 
 from ha.utils import consul_helper
 from ha.utils import log as logging
@@ -53,6 +52,14 @@ consul_opts = [
                     'started in agent mode while 1, 3 and 5 indicate that '
                     'consul is started in server mode with bootstrap_expect '
                     'being that specified value.'),
+    cfg.StrOpt('cluster_name', default='', help='the name of consul cluster'),
+    cfg.StrOpt('encrypt', default='', help='the encrypt key for encryption of Consul network traffic'),
+    cfg.StrOpt('verify_incoming', default='false', help='whether to verify consul incoming traffice'),
+    cfg.StrOpt('verify_outgoing', default='false', help='whether to verify consul outgoing traffice'),
+    cfg.StrOpt('verify_server_hostname', default='false', help='whether to verify consul server name'),
+    cfg.StrOpt('ca_file_content', default='', help='base64 encoded consul CA cert content'),
+    cfg.StrOpt('cert_file_content', default='', help='base64 encoded consul server cert content'),
+    cfg.StrOpt('key_file_content', default='', help='base64 encoded consul server key content')
 ]
 
 default_opts = [
@@ -87,41 +94,73 @@ STOPPING = False
 REBALANCE_IN_PROGRESS = False
 
 
-def generate_consul_conf():
-    client_json = os.path.join(PF9_CONSUL_CONF_DIR, 'conf.d/client.json')
-    server_json = os.path.join(PF9_CONSUL_CONF_DIR, 'conf.d/server.json')
-    client_json_exist = os.path.exists(client_json)
-    server_json_exist = os.path.exists(server_json)
-    if client_json_exist or server_json_exist:
-        cfg_file = client_json if client_json_exist else server_json
-        LOG.info('consul config file %s already exist', cfg_file)
-        return
+def add_consul_secure_settings(conf):
+    conf['encrypt'] = CONF.consul.encrypt
+    conf['verify_incoming'] = True if str(CONF.consul.verify_incoming).lower() == 'true' else False
+    conf['verify_outgoing'] = True if str(CONF.consul.verify_outgoing).lower() == 'true' else False
+    conf['verify_server_hostname'] = True if str(CONF.consul.verify_server_hostname).lower() == 'true' else False
+    if CONF.consul.ca_file_content:
+        content = b64decode(CONF.consul.ca_file_content)
+        file = os.path.join(PF9_CONSUL_CONF_DIR, 'consul_ca.pem')
+        with open(file, 'w') as cafp:
+            cafp.write(content)
+        conf['ca_file'] = file
+    if CONF.consul.cert_file_content:
+        content = b64decode(CONF.consul.cert_file_content)
+        file = os.path.join(PF9_CONSUL_CONF_DIR, 'consul_cert.pem')
+        with open(file, 'w') as certfp:
+            certfp.write(content)
+        conf['cert_file'] = file
+    if CONF.consul.key_file_content:
+        content = b64decode(CONF.consul.key_file_content)
+        file = os.path.join(PF9_CONSUL_CONF_DIR, 'consul_key.pem')
+        with open(file, 'w') as keyfp:
+            keyfp.write(content)
+        conf['key_file'] = file
+    return conf
 
-    ip_address = consul_helper.get_ip_address()
-    bind_address = consul_helper.get_bind_address()
-    if CONF.consul.bootstrap_expect == 0:
-        # Start consul with agent conf
-        with open(PF9_CONSUL_CONF_DIR + 'client.json.template') as fptr:
-            agent_conf = json.load(fptr)
-        agent_conf['advertise_addr'] = ip_address
-        agent_conf['bind_addr'] = bind_address
-        agent_conf['disable_remote_exec'] = True
-        if CONF.host:
-            agent_conf['node_name'] = CONF.host
-        with open(PF9_CONSUL_CONF_DIR + 'conf.d/client.json', 'w') as fptr:
-            json.dump(agent_conf, fptr)
-    else:
-        # Start consul with server conf
-        with open(PF9_CONSUL_CONF_DIR + 'server.json.template') as fptr:
-            server_conf = json.load(fptr)
-        server_conf['advertise_addr'] = ip_address
-        server_conf['bind_addr'] = bind_address
-        server_conf['bootstrap_expect'] = CONF.consul.bootstrap_expect
-        server_conf['disable_remote_exec'] = True
-        if CONF.host:
-            server_conf['node_name'] = CONF.host
-        with open(PF9_CONSUL_CONF_DIR + 'conf.d/server.json', 'w') as fptr:
-            json.dump(server_conf, fptr)
+
+def generate_consul_conf():
+    try:
+        ip_address = consul_helper.get_ip_address()
+        bind_address = consul_helper.get_bind_address()
+        if CONF.consul.bootstrap_expect == 0:
+            # Start consul with agent conf
+            with open(PF9_CONSUL_CONF_DIR + 'client.json.template') as fptr:
+                agent_conf = json.load(fptr)
+            agent_conf['advertise_addr'] = ip_address
+            agent_conf['bind_addr'] = bind_address
+            agent_conf['disable_remote_exec'] = True
+            agent_conf['log_level'] = 'debug'
+            agent_conf['datacenter'] = CONF.consul.cluster_name
+            if CONF.host:
+                agent_conf['node_name'] = CONF.host
+
+            # add secure settings
+            agent_conf = add_consul_secure_settings(agent_conf)
+            LOG.info('create consul slave configure file with data : %s', str(agent_conf))
+            with open(PF9_CONSUL_CONF_DIR + 'conf.d/client.json', 'w') as fptr:
+                json.dump(agent_conf, fptr)
+        else:
+            # Start consul with server conf
+            with open(PF9_CONSUL_CONF_DIR + 'server.json.template') as fptr:
+                server_conf = json.load(fptr)
+            server_conf['advertise_addr'] = ip_address
+            server_conf['bind_addr'] = bind_address
+            server_conf['bootstrap_expect'] = CONF.consul.bootstrap_expect
+            server_conf['disable_remote_exec'] = True
+            server_conf['log_level'] = 'debug'
+            server_conf['datacenter'] = CONF.consul.cluster_name
+            if CONF.host:
+                server_conf['node_name'] = CONF.host
+
+            # add secure settings
+            server_conf = add_consul_secure_settings(server_conf)
+            LOG.info('create consul server configure file with data : %s', str(server_conf))
+            with open(PF9_CONSUL_CONF_DIR + 'conf.d/server.json', 'w') as fptr:
+                json.dump(server_conf, fptr)
+    except Exception as ex:
+        LOG.warn('unhandled exception when generate consul config : %s', str(ex))
 
 
 def run_cmd(cmd):
@@ -134,29 +173,31 @@ def run_cmd(cmd):
 def start_consul_service():
     retval = False
     service_start_retry = 30
-
-    retcode = run_cmd('sudo service pf9-consul status')
-    if retcode == 0:
-        LOG.warn('Consul service was already running. now stop it before start')
-        run_cmd('sudo service pf9-consul stop')
-
-    while service_start_retry > 0:
-        retcode = run_cmd('sudo service pf9-consul start')
-        # Sleep 3s to allow consul to fail in case the bootstrap server
-        # has not yet started. This also allows us 90s before the cluster
-        # creation will fail
-        sleep(3)
+    try:
+        retcode = run_cmd('sudo service pf9-consul status')
         if retcode == 0:
-            retcode = run_cmd('sudo service pf9-consul status')
+            LOG.warn('Consul service was already running. now stop it before start')
+            run_cmd('sudo service pf9-consul stop')
+
+        while service_start_retry > 0:
+            retcode = run_cmd('sudo service pf9-consul start')
+            # Sleep 3s to allow consul to fail in case the bootstrap server
+            # has not yet started. This also allows us 90s before the cluster
+            # creation will fail
+            sleep(3)
             if retcode == 0:
-                LOG.info('Consul service started')
-                retval = True
-                break
+                retcode = run_cmd('sudo service pf9-consul status')
+                if retcode == 0:
+                    LOG.info('Consul service started')
+                    retval = True
+                    break
+                else:
+                    LOG.warn('Consul service stopped. Retrying...')
             else:
-                LOG.warn('Consul service stopped. Retrying...')
-        else:
-            LOG.warn('Consul service could not be started')
-        service_start_retry = service_start_retry - 1
+                LOG.warn('Consul service could not be started')
+            service_start_retry = service_start_retry - 1
+    except Exception as ex:
+        LOG.warn('unhandled exception when start consul service : %s', str(ex))
     return retval
 
 
@@ -219,7 +260,6 @@ def switch_to_new_consul_role(rebalance_mgr, request, current_host_id, join_ips)
         rebalance_mgr.send_role_rebalance_response(resp)
         return False
 
-
     # change from original file to target file
     cmd = "mv -f '%s' '%s'" % (original_file, target_file)
     result = run_cmd(cmd)
@@ -245,6 +285,7 @@ def switch_to_new_consul_role(rebalance_mgr, request, current_host_id, join_ips)
         if target_role == constants.CONSUL_ROLE_CLIENT:
             cfg_obj.pop('bootstrap_expect', None)
             cfg_obj.pop('server', None)
+            cfg_obj['encrypt'] = CONF.consul.encrypt
             # when originally it is server role, there will be folder 'raft' , need
             # to remove it before restart consul, otherwise the cached data will block consul
             raft = os.path.join(cfg_obj['data_dir'], 'raft')
@@ -253,6 +294,7 @@ def switch_to_new_consul_role(rebalance_mgr, request, current_host_id, join_ips)
         elif target_role == constants.CONSUL_ROLE_SERVER:
             cfg_obj['bootstrap_expect'] = 3
             cfg_obj['server'] = True
+            cfg_obj['encrypt'] = CONF.consul.encrypt
         else:
             LOG.warn('unknown expected consul role %s', target_role)
             cfg_obj = None
@@ -343,7 +385,8 @@ def switch_to_new_consul_role(rebalance_mgr, request, current_host_id, join_ips)
     rebalance_mgr.send_role_rebalance_response(resp)
     return True
 
-def handle_consul_refresh_request(rebalance_mgr, hostid, request = None):
+
+def handle_consul_refresh_request(rebalance_mgr, hostid, request=None):
     try:
         key_prefix = 'request-'
         ch = consul_helper.consul_status(hostid)
@@ -371,7 +414,7 @@ def handle_consul_refresh_request(rebalance_mgr, hostid, request = None):
             key = key_prefix + request['id']
             _, existing = ch.kv_fetch(key)
             if existing is None:
-                data = json.dumps({'request':request,
+                data = json.dumps({'request': request,
                                    'processed': False,
                                    'timestamp': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
                                    'createdBy': hostid
@@ -397,7 +440,7 @@ def handle_consul_refresh_request(rebalance_mgr, hostid, request = None):
             if key.startswith(key_prefix):
                 value = json.loads(kv['Value'])
                 if not value['processed']:
-                    timestamp = datetime.strptime(value['timestamp'],'%Y-%m-%d %H:%M:%S')
+                    timestamp = datetime.strptime(value['timestamp'], '%Y-%m-%d %H:%M:%S')
                     if (datetime.utcnow() - timestamp) < timedelta(seconds=120):
                         valid_requests.append(value['request'])
                     else:
@@ -419,7 +462,7 @@ def handle_consul_refresh_request(rebalance_mgr, hostid, request = None):
                 report['reportedBy'] = hostid
                 resp = ConsulRefreshResponse(req_id,
                                              status=constants.REBALANCE_STATE_FINISHED,
-                                             report = json.dumps(report),
+                                             report=json.dumps(report),
                                              message='')
                 rebalance_mgr.send_role_rebalance_response(resp, type=message_types.MSG_CONSUL_REFRESH_RESPONSE)
                 LOG.info('consul refresh response is sent at %s : %s', str(datetime.utcnow()), str(resp))
@@ -560,13 +603,24 @@ def loop():
                         continue
                     LOG.info('try to join cluster members %s', join_ips)
                     retcode = run_cmd('consul join {ip}'.format(ip=join_ips))
+                    leader = None
                     if retcode == 0:
-                        LOG.info('joined consul cluster members {ip}'.format(
-                            ip=join_ips))
-                        cluster_setup = True
-                        ch.log_kvstore()
-                    else:
-                        LOG.info('join consul cluster %s failed', join_ips)
+                        LOG.info('joined consul cluster members {ip}, with leader {lead}'.format(
+                            ip=join_ips, lead=leader))
+                        leader = ch.cluster_leader()
+                        if leader:
+                            cluster_setup = True
+                            ch.log_kvstore()
+                    if not leader or retcode != 0:
+                        LOG.info('join consul cluster %s failed, code %s, leader %s . try to re-config and re-start',
+                                 join_ips,
+                                 str(retcode),
+                                 str(leader))
+                        # refresh the config file and restart consul, in case there is no leader or join failed
+                        # this happens when consul settings are updated through resmgr after consul had started
+                        # so need to re-config the settings and re-start consul
+                        generate_consul_conf()
+                        start_consul_service()
                 else:
                     if REBALANCE_IN_PROGRESS:
                         LOG.info('consul role rebalance is in progress, need to wait for it complete')
