@@ -37,6 +37,8 @@ from shared import constants
 from shared.exceptions import ha_exceptions
 from shared.messages.rebalance_request import ConsulRoleRebalanceRequest
 from shared.messages.consul_request import ConsulRefreshRequest
+from hamgr.common import key_helper as keyhelper
+
 
 LOG = logging.getLogger(__name__)
 
@@ -49,6 +51,7 @@ class NovaProvider(Provider):
         self._auth_uri_v3 = "%s/v3" % self._auth_uri
         self._tenant = config.get('keystone_middleware', 'admin_tenant_name')
         self._region = config.get('nova', 'region')
+        self._resmgr_endpoint = config.get('DEFAULT', 'resmgr_endpoint')
         self._token = None
         self._config = config
         # make sure the waiting timeout for masakari to process notification
@@ -99,6 +102,22 @@ class NovaProvider(Provider):
         # lock for consul role rebalance processing
         self.consul_role_rebalance_processing_lock = threading.Lock()
         self.consul_role_rebalance_processing_running = False
+        # lock for consul encryption change processing
+        self.consul_encryption_processing_lock = threading.Lock()
+        self.consul_encryption_processing_running = False
+
+    def _get_v3_token(self):
+        self._token = utils.get_token(self._auth_uri_v3,
+                                      self._tenant, self._username,
+                                      self._passwd, self._token)
+        return self._token
+
+    def _is_consul_encryption_enabled(self):
+        enable = self._config.getboolean('DEFAULT',
+                                         'enable_consul_encryption') \
+            if self._config.has_option("DEFAULT", "enable_consul_encryption") \
+            else False
+        return enable
 
     def _toggle_host_maintenance_state(self, host_id, segment_name,
                                        on_maintenance):
@@ -106,6 +125,7 @@ class NovaProvider(Provider):
             'toggle masakari host %s in segment %s to maintenance state %s',
             str(host_id), str(segment_name), str(on_maintenance))
         try:
+            self._token = self._get_v3_token()
             masakari.update_host_maintenance(self._token, host_id, segment_name,
                                              on_maintenance)
 
@@ -121,7 +141,8 @@ class NovaProvider(Provider):
                 LOG.debug('events processing task is already running')
                 return
             self.events_processing_running = True
-        LOG.debug('host events processing task starts to run at %s', str(datetime.utcnow()))
+        LOG.debug('host events processing task starts to run at %s',
+                  str(datetime.utcnow()))
         try:
             # ---------------------------------------------------------------------
             # because masakari only be able to handle one notification each time
@@ -160,10 +181,7 @@ class NovaProvider(Provider):
                 LOG.debug('no unhandled processing events to process')
                 return
             LOG.info('found unhandled events : %s', str(events))
-            # TODO : https://platform9.atlassian.net/browse/IAAS-9060
-            self._token = utils.get_token(self._auth_uri_v3,
-                                          self._tenant, self._username,
-                                          self._passwd, self._token)
+            self._token = self._get_v3_token()
             nova_client = self._get_client()
             time_out = timedelta(minutes=self._notification_stale_minutes)
             for event in events:
@@ -194,13 +212,17 @@ class NovaProvider(Provider):
                     continue
                 # if the event happened long time ago, just abort
                 if datetime.utcnow() - event_time > time_out:
+                    if event.notification_uuid and event.notification_status != constants.STATE_FINISHED:
+                        state = masakari.get_notification_status(self._token, event.notification_uuid)
+                        LOG.info('event %s is in state : %s , corresponding masakari notification state : %s',
+                                 str(event_uuid), str(event.notification_status), str(state))
                     db_api.update_processing_event_with_notification(
                         event_uuid, None, None,
                         constants.STATE_ABORTED,
                         'event happened long time ago : %s' % str(event_time)
                     )
-                    LOG.warn('event %s is aborted as it is too stale',
-                             str(event_uuid))
+                    LOG.warn('event %s is aborted from state %s , as it is too stale',
+                             str(event_uuid), str(event.notification_status))
                     continue
 
                 # check whether host is active in nova
@@ -213,7 +235,8 @@ class NovaProvider(Provider):
                 if event_type == constants.EVENT_HOST_DOWN:
                     if not event.notification_uuid:
                         if is_active:
-                            LOG.warn('still report host_down event to masakari, even the host %s is alive in nova',
+                            LOG.warn('still report host_down event to masakari,' \
+                                     'even the host %s is alive in nova',
                                 event_uuid)
 
                         notification_obj = self._report_event_to_masakari(
@@ -264,6 +287,7 @@ class NovaProvider(Provider):
             return
         notification_obj = None
         try:
+            self._token = self._get_v3_token()
             data = {
                 "event": 'STOPPED',
                 "host_status": 'NORMAL',
@@ -287,11 +311,12 @@ class NovaProvider(Provider):
     def _tracking_masakari_notification(self, event):
         if not event:
             return None
+        self._token = self._get_v3_token()
         notification_uuid = event.notification_uuid
         state = masakari.get_notification_status(self._token, notification_uuid)
-        LOG.debug('masakari notification %s status : %s',
-                  str(notification_uuid), str(state))
         # save the state to event
+        LOG.info('updating event %s with masakari notification %s status : %s',
+                 str(event.event_uuid), str(notification_uuid), str(state))
         db_api.update_processing_event_with_notification(event.event_uuid,
                                                          event.notification_uuid,
                                                          event.notification_created,
@@ -306,9 +331,7 @@ class NovaProvider(Provider):
                 return
             self.aggregate_task_running = True
         LOG.debug('host aggregate change processing task starts to run at %s', str(datetime.utcnow()))
-        self._token = utils.get_token(self._auth_uri_v3,
-                                      self._tenant, self._username,
-                                      self._passwd, self._token)
+        self._token = self._get_v3_token()
 
         client = self._get_client()
 
@@ -374,6 +397,7 @@ class NovaProvider(Provider):
 
             # reconcile hosts to hamgr and masakari
             for current_cluster in hamgr_clusters_for_agg:
+                cluster_name = current_cluster.name
                 cluster_id = current_cluster.id
                 cluster_enabled = current_cluster.enabled
 
@@ -410,7 +434,7 @@ class NovaProvider(Provider):
                             # in order to make the consul cluster work, by default we set all hosts as consul server
                             # and trigger a role rebalance request
                             LOG.info('add ha slave role to added host : %s', str(nova_delta_ids))
-                            self._add_ha_slave_if_not_exist(nova_delta_ids, 'server', common_ids)
+                            self._add_ha_slave_if_not_exist(cluster_name, nova_delta_ids, 'server', common_ids)
                             # trigger a consul role rebalance request
                             time.sleep(30)
                             self._rebalance_consul_roles_if_needed(constants.EVENT_HOST_ADDED)
@@ -546,7 +570,7 @@ class NovaProvider(Provider):
                                  str(new_active_host_ids))
                         # same here, since we don't know the consul roles on existing hosts, so just
                         # make thoese hosts as consul server, and trigger a role rebalance request
-                        self._add_ha_slave_if_not_exist(new_active_host_ids, 'server', masakari_host_ids)
+                        self._add_ha_slave_if_not_exist(str(aggregate_id), new_active_host_ids, 'server', masakari_host_ids)
                         # trigger consul role rebalance request
                         time.sleep(30)
                         self._rebalance_consul_roles_if_needed(constants.EVENT_HOST_ADDED)
@@ -608,7 +632,7 @@ class NovaProvider(Provider):
         else:
             LOG.warn('null consul cluster report or the request has not been processed by host : %s', str(status))
 
-    def _execute_consul_role_rebalance(self, rebalance_request, host_ip, join_ips):
+    def _execute_consul_role_rebalance(self, rebalance_request, cluster_name, host_ip, join_ips):
         target_host_id = rebalance_request['host_id']
         target_old_role = rebalance_request['old_role']
         target_new_role = rebalance_request['new_role']
@@ -630,12 +654,8 @@ class NovaProvider(Provider):
         #   or
         #   b) just restart pf9-ha-slave service
         #
-        url = 'http://localhost:8080/resmgr/v1/hosts'
-        self._token = utils.get_token(self._auth_uri_v3,
-                                      self._tenant,
-                                      self._username,
-                                      self._passwd,
-                                      self._token)
+        url = '%s/v1/hosts' % self._resmgr_endpoint
+        self._token = self._get_v3_token()
         headers = {'X-Auth-Token': self._token['id'], 'Content-Type': 'application/json'}
         # get the target host info to make sure the role status is ok
         req_url = url + "/" + target_host_id
@@ -648,7 +668,7 @@ class NovaProvider(Provider):
             error = 'host %s does not have pf9-ha-slave role' % target_host_id
             return {'status': constants.REBALANCE_STATE_ABORTED, 'error': error}
 
-        data = self._customize_pf9_ha_slave_config(join_ips, host_ip, host_ip)
+        data = self._customize_pf9_ha_slave_config(cluster_name, join_ips, host_ip, host_ip)
         # step 1 : modify 'bootstrap_expect' base on the new role
         data['bootstrap_expect'] = 3 if target_new_role == constants.CONSUL_ROLE_SERVER else 0
         LOG.info('update resmgr for consul role rebalance host %s with data %s', target_host_id, str(data))
@@ -678,10 +698,11 @@ class NovaProvider(Provider):
             return {'status': constants.REBALABCE_STATE_ERROR, 'error': msg}
 
 
-    def _add_ha_slave_if_not_exist(self, host_ids_for_adding, consul_role, peer_host_ids):
+    def _add_ha_slave_if_not_exist(self, cluster_name, host_ids_for_adding, consul_role, peer_host_ids):
         if consul_role not in ['server', 'agent']:
             consul_role = 'server'
         client = self._get_client()
+        self._token = self._get_v3_token()
         current_roles = self._get_roles_for_hosts(host_ids_for_adding)
         role_missed_host_ids = []
         for hid in host_ids_for_adding:
@@ -692,7 +713,7 @@ class NovaProvider(Provider):
             LOG.info('authorize pf9-ha-slave during adding new hosts: %s ', str(role_missed_host_ids))
             all_hosts = list(set(host_ids_for_adding).union(set(peer_host_ids)))
             ip_lookup, cluster_ip_lookup = self._get_ips_for_hosts(client, all_hosts)
-            self._auth(ip_lookup, cluster_ip_lookup, self._token, role_missed_host_ids, consul_role)
+            self._auth(cluster_name, ip_lookup, cluster_ip_lookup, self._token, role_missed_host_ids, consul_role)
             self._wait_for_role_to_ok(role_missed_host_ids)
 
     def _remove_ha_slave_if_exist(self, host_ids):
@@ -839,13 +860,16 @@ class NovaProvider(Provider):
                          'moment.', host)
                 raise ha_exceptions.HostOffline(host)
 
-    def _customize_pf9_ha_slave_config(self, consul_join_ips, consul_host_ip, consul_cluster_ip):
+    def _customize_pf9_ha_slave_config(self, cluster_name, consul_join_ips, consul_host_ip, consul_cluster_ip):
         # since the pf9-ha-slave role is controlled by hamgr, all the customizable settings for pf9-ha-slave role
         # that need to be synced with hamgr should be list here to be passed down to resmgr for updating
         # the settings for pf9-ha-slave on host.
         # the keys needs to match the keys which are customizable in pf9-ha-slave config file
         # first the basic settings
-        customize_cfg = dict(join=consul_join_ips, ip_address=consul_host_ip, cluster_ip=consul_cluster_ip)
+        customize_cfg = dict(cluster_name=str(cluster_name),
+                             join=consul_join_ips,
+                             ip_address=consul_host_ip,
+                             cluster_ip=consul_cluster_ip)
         # then other settings
         is_enabled = self._config.getboolean("DEFAULT", "enable_consul_role_rebalance") \
             if self._config.has_option("DEFAULT", "enable_consul_role_rebalance") else False
@@ -868,11 +892,23 @@ class NovaProvider(Provider):
             # the routing key for receiving on controller is the routing key for sending on hosts
             customize_cfg['amqp_routingkey_receiving'] = routingkey_for_sending
 
+        if self._is_consul_encryption_enabled():
+            gossip_key = keyhelper.get_consul_gossip_encryption_key(cluster_name=str(cluster_name))
+            _, ca_cert_content = keyhelper.read_consul_ca_key_cert_pair()
+            svc_key_content, svc_cert_content = keyhelper.read_consul_svc_key_cert_pair(cluster_name)
+            customize_cfg['encrypt'] = gossip_key
+            customize_cfg['verify_incoming'] = "true"
+            customize_cfg['verify_outgoing'] = 'true'
+            customize_cfg['verify_server_hostname'] = 'false'
+            customize_cfg['ca_file_content'] = ca_cert_content
+            customize_cfg['cert_file_content'] = svc_cert_content
+            customize_cfg['key_file_content'] = svc_key_content
+
         return customize_cfg
 
-    def _auth(self, ip_lookup, cluster_ip_lookup, token, nodes, role):
+    def _auth(self, aggregate_id, ip_lookup, cluster_ip_lookup, token, nodes, role):
         assert role in ['server', 'agent']
-        url = 'http://localhost:8080/resmgr/v1/hosts'
+        url = '%s/v1/hosts' % self._resmgr_endpoint
         headers = {'X-Auth-Token': token['id'],
                    'Content-Type': 'application/json'}
         valid_ips = [ x for x in cluster_ip_lookup.values() if x !='' ]
@@ -882,10 +918,10 @@ class NovaProvider(Provider):
             start_time = datetime.now()
             LOG.info('Authorizing pf9-ha-slave role on node %s using IP %s',
                      node, ip_lookup[node])
-            data = self._customize_pf9_ha_slave_config(ips, ip_lookup[node], cluster_ip_lookup[node])
+            data = self._customize_pf9_ha_slave_config(aggregate_id, ips, ip_lookup[node], cluster_ip_lookup[node])
             data['bootstrap_expect'] = 3 if role == 'server' else 0
             auth_url = '/'.join([url, node, 'roles', 'pf9-ha-slave'])
-            LOG.info('authorize pf9-ha-slave on host %s with consul role %s', auth_url, role)
+            LOG.info('authorize pf9-ha-slave on host %s with consul role %s, data %s', node, role, str(data))
             resp = requests.put(auth_url, headers=headers,
                                 json=data, verify=False)
             if resp.status_code == requests.codes.not_found and \
@@ -900,6 +936,8 @@ class NovaProvider(Provider):
                                     json=data, verify=False)
                 if datetime.now() - start_time > timedelta(minutes=2):
                     break
+            if resp.status_code != requests.codes.ok:
+                LOG.warn('authorize pf9-ha-slave on host %s failed, data %s, resp %s', node, str(data), str(resp))
             resp.raise_for_status()
 
     def _fetch_role_details_for_host(self, host_id, host_roles):
@@ -910,12 +948,10 @@ class NovaProvider(Provider):
             return None
         rolename = roles[0]
         # Query consul_ip from resmgr ostackhost role settings
-        self._token = utils.get_token(self._auth_uri_v3,
-                                      self._tenant, self._username,
-                                      self._passwd, self._token)
+        self._token = self._get_v3_token()
         headers = {'X-Auth-Token': self._token['id'],
                    'Content-Type': 'application/json'}
-        resmgr_url = 'http://localhost:8080/resmgr/v1/hosts/'
+        resmgr_url = '%s/v1/hosts/' % self._resmgr_endpoint
         host_url = '/'.join([resmgr_url, host_id, 'roles', rolename])
         resp = requests.get(host_url, headers=headers)
         resp.raise_for_status()
@@ -949,10 +985,10 @@ class NovaProvider(Provider):
         for hyp in all_hypervisors:
             host_id = hyp.service['host']
             ip_lookup[host_id] = hyp.host_ip
+            cluster_ip = ''
             if host_id in lookup:
                 # Overwrite host_ip value with consul_ip or cluster_ip
                 # from ostackhost role
-                cluster_ip = ''
                 if roles_map.get(host_id, None) is not None:
                     json_resp = self._fetch_role_details_for_host(host_id, roles_map[host_id])
                     consul_ip = self._get_consul_ip(host_id, json_resp)
@@ -985,12 +1021,10 @@ class NovaProvider(Provider):
 
         leader_ip = ip_lookup[leader]
 
-        self._token = utils.get_token(self._auth_uri_v3,
-                                      self._tenant, self._username,
-                                      self._passwd, self._token)
+        self._token = self._get_v3_token()
         LOG.info('authorize pf9-ha-slave during assign roles')
-        self._auth(ip_lookup, cluster_ip_lookup, self._token, [leader] + servers, 'server')
-        self._auth(ip_lookup, cluster_ip_lookup, self._token, agents, 'agent')
+        self._auth(aggregate_id, ip_lookup, cluster_ip_lookup, self._token, [leader] + servers, 'server')
+        self._auth(aggregate_id, ip_lookup, cluster_ip_lookup, self._token, agents, 'agent')
 
     def __perf_meter(self, method, time_start):
         time_end = datetime.utcnow()
@@ -1080,11 +1114,27 @@ class NovaProvider(Provider):
         self._validate_hosts(hosts)
         self.__perf_meter('_validate_hosts', time_begin)
         time_begin = datetime.utcnow()
-        self._token = utils.get_token(self._auth_uri_v3,
-                                      self._tenant, self._username,
-                                      self._passwd, self._token)
+        self._token = self._get_v3_token()
         self.__perf_meter('utils.get_token', time_begin)
         try:
+            # when request to enable a cluster, first create CA if not exist, and svc key and certs
+            if self._is_consul_encryption_enabled():
+                ca_changed = False
+                svc_changed = False
+                if not keyhelper.are_consul_ca_key_cert_pair_exist() or \
+                        keyhelper.is_consul_ca_cert_expired():
+                    ca_changed = keyhelper.create_consul_ca_key_cert_pairs()
+                    LOG.info('CA key and cert are generated ? %s', str(ca_changed))
+                else:
+                    LOG.debug('CA key and cert are good for now')
+
+                if not keyhelper.are_consul_svc_key_cert_pair_exist(cluster_id) or \
+                        keyhelper.is_consul_svc_cert_expired(cluster_id):
+                    svc_changed = keyhelper.create_consul_svc_key_cert_pairs(cluster_id)
+                    LOG.info('svc key and cert for cluster %s are generated ? %s', cluster_id, str(svc_changed))
+                else:
+                    LOG.debug('svc key and cert for cluster %s are good for now', cluster_id)
+
             # 1. mark request as 'enabling' in status
             LOG.info('updating status of cluster %d to %s', cluster_id, constants.HA_STATE_ENABLING)
             time_begin = datetime.utcnow()
@@ -1150,12 +1200,10 @@ class NovaProvider(Provider):
                 self.__perf_meter('db_api.update_cluster_task_state', time_begin)
 
     def _get_settings_for_host(self, host_id):
-        self._token = utils.get_token(self._auth_uri_v3,
-                                      self._tenant, self._username,
-                                      self._passwd, self._token)
+        self._token = self._get_v3_token()
         headers = {'X-Auth-Token': self._token['id'],
                    'Content-Type': 'application/json'}
-        url = 'http://localhost:8080/resmgr/v1/hosts'
+        url = '%s/v1/hosts' % self._resmgr_endpoint
         auth_url = '/'.join([url, host_id])
         resp = requests.get(auth_url, headers=headers)
         resp.raise_for_status()
@@ -1175,12 +1223,10 @@ class NovaProvider(Provider):
                     raise ha_exceptions.RoleConvergeFailed(node)
 
     def _deauth(self, nodes):
-        self._token = utils.get_token(self._auth_uri_v3,
-                                      self._tenant, self._username,
-                                      self._passwd, self._token)
+        self._token = self._get_v3_token()
         headers = {'X-Auth-Token': self._token['id'],
                    'Content-Type': 'application/json'}
-        url = 'http://localhost:8080/resmgr/v1/hosts/'
+        url = '%s/v1/hosts/' % self._resmgr_endpoint
 
         for node in nodes:
             LOG.info('De-authorizing pf9-ha-slave role on node %s', node)
@@ -1261,9 +1307,7 @@ class NovaProvider(Provider):
         # the name used to query db needs to be string, not int
         aggregate_name = str(cluster.id)
         try:
-            self._token = utils.get_token(self._auth_uri_v3,
-                                          self._tenant, self._username,
-                                          self._passwd, self._token)
+            self._token = self._get_v3_token()
             hosts = None
             try:
                 if cluster:
@@ -1351,6 +1395,7 @@ class NovaProvider(Provider):
         current_host_ids = set(aggregate.hosts)
 
         try:
+            self._token = self._get_v3_token()
             nodes = masakari.get_nodes_in_segment(self._token, aggregate_id)
             db_node_ids = set([node['name'] for node in nodes])
             for current_host in current_host_ids:
@@ -1680,7 +1725,8 @@ class NovaProvider(Provider):
                 return
             for req in unhandled_requests:
                 req_id = req.uuid
-                LOG.info('processing consul role rebalance request %s : %s', req.uuid, str(req.rebalance_action))
+                LOG.info('processing consul role rebalance request %s for event %s: %s',
+                         req.uuid, str(req.event_uuid), str(req.rebalance_action))
                 # first check by time, abort request if timestamp shows the request older than 15 minutes
                 if (datetime.utcnow() - req.last_updated) > timedelta(minutes=15):
                     error = 'request created at %s is staled' % req.last_updated
@@ -1825,26 +1871,28 @@ class NovaProvider(Provider):
 
                 join_ips = ','.join(consul_addresses)
                 cluster_ip = target_consuls[0]['Addr']
+                cluster_name = target_consuls[0]['Tags']['dc']
 
                 # data = self._customize_pf9_ha_slave_config(join_ips, cluster_ip, cluster_ip)
                 LOG.info('run consul role rebalance request with ip %s to join %s : %s',
                          cluster_ip, join_ips, str(rebalance_request))
-                rebalance_result = self._execute_consul_role_rebalance(rebalance_request, cluster_ip, join_ips)
+                rebalance_result = self._execute_consul_role_rebalance(rebalance_request, cluster_name, cluster_ip, join_ips)
                 LOG.info('result of consul role rebalance request %s : %s',
                          str(rebalance_request), str(rebalance_result))
-                error_code = rebalance_result['status']
-                error_msg = rebalance_result['error']
+                status_code = rebalance_result['status']
+                status_msg = rebalance_result['error']
                 db_api.update_consul_role_rebalance(req.uuid,
                                                     None,
                                                     None,
-                                                    error_code,
-                                                    error_msg)
+                                                    status_code,
+                                                    status_msg)
                 # if the error code is not none , means something happened (most cases are the target host is down
                 # before the above process happened, so get empty response), let's just create new rebalance
                 # request
-                if error_code:
-                    LOG.info('rebalance request %s failed for event %s (%s), re-try rebalance for this event if needed',
-                             str(req.uuid), event_uuid,  event_type)
+                if status_code == constants.REBALABCE_STATE_ERROR:
+                    LOG.info('rebalance request %s failed for event %s (%s), re-try rebalance for this event if needed'\
+                             '. code : %s, message : %s',
+                             str(req.uuid), event_uuid,  event_type, status_code, status_msg)
                     self._rebalance_consul_roles_if_needed(req.event_name, event_uuid=event_uuid)
         except Exception as ex:
             error = 'exception : %s' % str(ex)
@@ -1860,6 +1908,97 @@ class NovaProvider(Provider):
             with self.consul_role_rebalance_processing_lock:
                 self.consul_role_rebalance_processing_running = False
         LOG.info('consul role rebalance processing task has finished at %s', str(datetime.utcnow()))
+
+    def process_consul_encryption_configuration(self):
+        with self.consul_encryption_processing_lock:
+            if self.consul_encryption_processing_running:
+                LOG.debug('consul encryption configuration processing task is already running')
+                return
+            self.consul_encryption_processing_running = True
+        LOG.info('consul encryption configuration processing task start to work at %s', str(datetime.utcnow()))
+        try:
+            if not self._is_consul_encryption_enabled():
+                return
+
+            # CA key and cert only needs to be created once, unless they expired
+            ca_changed = False
+            if not keyhelper.are_consul_ca_key_cert_pair_exist() or \
+                    keyhelper.is_consul_ca_cert_expired():
+                ca_changed = keyhelper.create_consul_ca_key_cert_pairs()
+                LOG.info('expired CA key and cert are refreshed ? %s', str(ca_changed))
+            else:
+                LOG.debug('CA key and cert are good for now')
+
+            # svc key and cert need to be created for each enabled cluster
+            self._token = self._get_v3_token()
+            clusters = db_api.get_all_active_clusters()
+            for cluster in clusters:
+                cluster_name = cluster.name
+                svc_changed = False
+                # for ha enabled cluster, when svc key and cert not exist , or expired, then refresh them
+                if not keyhelper.are_consul_svc_key_cert_pair_exist(cluster_name) or \
+                        keyhelper.is_consul_svc_cert_expired(cluster_name):
+                    svc_changed = keyhelper.create_consul_svc_key_cert_pairs(cluster_name)
+                    LOG.info('expired svc key and cert for cluster %s are refreshed ? %s', cluster_name, str(svc_changed))
+                else:
+                    LOG.debug('svc key and cert for cluster %s are good for now', cluster_name)
+
+                if ca_changed or svc_changed:
+                    # get hosts ids from masakari for current cluster
+                    hosts = masakari.get_nodes_in_segment(self._token, str(cluster_name))
+                    host_ids = [x['uuid'] for x in hosts]
+                    ip_lookup, cluster_ip_lookup = self._get_ips_for_hosts(client, host_ids)
+                    # need to push the settings for each host through resmgr
+                    for host in hosts:
+                        host_id = str(host['uuid'])
+                        url = '%s/v1/hosts' % self._resmgr_endpoint
+                        self._token = self._get_v3_token()
+                        headers = {'X-Auth-Token': self._token['id'], 'Content-Type': 'application/json'}
+                        # get the target host info to make sure the role status is ok
+                        req_url = url + "/" + host_id
+                        result = requests.get(req_url, headers=headers)
+                        if not result or result.status_code != requests.codes.ok:
+                            LOG.warn('call to %s was unsuccessful, result : %s', req_url, str(result))
+                            continue
+                        resp_host = result.json()
+                        if 'pf9-ha-slave' not in resp_host['roles']:
+                            LOG.warn('host %s does not have pf9-ha-slave role', host_id)
+                            continue
+
+                        req_url = '%s/%s/roles/pf9-ha-slave' % (url, host_id)
+                        result = requests.get(req_url, headers=headers)
+                        if not result or result.status_code != requests.codes.ok:
+                            LOG.warn('call to %s was unsuccessful, result : %s', req_url, str(result))
+                            continue
+                        resp_role = result.json()
+                        LOG.debug('pf9-ha-slave role settings for host %s : %s', host_id, str(resp_role))
+
+                        valid_ips = [x for x in cluster_ip_lookup.values() if x != '']
+                        join_ips = ','.join([str(v) for v in valid_ips])
+                        host_ip = ip_lookup[host_id]
+                        # after the pf9-ha-slave role is enabled, the resmgr should have below customized settings:
+                        # - cluster_ip, join, ip_address, bootstrap_expect
+                        # no matter they are existed or not, always set cluster_ip, join, ip_address.
+                        # only the bootstrap_expect can not be determined here
+                        data = self._customize_pf9_ha_slave_config(cluster_name, join_ips, host_ip, host_ip)
+                        # update resmgr with the new settings
+                        req_url = '%s/%s/roles/pf9-ha-slave' % (url, host_id)
+                        result = requests.put(req_url,
+                                              headers=headers,
+                                              json=data)
+                        LOG.info('req_url : %s , result : %s', req_url, str(result))
+                        if not result or result.status_code != requests.codes.ok:
+                            LOG.warn('failed to update settings for host %s : %s', host_id, str(data))
+
+                else:
+                    LOG.info('not changed in CA key and cert, or svc key and cert for cluster %s', cluster_name)
+
+        except Exception as ex:
+            LOG.exception('unhandled exception in process_consul_encryption_configuration : %s', str(ex))
+        finally:
+            with self.consul_encryption_processing_lock:
+                self.consul_encryption_processing_running = False
+        LOG.info('consul encryption configuration processing task has finished at %s', str(datetime.utcnow()))
 
 
 def get_provider(config):

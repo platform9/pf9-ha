@@ -66,6 +66,11 @@ class NovaProviderTest(unittest.TestCase):
         config.set('nova', 'region', 'fake')
 
         config.set('DEFAULT', 'event_report_threshold_seconds', '30')
+        config.set('DEFAULT', 'resmgr_endpoint','http://localhost:8080/resmgr')
+        config.set('DEFAULT', 'du_fqdn', '')
+        config.set('DEFAULT', 'customer_shortname', '')
+        config.set('DEFAULT', 'customer_fullname', '')
+        config.set('DEFAULT', 'region_name', '')
 
         self._provider = get_provider(config)
 

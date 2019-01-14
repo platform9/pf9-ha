@@ -124,7 +124,10 @@ def get_consul_status(aggregate_id=None):
         leader = record.leader
         members = json.loads(record.members)
         for host_id in aggregate_host_ids:
-            member = filter(lambda x : x['Name'] == host_id, members)[0]
+            matches = [x for x in members if x['Name'] == host_id]
+            if len(matches) <= 0:
+                continue
+            member = matches[0]
             if not member:
                 LOG.warn('host %s exists in aggregate %s but does not '
                             'in consul members report : %s',

@@ -11,6 +11,38 @@
       "path": "config/ha_slave_conf/consul",
       "default": 0
     },
+    "cluster_name" :{
+      "path": "config/ha_slave_conf/consul",
+      "default": ""
+    },
+    "encrypt": {
+      "path": "config/ha_slave_conf/consul",
+      "default": ""
+    },
+    "verify_incoming": {
+      "path": "config/ha_slave_conf/consul",
+      "default": "false"
+    },
+    "verify_outgoing": {
+      "path": "config/ha_slave_conf/consul",
+      "default": "false"
+    },
+    "verify_server_hostname": {
+      "path": "config/ha_slave_conf/consul",
+      "default": "false"
+    },
+    "ca_file_content": {
+      "path": "config/ha_slave_conf/consul",
+      "default": ""
+    },
+    "cert_file_content": {
+      "path": "config/ha_slave_conf/consul",
+      "default": ""
+    },
+    "key_file_content": {
+      "path": "config/ha_slave_conf/consul",
+      "default": ""
+    },
     "ip_address": {
       "path": "config/ha_slave_conf/node",
       "default": ""
