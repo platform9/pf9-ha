@@ -214,7 +214,7 @@ class consul_status(object):
                 'leader': self.cc.status.leader(),
                 'peers': self.cc.status.peers(),
                 'members': self.cc.agent.members(),
-                'kv': kv_list,
+                'kv': '',
                 'joins': str(CONF.consul.join),
             }
 
