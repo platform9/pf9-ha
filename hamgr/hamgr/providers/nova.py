@@ -1100,6 +1100,7 @@ class NovaProvider(Provider):
         client = self._get_client()
         str_aggregate_id = request.name
         cluster_id = request.id
+        cluster_name = request.name
         time_begin = datetime.utcnow()
         self.__perf_meter('db_api.get_cluster', time_begin),
         time_begin = datetime.utcnow()
@@ -1128,12 +1129,12 @@ class NovaProvider(Provider):
                 else:
                     LOG.debug('CA key and cert are good for now')
 
-                if not keyhelper.are_consul_svc_key_cert_pair_exist(cluster_id) or \
-                        keyhelper.is_consul_svc_cert_expired(cluster_id):
-                    svc_changed = keyhelper.create_consul_svc_key_cert_pairs(cluster_id)
-                    LOG.info('svc key and cert for cluster %s are generated ? %s', cluster_id, str(svc_changed))
+                if not keyhelper.are_consul_svc_key_cert_pair_exist(cluster_name) or \
+                        keyhelper.is_consul_svc_cert_expired(cluster_name):
+                    svc_changed = keyhelper.create_consul_svc_key_cert_pairs(cluster_name)
+                    LOG.info('svc key and cert for cluster name %s are generated ? %s', cluster_name, str(svc_changed))
                 else:
-                    LOG.debug('svc key and cert for cluster %s are good for now', cluster_id)
+                    LOG.debug('svc key and cert for cluster name %s are good for now', cluster_name)
 
             # 1. mark request as 'enabling' in status
             LOG.info('updating status of cluster %d to %s', cluster_id, constants.HA_STATE_ENABLING)

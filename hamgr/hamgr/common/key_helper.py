@@ -333,12 +333,18 @@ def are_consul_svc_key_cert_pair_exist(cluster_name):
 def read_key_cert_pair(key_file, cert_file, base64_encode=True):
     content_key = ''
     content_cert = ''
+    LOG.info('key file to read %s', key_file)
     if os.path.exists(key_file):
         with open(key_file) as fp:
             content_key = fp.read()
+    else:
+        LOG.warn('key file %s requested does not exist', key_file)
+    LOG.info('cert file to read %s', cert_file)
     if os.path.exists(cert_file):
         with open(cert_file) as fp:
             content_cert = fp.read()
+    else:
+        LOG.warn('cert file %s requested does not exist', cert_file)
     if base64_encode:
         content_key = base64.b64encode(content_key)
         content_cert = base64.b64encode(content_cert)
