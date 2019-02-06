@@ -40,6 +40,14 @@ def get_failover_segment(token, name):
     return expected_seg[0]
 
 
+def get_all_failover_segments(token):
+    url = '/'.join([_URL, 'segments'])
+    headers = {'X-Auth-Token': token['id'],
+               'Content-Type': 'application/json'}
+    resp = requests.get(url, headers=headers)
+    resp.raise_for_status()
+    return resp.json()
+
 def is_failover_segment_exist(token, segment_name):
     try:
         get_failover_segment(token, segment_name)
@@ -167,6 +175,7 @@ def create_failover_segment(token, name, hosts):
     else:
         LOG.warn('Segment %s not exists, now try to create one', name)
         resp = requests.post(url, headers=headers, data=json.dumps(dict(segment=data)))
+        LOG.debug('resp when create segment %s : %s', str(data), str(resp.__dict__))
         resp.raise_for_status()
 
         seg = resp.json()['segment']
@@ -178,6 +187,8 @@ def create_failover_segment(token, name, hosts):
                                   on_maintenance='False',
                                   control_attributes=''))
             resp = requests.post(url, headers=headers, data=json.dumps(data))
+            LOG.debug('resp when add host %s into segment %s : %s',
+                      str(h), str(seg['uuid']), str(resp.__dict__))
             resp.raise_for_status()
 
 
@@ -284,7 +295,7 @@ def add_hosts_to_failover_segment(token, segment_name, host_ids):
         segment = get_failover_segment(token, str(segment_name))
     except exceptions.SegmentNotFound:
         LOG.warn('masakari segment %s does not exist for adding hosts %s', segment_name, str(host_ids))
-        pass
+        return
 
     url = '/'.join([_URL, 'segments', segment['uuid'], 'hosts'])
     headers = {'X-Auth-Token': token['id'], 'Content-Type': 'application/json'}
@@ -304,7 +315,7 @@ def delete_hosts_from_failover_segment(token, segment_name, host_ids):
         segment = get_failover_segment(token, str(segment_name))
     except exceptions.SegmentNotFound:
         LOG.warn('masakari segment %s does not exist for adding hosts %s', segment_name, str(host_ids))
-        pass
+        return
 
     # when delete a host, requires host uuid, not host name (id)
     headers = {'X-Auth-Token': token['id']}

@@ -172,12 +172,19 @@ def start_consul_service():
     retval = False
     service_start_retry = 30
     try:
-        retcode = run_cmd('sudo service pf9-consul status')
-        if retcode == 0:
-            LOG.warn('Consul service was already running. now stop it before start')
-            run_cmd('sudo service pf9-consul stop')
-
         while service_start_retry > 0:
+            retcode = run_cmd('sudo service pf9-consul status')
+            LOG.info('retcode of command "sudo service pf9-consul status" : %s', str(retcode))
+            if retcode !=0:
+                sleep(3)
+                continue
+
+            retcode = run_cmd('sudo service pf9-consul stop')
+            LOG.info('retcode of command "sudo service pf9-consul stop" : %s', str(retcode))
+            if retcode != 0:
+                sleep(3)
+                continue
+
             retcode = run_cmd('sudo service pf9-consul start')
             # Sleep 3s to allow consul to fail in case the bootstrap server
             # has not yet started. This also allows us 90s before the cluster
@@ -194,6 +201,7 @@ def start_consul_service():
             else:
                 LOG.warn('Consul service could not be started')
             service_start_retry = service_start_retry - 1
+            sleep(3)
     except Exception as ex:
         LOG.warn('unhandled exception when start consul service : %s', str(ex))
     return retval
@@ -511,6 +519,102 @@ def processing_rebalance_requests(rebalance_mgr, hostid, join_ips):
             LOG.exception('unhandled exception in processing_rebalance_requests')
         sleep(1)
 
+def config_needs_refresh():
+    # if settings in /opt/pf9/etc/pf9-ha/conf.d/pf9-ha.conf are updated from resmgr by hostagent
+    # but the /opt/pf9/etc/pf9-consul/conf.d/xx.json does not have it, then need to refresh it
+    # {
+    #     "advertise_addr": "10.97.0.18",
+    #     "bind_addr": "10.97.0.18",
+    #     "bootstrap_expect": 3,
+    #     "ca_file": "/opt/pf9/etc/pf9-consul/consul_ca.pem",
+    #     "cert_file": "/opt/pf9/etc/pf9-consul/consul_cert.pem",
+    #     "data_dir": "/opt/pf9/consul-data-dir/",
+    #     "datacenter": "72",
+    #     "disable_remote_exec": true,
+    #     "encrypt": "cGY5LWRjLTcyLTAwMDAwMA==",
+    #     "key_file": "/opt/pf9/etc/pf9-consul/consul_key.pem",
+    #     "node_name": "19977b82-5ed5-49ed-be08-971b7e3c983f",
+    #     "server": true,
+    #     "verify_incoming": true,
+    #     "verify_outgoing": true,
+    #     "verify_server_hostname": false
+    # }
+    settings_source = dict(
+        advertise_addr=consul_helper.get_ip_address(),
+        bind_addr=consul_helper.get_bind_address(),
+        bootstrap_expect=CONF.consul.bootstrap_expect,
+        datacenter=CONF.consul.cluster_name,
+        encrypt=CONF.consul.encrypt,
+        ca_file_content=CONF.consul.ca_file_content,
+        cert_file_content=CONF.consul.cert_file_content,
+        key_file_content=CONF.consul.key_file_content
+    )
+
+    settings_consul = {}
+    cfg_file = ""
+    if CONF.consul.bootstrap_expect == 0:
+        cfg_file = PF9_CONSUL_CONF_DIR + 'conf.d/client.json'
+    else:
+        cfg_file = PF9_CONSUL_CONF_DIR + 'conf.d/server.json'
+    with open(cfg_file) as fptr:
+        settings_consul = json.load(fptr)
+
+    # check whether settings in source do not exist or not match in consul settings
+    if settings_source['advertise_addr'] != settings_consul.get('advertise_addr', None):
+        LOG.info('detected changes in advertise_addr, source : %s , consul cfg : %s',
+                 settings_source['advertise_addr'],
+                 settings_consul.get('advertise_addr', None))
+        return True
+    if settings_source['bind_addr']!= settings_consul.get('bind_addr', None):
+        LOG.info('detected changes in bind_addr, source : %s , consul cfg : %s',
+                 settings_source['bind_addr'],
+                 settings_consul.get('bind_addr', None))
+        return True
+    if settings_source['datacenter']!= settings_consul.get('datacenter', None):
+        LOG.info('detected changes in datacenter, source : %s , consul cfg : %s',
+                 settings_source['datacenter'],
+                 settings_consul.get('datacenter', None))
+        return True
+    if settings_source['encrypt']!= settings_consul.get('encrypt', None):
+        LOG.info('detected changes in encrypt, source : %s , consul cfg : %s',
+                 settings_source['encrypt'],
+                 settings_consul.get('encrypt', None))
+        return True
+
+    file_maps = [('consul_ca.pem', 'ca_file_content'),
+                 ('consul_cert.pem', 'cert_file_content'),
+                 ('consul_key.pem', 'key_file_content')
+                 ]
+    for item in file_maps:
+        file_path = os.path.join(PF9_CONSUL_CONF_DIR, item[0])
+        content_key = item[1]
+        if settings_source[content_key] and os.path.exists(file_path) == False:
+            LOG.info('detected changes in file %s, source content: %s , consul cfg exists ?: %s',
+                     file_path,
+                     settings_source[content_key],
+                     str(os.path.exists(file_path)))
+            return True
+
+        file_content = None
+        with open(file_path) as fp:
+            file_content = fp.read()
+
+        if file_content != b64decode(settings_source[content_key]):
+            LOG.info('detected changes in content in %s, source content: %s , consul cfg  content : %s',
+                     file_path,
+                     b64decode(settings_source[content_key]),
+                     file_content)
+            return True
+
+    LOG.info('configuration for consul has not changed')
+    return False
+
+def get_join_ips():
+    join_ips = ''
+    if CONF.consul.join:
+        ips = CONF.consul.join.split(',')
+        join_ips = ' '.join([x.strip() for x in ips if x])
+    return join_ips
 
 def loop():
     global STOPPING
@@ -536,10 +640,7 @@ def loop():
     start_loop = start_consul_service()
 
     # find out consul join ips
-    join_ips = ''
-    if CONF.consul.join:
-        ips = CONF.consul.join.split(',')
-        join_ips = ' '.join([x.strip() for x in ips])
+    join_ips = get_join_ips()
     LOG.debug('consul join addresses from config file :%s', join_ips)
 
     rebalance_thread = None
@@ -592,9 +693,14 @@ def loop():
         # the main thread handling host down events
         while start_loop:
             try:
+                if config_needs_refresh():
+                    LOG.info('configuration changes detected for consul, now re-config consul')
+                    cluster_setup = False
+
                 if not cluster_setup:
                     # Running join against oneself generates a warning message in
                     # logs but does not cause consul to crash
+                    join_ips = get_join_ips()
                     if not join_ips:
                         LOG.error('null or empty consul join ip list in config file')
                         sleep(sleep_time)

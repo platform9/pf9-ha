@@ -39,7 +39,6 @@ from shared.messages.rebalance_request import ConsulRoleRebalanceRequest
 from shared.messages.consul_request import ConsulRefreshRequest
 from hamgr.common import key_helper as keyhelper
 
-
 LOG = logging.getLogger(__name__)
 
 
@@ -237,7 +236,7 @@ class NovaProvider(Provider):
                         if is_active:
                             LOG.warn('still report host_down event to masakari,' \
                                      'even the host %s is alive in nova',
-                                event_uuid)
+                                     event_uuid)
 
                         notification_obj = self._report_event_to_masakari(
                             event)
@@ -361,6 +360,7 @@ class NovaProvider(Provider):
         # masakari for vm evacuation management
         # ----------------------------------------------------------
         # find out all host aggregates from nova
+
         nova_all_aggregates = client.aggregates.list()
         nova_active_aggres = [x for x in nova_all_aggregates if x.deleted == False]
         hamgr_all_clusters = db_api.get_all_clusters()
@@ -376,7 +376,7 @@ class NovaProvider(Provider):
             nova_agg_hosts = active_agg.hosts
             LOG.info('host ids from nova aggregate %s : %s', nova_agg_name, str(nova_agg_hosts))
             # is there a ha cluster for this id ?
-            hamgr_clusters_for_agg = [x for x in hamgr_all_clusters if x.name == str(nova_agg_id) ]
+            hamgr_clusters_for_agg = [x for x in hamgr_all_clusters if x.name == str(nova_agg_id)]
             LOG.info('found hamgr clusters for nova aggregate %s : %s', nova_agg_name, str(hamgr_clusters_for_agg))
             if len(hamgr_clusters_for_agg) <= 0:
                 # create one and set state to be 'disabled'
@@ -385,10 +385,6 @@ class NovaProvider(Provider):
                     new_cluster = db_api.create_cluster_if_needed(str(nova_agg_id), constants.TASK_CREATING)
                     db_api.update_cluster(new_cluster.id, False)
                     db_api.update_request_status(new_cluster.id, constants.HA_STATE_DISABLED)
-                    if not masakari.is_failover_segment_exist(self._token, str(new_cluster.id)):
-                        # add corresponding masakari info
-                        LOG.info('create masakari segment for newly created disabled ha cluster')
-                        masakari.create_failover_segment(self._token, str(new_cluster.id), nova_agg_hosts)
                     db_api.update_cluster_task_state(new_cluster.id, constants.TASK_COMPLETED)
                     LOG.info('created a disabled ha cluster %s with hosts %s for nova aggregates %s',
                              str(new_cluster.id),
@@ -406,13 +402,10 @@ class NovaProvider(Provider):
                 # if more hosts in masakari, means some of they are removed from nova aggregate
 
                 masakari_hosts = []
-                if not masakari.is_failover_segment_exist(self._token, str(cluster_id)):
-                    # first rebuild a failover segment
-                    LOG.info('masakari segment %s not exist, now create with hosts %s', str(cluster_id), str(nova_agg_hosts))
-                    masakari.create_failover_segment(self._token, str(cluster_id), nova_agg_hosts)
 
                 # add hosts found in nova aggregate but not in masakari segment
-                masakari_hosts = masakari.get_nodes_in_segment(self._token, str(cluster_id))
+                if masakari.is_failover_segment_exist(self._token, str(cluster_id)):
+                    masakari_hosts = masakari.get_nodes_in_segment(self._token, str(cluster_id))
                 masakari_hids = [x['name'] for x in masakari_hosts]
                 common_ids = set(nova_agg_hosts).intersection(set(masakari_hids))
                 nova_delta_ids = set(nova_agg_hosts) - set(common_ids)
@@ -440,12 +433,14 @@ class NovaProvider(Provider):
                             self._rebalance_consul_roles_if_needed(constants.EVENT_HOST_ADDED)
 
                 # remove host found in masakari segment but not in nova aggregate
-                masakari_hosts = masakari.get_nodes_in_segment(self._token, str(cluster_id))
+                if masakari.is_failover_segment_exist(self._token, str(cluster_id)):
+                    masakari_hosts = masakari.get_nodes_in_segment(self._token, str(cluster_id))
                 masakari_hids = [x['name'] for x in masakari_hosts]
                 common_ids = set(nova_agg_hosts).intersection(set(masakari_hids))
                 masakari_delta_ids = set(masakari_hids) - set(common_ids)
                 if len(masakari_delta_ids) > 0:
-                    LOG.info('found hosts removed from nova aggregate %s : %s', str(nova_agg_id), str(masakari_delta_ids))
+                    LOG.info('found hosts removed from nova aggregate %s : %s', str(nova_agg_id),
+                             str(masakari_delta_ids))
                     # need to remove those additional hosts found in masakari
                     if masakari.is_failover_segment_under_recovery(self._token, str(cluster_id)):
                         LOG.info('will retry to remove hosts %s from masakari segment %s, '
@@ -528,7 +523,7 @@ class NovaProvider(Provider):
                     # resume on maintenance hosts, and enforce pf9-ha-slave role on active hosts
                     for hid in nova_active_host_ids:
                         # already know the host is active in nova
-                        xhosts = [x for x in nodes if str(x['name']) == str(hid) ]
+                        xhosts = [x for x in nodes if str(x['name']) == str(hid)]
                         if len(xhosts) == 1 and xhosts[0]['on_maintenance']:
                             LOG.info('toggle maintenance for host %s', str(hid))
                             # need to unlock the host when the segment is not in use, otherwise will retry later
@@ -565,12 +560,13 @@ class NovaProvider(Provider):
 
                     if len(new_active_host_ids) > 0:
                         # need to put pf-ha-slave role on them
-                        LOG.info('new active hosts are added into aggregate %s but not in masakari : %s ' ,
+                        LOG.info('new active hosts are added into aggregate %s but not in masakari : %s ',
                                  str(aggregate_id),
                                  str(new_active_host_ids))
                         # same here, since we don't know the consul roles on existing hosts, so just
                         # make thoese hosts as consul server, and trigger a role rebalance request
-                        self._add_ha_slave_if_not_exist(str(aggregate_id), new_active_host_ids, 'server', masakari_host_ids)
+                        self._add_ha_slave_if_not_exist(str(aggregate_id), new_active_host_ids, 'server',
+                                                        masakari_host_ids)
                         # trigger consul role rebalance request
                         time.sleep(30)
                         self._rebalance_consul_roles_if_needed(constants.EVENT_HOST_ADDED)
@@ -607,7 +603,7 @@ class NovaProvider(Provider):
                               "another cluster")
                 except Exception as e:
                     LOG.exception('Exception while processing aggregate %s: %s',
-                              aggregate_id, e)
+                                  aggregate_id, e)
 
         with self.aggregate_task_lock:
             LOG.debug('Aggregate changes task completed')
@@ -685,7 +681,7 @@ class NovaProvider(Provider):
                      target_host_id,
                      str(data),
                      str(result))
-            return {'status': constants.REBALANCE_STATE_ABORTED, 'error': 'failed to update resmgr' }
+            return {'status': constants.REBALANCE_STATE_ABORTED, 'error': 'failed to update resmgr'}
         else:
             # step 2 : notify pf9-ha-slave with RPC message contains the rebalance request
             LOG.info('sending consul role rebalance request %s ', str(rebalance_request))
@@ -696,7 +692,6 @@ class NovaProvider(Provider):
         else:
             msg = 'empty consul role rebalance response for request : %s' % str(rebalance_request)
             return {'status': constants.REBALABCE_STATE_ERROR, 'error': msg}
-
 
     def _add_ha_slave_if_not_exist(self, cluster_name, host_ids_for_adding, consul_role, peer_host_ids):
         if consul_role not in ['server', 'agent']:
@@ -911,7 +906,7 @@ class NovaProvider(Provider):
         url = '%s/v1/hosts' % self._resmgr_endpoint
         headers = {'X-Auth-Token': token['id'],
                    'Content-Type': 'application/json'}
-        valid_ips = [ x for x in cluster_ip_lookup.values() if x !='' ]
+        valid_ips = [x for x in cluster_ip_lookup.values() if x != '']
         ips = ','.join([str(v) for v in valid_ips])
         LOG.info('ips for consul members to join : %s', ips)
         for node in nodes:
@@ -944,7 +939,8 @@ class NovaProvider(Provider):
         LOG.info('find role details for host %s with role map %s', str(host_id), str(host_roles))
         roles = filter(lambda x: x.startswith('pf9-ostackhost'), host_roles)
         if len(roles) != 1:
-            LOG.warn('pf9-ostackhost role not found in roles from resgmr for host %s : %s', str(host_id), str(host_roles))
+            LOG.warn('pf9-ostackhost role not found in roles from resgmr for host %s : %s', str(host_id),
+                     str(host_roles))
             return None
         rolename = roles[0]
         # Query consul_ip from resmgr ostackhost role settings
@@ -975,7 +971,7 @@ class NovaProvider(Provider):
     def _get_ips_for_hosts(self, client, hosts):
         all_hypervisors = client.hypervisors.list()
         LOG.info('all hypervisors : %s', str(all_hypervisors))
-        hyperviros_host_ids = [x.service['host'] for x in all_hypervisors ]
+        hyperviros_host_ids = [x.service['host'] for x in all_hypervisors]
         LOG.info('host ids of all hypervisors : %s', str(hyperviros_host_ids))
         roles_map = self._get_roles_for_hosts(hyperviros_host_ids)
         LOG.info('roles map of all hypervisors : %s', str(roles_map))
@@ -1151,9 +1147,10 @@ class NovaProvider(Provider):
 
             # 3. Create masakari fail-over segment
             time_begin = datetime.utcnow()
-            LOG.info('create masakari masakari segment during handling enabling request')
-            masakari.create_failover_segment(self._token, str(cluster_id),
-                                             hosts)
+            if not masakari.is_failover_segment_exist(self._token, str(cluster_id)):
+                LOG.info('create masakari masakari segment during handling enabling request, ' \
+                         'segment id %s, hosts %s', str(cluster_id), str(hosts))
+                masakari.create_failover_segment(self._token, str(cluster_id), hosts)
             self.__perf_meter('masakari.create_failover_segment', time_begin)
 
             # 4. mark request as 'enabled' in status
@@ -1603,10 +1600,10 @@ class NovaProvider(Provider):
                 consul_host = consul_servers_alive[i - start]
                 # only active host can be used for rebalance
                 if self._is_nova_service_active(consul_host['Name'], self._get_client()):
-                    candicates.append({'host':consul_host['Name'],
-                                       'old_role':old_role,
-                                       'new_role':new_role,
-                                       'member':consul_host})
+                    candicates.append({'host': consul_host['Name'],
+                                       'old_role': old_role,
+                                       'new_role': new_role,
+                                       'member': consul_host})
         elif len(consul_servers_alive) < server_threshold:
             wanted = server_threshold - len(consul_servers_alive)
             LOG.info('not enough alive consul role of server, found %s, required %s, wanted %s',
@@ -1630,16 +1627,15 @@ class NovaProvider(Provider):
                     consul_host = consul_slaves_alive[i - start]
                     # only active host can be used for rebalance
                     if self._is_nova_service_active(consul_host['Name']):
-                        candicates.append({'host':consul_host['Name'],
-                                           'old_role':old_role,
+                        candicates.append({'host': consul_host['Name'],
+                                           'old_role': old_role,
                                            'new_role': new_role,
-                                           'member':consul_host})
+                                           'member': consul_host})
         else:
             LOG.info('consul role rebalance is not needed, num of alive consul servers %s meets required %s',
                      str(len(consul_servers_alive)),
                      str(server_threshold))
         return candicates
-
 
     def _report_consul_rebalance(self, event_type, event_uuid, consul_report):
         try:
@@ -1648,7 +1644,8 @@ class NovaProvider(Provider):
             # create rebalance request for each target hosts, they should be processed one by one
             for candidate in candicates:
                 host_id = candidate['host']
-                rebalance_action = {'host':host_id, 'old_role':candidate['old_role'], 'new_role':candidate['new_role']}
+                rebalance_action = {'host': host_id, 'old_role': candidate['old_role'],
+                                    'new_role': candidate['new_role']}
                 existing_actions = db_api.get_unhandled_consul_role_rebalance_records_by_action(
                     json.dumps(rebalance_action))
                 # if for the same host, there are unhandled requests(either server to slave, or slave to server)
@@ -1806,7 +1803,7 @@ class NovaProvider(Provider):
                     # host events has been aborted, no need to rebalance consul role
                     if event_status in ['error', 'failed', 'ignored', 'aborted']:
                         error = "associated host event %s (%s) was in %s status" % (
-                        event_uuid, event_type, event_status)
+                            event_uuid, event_type, event_status)
                         LOG.warning('abort consul role rebalance request as the %s', error)
                         db_api.update_consul_role_rebalance(req.uuid,
                                                             None,
@@ -1877,7 +1874,8 @@ class NovaProvider(Provider):
                 # data = self._customize_pf9_ha_slave_config(join_ips, cluster_ip, cluster_ip)
                 LOG.info('run consul role rebalance request with ip %s to join %s : %s',
                          cluster_ip, join_ips, str(rebalance_request))
-                rebalance_result = self._execute_consul_role_rebalance(rebalance_request, cluster_name, cluster_ip, join_ips)
+                rebalance_result = self._execute_consul_role_rebalance(rebalance_request, cluster_name, cluster_ip,
+                                                                       join_ips)
                 LOG.info('result of consul role rebalance request %s : %s',
                          str(rebalance_request), str(rebalance_result))
                 status_code = rebalance_result['status']
@@ -1891,9 +1889,9 @@ class NovaProvider(Provider):
                 # before the above process happened, so get empty response), let's just create new rebalance
                 # request
                 if status_code == constants.REBALABCE_STATE_ERROR:
-                    LOG.info('rebalance request %s failed for event %s (%s), re-try rebalance for this event if needed'\
+                    LOG.info('rebalance request %s failed for event %s (%s), re-try rebalance for this event if needed' \
                              '. code : %s, message : %s',
-                             str(req.uuid), event_uuid,  event_type, status_code, status_msg)
+                             str(req.uuid), event_uuid, event_type, status_code, status_msg)
                     self._rebalance_consul_roles_if_needed(req.event_name, event_uuid=event_uuid)
         except Exception as ex:
             error = 'exception : %s' % str(ex)
@@ -1940,7 +1938,8 @@ class NovaProvider(Provider):
                 if not keyhelper.are_consul_svc_key_cert_pair_exist(cluster_name) or \
                         keyhelper.is_consul_svc_cert_expired(cluster_name):
                     svc_changed = keyhelper.create_consul_svc_key_cert_pairs(cluster_name)
-                    LOG.info('expired svc key and cert for cluster %s are refreshed ? %s', cluster_name, str(svc_changed))
+                    LOG.info('expired svc key and cert for cluster %s are refreshed ? %s', cluster_name,
+                             str(svc_changed))
                 else:
                     LOG.debug('svc key and cert for cluster %s are good for now', cluster_name)
 
