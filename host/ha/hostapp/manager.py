@@ -175,17 +175,13 @@ def start_consul_service():
         while service_start_retry > 0:
             retcode = run_cmd('sudo service pf9-consul status')
             LOG.info('retcode of command "sudo service pf9-consul status" : %s', str(retcode))
-            if retcode !=0:
-                sleep(3)
-                continue
-
-            retcode = run_cmd('sudo service pf9-consul stop')
-            LOG.info('retcode of command "sudo service pf9-consul stop" : %s', str(retcode))
-            if retcode != 0:
-                sleep(3)
-                continue
+            if retcode == 0:
+                LOG.warn('Consul service was already running. now stop it before start')
+                retcode = run_cmd('sudo service pf9-consul stop')
+                LOG.info('retcode of command "sudo service pf9-consul stop" : %s', str(retcode))
 
             retcode = run_cmd('sudo service pf9-consul start')
+            LOG.info('retcode of command "sudo service pf9-consul start" : %s', str(retcode))
             # Sleep 3s to allow consul to fail in case the bootstrap server
             # has not yet started. This also allows us 90s before the cluster
             # creation will fail
