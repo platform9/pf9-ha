@@ -13,7 +13,7 @@
 # limitations under the License.
 
 PF9_VERSION ?= 3.6.0
-PF9_BUILD_NUMBER ?= 0
+BUILD_NUMBER ?= 0
 UID ?= $(shell id -u)
 GID ?= $(shell id -g)
 SRCROOT = $(abspath $(dir $(CURDIR)))
@@ -38,10 +38,10 @@ $(STAGE)/wrapper:
 	mkdir -p $@
 
 wrapper: rpm deb
-	$(CURDIR)/build-wrapper.sh $(PF9_VERSION) $(PF9_BUILD_NUMBER) $(BUILD) $(STAGE)/wrapper
+	$(CURDIR)/build-wrapper.sh $(PF9_VERSION) $(BUILD_NUMBER) $(BUILD) $(STAGE)/wrapper
 
 rpm deb:
-	$(CURDIR)/package.sh $(PF9_VERSION) $(PF9_BUILD_NUMBER) $(STAGE)/$@ $(BUILD) $@
+	$(CURDIR)/package.sh $(PF9_VERSION) $(BUILD_NUMBER) $(STAGE)/$@ $(BUILD) $@
 
 $(BUILD):
 	mkdir -p $@
