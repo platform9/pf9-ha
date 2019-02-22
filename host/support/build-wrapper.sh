@@ -18,6 +18,8 @@ builddir=$3
 stagedir=$4
 thisdir=`cd $(dirname $0); pwd`
 
+echo "### version=${version} , buildnum=${buildnum} , builddir=${builddir} , stagedir=${stagedir} , thisdir=${thisdir}"
+
 name=pf9-ha-slave-wrapper
 arch=x86_64
 desc="Wrapper package for Platform9 On-host consul cluster manager service"

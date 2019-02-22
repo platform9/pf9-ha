@@ -6,23 +6,19 @@ export PBR_VERSION=3.1.1
 
 proj=hamgr
 githash=${PF9_GITHASH:-`git rev-parse --short HEAD`}
-echo "** hamgr git hash : ${githash}"
 version=${PF9_VERSION:-1.5.0}
-echo "** hamgr version : ${version}"
-echo "** hamgr build : ${PF9_BUILD_NUMBER}"
+buildnum=${BUILD_NUMBER:-0}
 spec=pf9-$proj.spec
 srcroot=$(dirname $(readlink -f $0))/..
-echo "### srcroot = ${srcroot}"
 rpmbuild=$srcroot/../build/$proj
-echo "### rpmbuild = ${rpmbuild}"
 shared=$(readlink -f ../../shared)
-echo "### shared = ${shared}"
 
+echo "### version=${version} , buildnum=${buildnum} , githash=${githash}, srcroot=${srcroot}"
 
 package=pf9-hamgr
 svcuser=hamgr
 svcgroup=hamgr
-release=${PF9_BUILD_NUMBER:-0}.${githash}
+release=${buildnum}.${githash}
 
 # build rpm environment
 [ -d $rpmbuild ] && rm -rf $srcroot/rpmbuild
