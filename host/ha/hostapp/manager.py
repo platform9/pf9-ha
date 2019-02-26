@@ -16,6 +16,7 @@ import json
 import os
 import io
 import threading
+import uuid
 from ConfigParser import ConfigParser
 from datetime import datetime
 from datetime import timedelta
@@ -100,6 +101,7 @@ CONF.register_opts(role_balance_opts, role_balance_grp)
 
 CONF.register_opts(default_opts)
 
+PF9_CONSUL_DATA_DIR='/opt/pf9/consul-data-dir'
 PF9_CONSUL_CONF_DIR = '/opt/pf9/etc/pf9-consul/'
 STOPPING = False
 REBALANCE_IN_PROGRESS = False
@@ -142,6 +144,7 @@ def generate_consul_conf():
             agent_conf['advertise_addr'] = ip_address
             agent_conf['bind_addr'] = bind_address
             agent_conf['disable_remote_exec'] = True
+            agent_conf['log_level'] = 'debug'
             agent_conf['datacenter'] = CONF.consul.cluster_name
             if CONF.host:
                 agent_conf['node_name'] = CONF.host
@@ -159,6 +162,7 @@ def generate_consul_conf():
             server_conf['bind_addr'] = bind_address
             server_conf['bootstrap_expect'] = CONF.consul.bootstrap_expect
             server_conf['disable_remote_exec'] = True
+            server_conf['log_level'] = 'debug'
             server_conf['datacenter'] = CONF.consul.cluster_name
             if CONF.host:
                 server_conf['node_name'] = CONF.host
@@ -190,7 +194,6 @@ def start_consul_service():
                 LOG.warn('Consul service was already running. now stop it before start')
                 retcode = run_cmd('sudo service pf9-consul stop')
                 LOG.info('retcode of command "sudo service pf9-consul stop" : %s', str(retcode))
-
             retcode = run_cmd('sudo service pf9-consul start')
             LOG.info('retcode of command "sudo service pf9-consul start" : %s', str(retcode))
             # Sleep 3s to allow consul to fail in case the bootstrap server
@@ -207,6 +210,10 @@ def start_consul_service():
                     LOG.warn('Consul service stopped. Retrying...')
             else:
                 LOG.warn('Consul service could not be started')
+            try:
+                repair_consul_wiped_files_if_needed()
+            except:
+                LOG.exception('### unhandled exception when repair consul generated files')
             service_start_retry = service_start_retry - 1
             sleep(3)
     except Exception as ex:
@@ -525,6 +532,55 @@ def processing_rebalance_requests(rebalance_mgr, hostid, join_ips):
             REBALANCE_IN_PROGRESS = False
             LOG.exception('unhandled exception in processing_rebalance_requests')
         sleep(1)
+
+
+def repair_consul_wiped_files_if_needed():
+    try:
+        # node-id should be created by consul itself, but observed that during power off then on scenario consul
+        # might wipe out its node-id, which cause it fails to start. in this case , need to manually create a node
+        # id for it, then restart consul will fix it
+        nodeid_file = os.path.join(PF9_CONSUL_DATA_DIR, 'node-id')
+        nodeid = str(uuid.uuid4())
+        if not os.path.exists(nodeid_file):
+            # the PF9_CONSUL_DATA_DIR must exist after pf9-ha-slave role
+            # is enabled, we don't have permission to create the folder,
+            # so assume it is there
+            with open(nodeid_file, 'w') as fp:
+                LOG.info('### detected there is no consul node-id file, now create with id %s', nodeid)
+                fp.write(nodeid)
+        else:
+            LOG.info('### consul node-id file exist, now check its content')
+            nodeid_old = None
+            with open(nodeid_file) as fp:
+                nodeid_old = fp.read()
+            if not nodeid_old:
+                with open(nodeid_file, 'w') as fp:
+                    LOG.info('### detected consul node-id is empty, now write id %s', nodeid)
+                    fp.write(nodeid)
+            else:
+                LOG.info('### skip node-id, as it is not empty : %s', str(nodeid_old))
+        # when node-id was wiped out, the same time the keyring were also wiped not (not sure why). so need to
+        # clean the serf folder, otherwise will get:
+        # "Failed to configure keyring: unexpected end of JSON input"
+        keyrings = ['local.keyring', 'remote.keyring']
+        for keyring in keyrings:
+            keyring_file = os.path.join(PF9_CONSUL_DATA_DIR, 'serf', keyring)
+            if os.path.exists(keyring_file):
+                content=''
+                LOG.info('### %s file exist, now check its content ...', keyring_file)
+                with open(keyring_file) as fp:
+                    content=fp.read()
+                if len(content) == 0:
+                    LOG.info('### content of %s is empty, now delete it', keyring_file)
+                    cmd = "rm -rf '%s'" % (keyring_file)
+                    result = run_cmd(cmd)
+                    LOG.info('### result of command "%s" : %s', cmd, str(result))
+                else:
+                    LOG.info('### skip %s as the content is not empty', keyring_file)
+            else:
+                LOG.info('## skip %s as the file not exist', keyring_file)
+    except:
+        LOG.exception('### unhandled exception when repair consul wiped files')
 
 def config_needs_refresh():
     # if settings in /opt/pf9/etc/pf9-ha/conf.d/pf9-ha.conf are updated from resmgr by hostagent
