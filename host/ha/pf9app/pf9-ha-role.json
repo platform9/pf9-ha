@@ -51,6 +51,10 @@
       "path": "config/ha_slave_conf/node",
       "default": ""
     },
+    "consul_log_level": {
+      "path": "config/ha_slave_conf/node",
+      "default": "info"
+    },
     "role_rebalance_enabled": {
       "path": "config/ha_slave_conf/consul_role_rebalance",
       "default": "false"
