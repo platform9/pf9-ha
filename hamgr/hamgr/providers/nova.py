@@ -323,291 +323,295 @@ class NovaProvider(Provider):
         return state
 
     def process_host_aggregate_changes(self):
-        with self.aggregate_task_lock:
-            if self.aggregate_task_running:
-                LOG.info('Check host aggregates for changes task already '
-                         'running')
-                return
-            self.aggregate_task_running = True
-        LOG.debug('host aggregate change processing task starts to run at %s', str(datetime.utcnow()))
-        self._token = self._get_v3_token()
+        try:
+            with self.aggregate_task_lock:
+                if self.aggregate_task_running:
+                    LOG.info('Check host aggregates for changes task already '
+                             'running')
+                    return
+                self.aggregate_task_running = True
 
-        client = self._get_client()
+            LOG.debug('host aggregate change processing task starts to run at %s', str(datetime.utcnow()))
+            self._token = self._get_v3_token()
 
-        # ---------------------------------------------------------------
-        # scenarios
-        #  1) nova aggregate exists   [ sync from nova aggregate to ha system ]
-        #     1.1) corresponding ha cluster exists
-        #        1.1.1) masakari (failover segment, hosts) does not match hosts from nova aggregate
-        #             X = {hosts in masakari} , Y = {host in nova aggregate}, Z = { common hosts in X and Y}
-        #            1.1.1.1) X and Y have no common
-        #                 remove all masakari hosts, then add nova aggregate hosts to masakari
-        #            1.1.1.2) X and Y have some in common
-        #                 remove additional hosts (X-Z) from masakari, add additional host (Y-Z) to masakari
-        #                 this also works for
-        #                   - Y is subset of X : just add additional hosts to masakari
-        #                   - X is subset of Y : just remove additional hosts from masakari
-        #        1.1.2) masakari (failover segment, hosts) matches hosts from nova aggregate
-        #           no action needed
-        #    1.2) corresponding ha cluster does not exist
-        #        need to create a disabled ha cluster , and add masakari failover segment and hosts
-        #  2) nova aggregate does not exists  [ build nova aggregates from ha system ]
-        #     [ not sure whether this is valid scenario, because create nova aggregates needs to know
-        #      availability zone infomation , especially when there is no availability zone . ]
-        # ----------------------------------------------------------
-        # first reconcile hosts between nova aggregates and masakari
-        # to make sure real world settings on nova are synced to
-        # masakari for vm evacuation management
-        # ----------------------------------------------------------
-        # find out all host aggregates from nova
+            client = self._get_client()
 
-        nova_all_aggregates = client.aggregates.list()
-        nova_active_aggres = [x for x in nova_all_aggregates if x.deleted == False]
-        hamgr_all_clusters = db_api.get_all_clusters()
+            # ---------------------------------------------------------------
+            # scenarios
+            #  1) nova aggregate exists   [ sync from nova aggregate to ha system ]
+            #     1.1) corresponding ha cluster exists
+            #        1.1.1) masakari (failover segment, hosts) does not match hosts from nova aggregate
+            #             X = {hosts in masakari} , Y = {host in nova aggregate}, Z = { common hosts in X and Y}
+            #            1.1.1.1) X and Y have no common
+            #                 remove all masakari hosts, then add nova aggregate hosts to masakari
+            #            1.1.1.2) X and Y have some in common
+            #                 remove additional hosts (X-Z) from masakari, add additional host (Y-Z) to masakari
+            #                 this also works for
+            #                   - Y is subset of X : just add additional hosts to masakari
+            #                   - X is subset of Y : just remove additional hosts from masakari
+            #        1.1.2) masakari (failover segment, hosts) matches hosts from nova aggregate
+            #           no action needed
+            #    1.2) corresponding ha cluster does not exist
+            #        need to create a disabled ha cluster , and add masakari failover segment and hosts
+            #  2) nova aggregate does not exists  [ build nova aggregates from ha system ]
+            #     [ not sure whether this is valid scenario, because create nova aggregates needs to know
+            #      availability zone infomation , especially when there is no availability zone . ]
+            # ----------------------------------------------------------
+            # first reconcile hosts between nova aggregates and masakari
+            # to make sure real world settings on nova are synced to
+            # masakari for vm evacuation management
+            # ----------------------------------------------------------
+            # find out all host aggregates from nova
 
-        # because hosts in nova aggregate reflect the real word settings for HA, so need to reconcile hosts in
-        # each aggregate from nova to hamgr and masakari
-        # for each active nova aggregate
-        #  if there is corresponding ha cluster, then update hosts in masakari with hosts from this nova aggregate
-        #  else create ha cluster in hamgr , and in masakari , but put the cluster in disabled state
-        for active_agg in nova_active_aggres:
-            nova_agg_id = active_agg.id
-            nova_agg_name = active_agg.name
-            nova_agg_hosts = active_agg.hosts
-            LOG.info('host ids from nova aggregate %s : %s', nova_agg_name, str(nova_agg_hosts))
-            # is there a ha cluster for this id ?
-            hamgr_clusters_for_agg = [x for x in hamgr_all_clusters if x.name == str(nova_agg_id)]
-            LOG.info('found hamgr clusters for nova aggregate %s : %s', nova_agg_name, str(hamgr_clusters_for_agg))
-            if len(hamgr_clusters_for_agg) <= 0:
-                # create one and set state to be 'disabled'
-                if not db_api.is_cluster_exist(str(nova_agg_id)):
-                    LOG.info('create a disabled ha cluster when active nova aggregate found but no active ha cluster')
-                    new_cluster = db_api.create_cluster_if_needed(str(nova_agg_id), constants.TASK_CREATING)
-                    db_api.update_cluster(new_cluster.id, False)
-                    db_api.update_request_status(new_cluster.id, constants.HA_STATE_DISABLED)
-                    db_api.update_cluster_task_state(new_cluster.id, constants.TASK_COMPLETED)
-                    LOG.info('created a disabled ha cluster %s with hosts %s for nova aggregates %s',
-                             str(new_cluster.id),
-                             str(nova_agg_hosts),
-                             nova_agg_name)
+            nova_all_aggregates = client.aggregates.list()
+            nova_active_aggres = [x for x in nova_all_aggregates if x.deleted == False]
+            hamgr_all_clusters = db_api.get_all_clusters()
 
-            # reconcile hosts to hamgr and masakari
-            for current_cluster in hamgr_clusters_for_agg:
-                cluster_name = current_cluster.name
-                cluster_id = current_cluster.id
-                cluster_enabled = current_cluster.enabled
+            # because hosts in nova aggregate reflect the real word settings for HA, so need to reconcile hosts in
+            # each aggregate from nova to hamgr and masakari
+            # for each active nova aggregate
+            #  if there is corresponding ha cluster, then update hosts in masakari with hosts from this nova aggregate
+            #  else create ha cluster in hamgr , and in masakari , but put the cluster in disabled state
+            for active_agg in nova_active_aggres:
+                nova_agg_id = active_agg.id
+                nova_agg_name = active_agg.name
+                nova_agg_hosts = active_agg.hosts
+                LOG.info('host ids from nova aggregate %s : %s', nova_agg_name, str(nova_agg_hosts))
+                # is there a ha cluster for this id ?
+                hamgr_clusters_for_agg = [x for x in hamgr_all_clusters if x.name == str(nova_agg_id)]
+                LOG.info('found hamgr clusters for nova aggregate %s : %s', nova_agg_name, str(hamgr_clusters_for_agg))
+                if len(hamgr_clusters_for_agg) <= 0:
+                    # create one and set state to be 'disabled'
+                    if not db_api.is_cluster_exist(str(nova_agg_id)):
+                        LOG.info('create a disabled ha cluster when active nova aggregate found but no active ha cluster')
+                        new_cluster = db_api.create_cluster_if_needed(str(nova_agg_id), constants.TASK_CREATING)
+                        db_api.update_cluster(new_cluster.id, False)
+                        db_api.update_request_status(new_cluster.id, constants.HA_STATE_DISABLED)
+                        db_api.update_cluster_task_state(new_cluster.id, constants.TASK_COMPLETED)
+                        LOG.info('created a disabled ha cluster %s with hosts %s for nova aggregates %s',
+                                 str(new_cluster.id),
+                                 str(nova_agg_hosts),
+                                 nova_agg_name)
 
-                # ideally the hosts from masakari is the same as hosts in nova aggregates
-                # if more hosts in nova aggregate, means they exist in nova aggregate but not in masakari
-                # if more hosts in masakari, means some of they are removed from nova aggregate
+                # reconcile hosts to hamgr and masakari
+                for current_cluster in hamgr_clusters_for_agg:
+                    cluster_name = current_cluster.name
+                    cluster_id = current_cluster.id
+                    cluster_enabled = current_cluster.enabled
 
-                masakari_hosts = []
+                    # ideally the hosts from masakari is the same as hosts in nova aggregates
+                    # if more hosts in nova aggregate, means they exist in nova aggregate but not in masakari
+                    # if more hosts in masakari, means some of they are removed from nova aggregate
 
-                # add hosts found in nova aggregate but not in masakari segment
-                if masakari.is_failover_segment_exist(self._token, str(cluster_id)):
-                    masakari_hosts = masakari.get_nodes_in_segment(self._token, str(cluster_id))
-                masakari_hids = [x['name'] for x in masakari_hosts]
-                common_ids = set(nova_agg_hosts).intersection(set(masakari_hids))
-                nova_delta_ids = set(nova_agg_hosts) - set(common_ids)
-                if len(nova_delta_ids) > 0:
-                    LOG.info('found new hosts added into nova aggregate %s : %s', str(nova_agg_id), str(nova_delta_ids))
-                    # need to add those additional hosts into masakari
-                    if masakari.is_failover_segment_under_recovery(self._token, str(cluster_id)):
-                        LOG.info('will retry to add hosts %s to masakari segment %s, '
-                                 'as the segment is under recovery',
-                                 str(nova_delta_ids), str(cluster_id))
-                    else:
-                        # hosts already in nova aggregate so only need to add to masakari
-                        LOG.info('add additional hosts %s found in nova aggregate %s to masakari segment %s',
-                                 str(nova_delta_ids), nova_agg_name, str(cluster_id))
-                        masakari.add_hosts_to_failover_segment(self._token,
-                                                               str(cluster_id),
-                                                               nova_delta_ids)
-                        if cluster_enabled:
-                            # in order to make the consul cluster work, by default we set all hosts as consul server
-                            # and trigger a role rebalance request
-                            LOG.info('add ha slave role to added host : %s', str(nova_delta_ids))
-                            self._add_ha_slave_if_not_exist(cluster_name, nova_delta_ids, 'server', common_ids)
-                            # trigger a consul role rebalance request
+                    masakari_hosts = []
+
+                    # add hosts found in nova aggregate but not in masakari segment
+                    if masakari.is_failover_segment_exist(self._token, str(cluster_id)):
+                        masakari_hosts = masakari.get_nodes_in_segment(self._token, str(cluster_id))
+                    masakari_hids = [x['name'] for x in masakari_hosts]
+                    common_ids = set(nova_agg_hosts).intersection(set(masakari_hids))
+                    nova_delta_ids = set(nova_agg_hosts) - set(common_ids)
+                    if len(nova_delta_ids) > 0:
+                        LOG.info('found new hosts added into nova aggregate %s : %s', str(nova_agg_id), str(nova_delta_ids))
+                        # need to add those additional hosts into masakari
+                        if masakari.is_failover_segment_under_recovery(self._token, str(cluster_id)):
+                            LOG.info('will retry to add hosts %s to masakari segment %s, '
+                                     'as the segment is under recovery',
+                                     str(nova_delta_ids), str(cluster_id))
+                        else:
+                            # hosts already in nova aggregate so only need to add to masakari
+                            LOG.info('add additional hosts %s found in nova aggregate %s to masakari segment %s',
+                                     str(nova_delta_ids), nova_agg_name, str(cluster_id))
+                            masakari.add_hosts_to_failover_segment(self._token,
+                                                                   str(cluster_id),
+                                                                   nova_delta_ids)
+                            if cluster_enabled:
+                                # in order to make the consul cluster work, by default we set all hosts as consul server
+                                # and trigger a role rebalance request
+                                LOG.info('add ha slave role to added host : %s', str(nova_delta_ids))
+                                self._add_ha_slave_if_not_exist(cluster_name, nova_delta_ids, 'server', common_ids)
+                                # trigger a consul role rebalance request
+                                time.sleep(30)
+                                self._rebalance_consul_roles_if_needed(constants.EVENT_HOST_ADDED)
+
+                    # remove host found in masakari segment but not in nova aggregate
+                    if masakari.is_failover_segment_exist(self._token, str(cluster_id)):
+                        masakari_hosts = masakari.get_nodes_in_segment(self._token, str(cluster_id))
+                    masakari_hids = [x['name'] for x in masakari_hosts]
+                    common_ids = set(nova_agg_hosts).intersection(set(masakari_hids))
+                    masakari_delta_ids = set(masakari_hids) - set(common_ids)
+                    if len(masakari_delta_ids) > 0:
+                        LOG.info('found hosts removed from nova aggregate %s : %s', str(nova_agg_id),
+                                 str(masakari_delta_ids))
+                        # need to remove those additional hosts found in masakari
+                        if masakari.is_failover_segment_under_recovery(self._token, str(cluster_id)):
+                            LOG.info('will retry to remove hosts %s from masakari segment %s, '
+                                     'as the segment is under recovery',
+                                     str(masakari_delta_ids), str(cluster_id))
+                        else:
+                            LOG.info('remove additional hosts %s found in masakari from segment %s ',
+                                     str(masakari_delta_ids),
+                                     str(cluster_id))
+                            masakari.delete_hosts_from_failover_segment(self._token,
+                                                                        str(cluster_id),
+                                                                        masakari_delta_ids)
+                            if cluster_enabled:
+                                LOG.info('remove ha salve role from removed hosts : %s', str(masakari_delta_ids))
+                                self._remove_ha_slave_if_exist(masakari_delta_ids)
+                                LOG.info('try to rebalance consul roles after removed hosts : %s', str(masakari_delta_ids))
+                                time.sleep(30)
+                                self._rebalance_consul_roles_if_needed(constants.EVENT_HOST_REMOVED)
+
+                    # when cluster is enabled, make sure pf9-ha-slave role is on all active hosts
+                    # ----------------------------------------------------------
+                    # then reconcile masakari hosts and pf9-ha-slave on those
+                    # hosts for active ha clusters to make sure the
+                    # pf9-ha-slave role is installed on hosts in all active
+                    # clusters to provide monitoring ability
+                    # ----------------------------------------------------------
+                    if not cluster_enabled:
+                        continue
+                    LOG.info('cluster %s is enabled, now checking slave role ', str(cluster_id))
+                    aggregate_id = current_cluster.name
+                    segment_name = str(current_cluster.id)
+                    aggregate = self._get_aggregate(client, aggregate_id)
+                    aggregate_host_ids = set(aggregate.hosts)
+                    new_active_host_ids = set()
+                    new_inactive_host_ids = set()
+                    existing_active_host_ids = set()
+                    existing_inactive_host_ids = set()
+                    removed_host_ids = set()
+                    nova_active_host_ids = set()
+                    try:
+                        nodes = masakari.get_nodes_in_segment(self._token,
+                                                              segment_name)
+                        masakari_host_ids = set([node['name'] for node in nodes])
+
+                        LOG.debug("hosts records from nova : %s",
+                                  ','.join(list(aggregate_host_ids)))
+                        LOG.debug("hosts records from masakari : %s",
+                                  ','.join(list(masakari_host_ids)))
+
+                        for host in aggregate_host_ids:
+                            if self._is_nova_service_active(host, client=client):
+                                nova_active_host_ids.add(host)
+
+                                if host not in masakari_host_ids:
+                                    new_active_host_ids.add(host)
+                                else:
+                                    existing_active_host_ids.add(host)
+                            else:
+                                if host in masakari_host_ids:
+                                    # Only the host currently part of cluster that are
+                                    # down are of interest
+                                    existing_inactive_host_ids.add(host)
+                                else:
+                                    new_inactive_host_ids.add(host)
+                                    LOG.info('Ignoring down host %s as it is not part'
+                                             ' of the cluster', host)
+
+                        removed_host_ids = masakari_host_ids - aggregate_host_ids
+
+                        LOG.info('Found existing active hosts : %s ', str(existing_active_host_ids))
+                        LOG.info('Found existing inactive hosts : %s ', str(existing_inactive_host_ids))
+                        LOG.info('Found new active hosts : %s ', str(new_active_host_ids))
+                        LOG.info('Found new inactive hosts : %s ', str(new_inactive_host_ids))
+                        LOG.info('Found removed hosts : %s ', str(removed_host_ids))
+
+                        # only when the cluster state is completed
+                        if current_cluster.task_state not in [constants.TASK_COMPLETED]:
+                            continue
+
+                        # resume on maintenance hosts, and enforce pf9-ha-slave role on active hosts
+                        for hid in nova_active_host_ids:
+                            # already know the host is active in nova
+                            xhosts = [x for x in nodes if str(x['name']) == str(hid)]
+                            if len(xhosts) == 1 and xhosts[0]['on_maintenance']:
+                                LOG.info('toggle maintenance for host %s', str(hid))
+                                # need to unlock the host when the segment is not in use, otherwise will retry later
+                                if not masakari.is_failover_segment_under_recovery(self._token, segment_name):
+                                    LOG.info('active host %s was found in maintenance state, unset maintentance state',
+                                             str(xhosts[0]['name']))
+                                    self._toggle_host_maintenance_state(hid, segment_name, False)
+
+                        found_hosts_added = len(new_active_host_ids) > 0 or len(new_inactive_host_ids) > 0
+                        found_hosts_removed = len(removed_host_ids) > 0
+                        found_hosts_changes = found_hosts_added or found_hosts_removed
+                        if not found_hosts_changes:
+                            LOG.info('no hosts added or removed, now make sure pf9-ha-slave is assigned on hosts %s',
+                                     str(nova_active_host_ids))
+                            # make sure ha-slave is enabled on existing active hosts
+                            current_roles = self._get_roles_for_hosts(nova_active_host_ids)
+                            LOG.debug("found roles : %s", str(current_roles))
+                            role_missed_host_ids = set()
+
+                            for hid in nova_active_host_ids:
+                                h_roles = current_roles[hid]
+                                LOG.debug("host %s  has roles : %s", str(hid), ','.join(h_roles))
+                                if "pf9-ha-slave" not in h_roles:
+                                    role_missed_host_ids.add(hid)
+
+                            if len(role_missed_host_ids) > 0:
+                                txt_ids = ','.join(list(role_missed_host_ids))
+                                LOG.info("assign ha-slave role for hosts which is missing pf9-ha-slave: %s", txt_ids)
+                                # hosts are not changed but just missing pf9-ha-slave, it is ok to just re-assign roles
+                                self._assign_roles(client, aggregate_id, nova_active_host_ids)
+                                LOG.debug("ha-slave roles are assigned to : %s", txt_ids)
+                            else:
+                                LOG.info("all hosts already have pf9-ha-slave role")
+
+                        if len(new_active_host_ids) > 0:
+                            # need to put pf-ha-slave role on them
+                            LOG.info('new active hosts are added into aggregate %s but not in masakari : %s ',
+                                     str(aggregate_id),
+                                     str(new_active_host_ids))
+                            # same here, since we don't know the consul roles on existing hosts, so just
+                            # make thoese hosts as consul server, and trigger a role rebalance request
+                            self._add_ha_slave_if_not_exist(str(aggregate_id), new_active_host_ids, 'server',
+                                                            masakari_host_ids)
+                            # trigger consul role rebalance request
                             time.sleep(30)
                             self._rebalance_consul_roles_if_needed(constants.EVENT_HOST_ADDED)
 
-                # remove host found in masakari segment but not in nova aggregate
-                if masakari.is_failover_segment_exist(self._token, str(cluster_id)):
-                    masakari_hosts = masakari.get_nodes_in_segment(self._token, str(cluster_id))
-                masakari_hids = [x['name'] for x in masakari_hosts]
-                common_ids = set(nova_agg_hosts).intersection(set(masakari_hids))
-                masakari_delta_ids = set(masakari_hids) - set(common_ids)
-                if len(masakari_delta_ids) > 0:
-                    LOG.info('found hosts removed from nova aggregate %s : %s', str(nova_agg_id),
-                             str(masakari_delta_ids))
-                    # need to remove those additional hosts found in masakari
-                    if masakari.is_failover_segment_under_recovery(self._token, str(cluster_id)):
-                        LOG.info('will retry to remove hosts %s from masakari segment %s, '
-                                 'as the segment is under recovery',
-                                 str(masakari_delta_ids), str(cluster_id))
-                    else:
-                        LOG.info('remove additional hosts %s found in masakari from segment %s ',
-                                 str(masakari_delta_ids),
-                                 str(cluster_id))
-                        masakari.delete_hosts_from_failover_segment(self._token,
-                                                                    str(cluster_id),
-                                                                    masakari_delta_ids)
-                        if cluster_enabled:
-                            LOG.info('remove ha salve role from removed hosts : %s', str(masakari_delta_ids))
-                            self._remove_ha_slave_if_exist(masakari_delta_ids)
-                            LOG.info('try to rebalance consul roles after removed hosts : %s', str(masakari_delta_ids))
+                        if len(new_inactive_host_ids) > 0:
+                            # need to wait for them become active so can put pf9-ha-slave role on them
+                            LOG.info('new inactive hosts are added into aggregate %s but not in masakari : %s, wait for '
+                                     'hosts to become active',
+                                     segment_name,
+                                     str(new_inactive_host_ids))
+
+                        if len(removed_host_ids) > 0:
+                            LOG.info('hosts are removed from nova aggregate %s : %s, now remove pf9-ha-slave role',
+                                     aggregate_id, str(removed_host_ids))
+                            self._remove_ha_slave_if_exist(removed_host_ids)
+                            LOG.info('try to rebalance consul roles after removed hosts : %s', str(removed_host_ids))
                             time.sleep(30)
                             self._rebalance_consul_roles_if_needed(constants.EVENT_HOST_REMOVED)
 
-                # when cluster is enabled, make sure pf9-ha-slave role is on all active hosts
-                # ----------------------------------------------------------
-                # then reconcile masakari hosts and pf9-ha-slave on those
-                # hosts for active ha clusters to make sure the
-                # pf9-ha-slave role is installed on hosts in all active
-                # clusters to provide monitoring ability
-                # ----------------------------------------------------------
-                if not cluster_enabled:
-                    continue
-                LOG.info('cluster %s is enabled, now checking slave role ', str(cluster_id))
-                aggregate_id = current_cluster.name
-                segment_name = str(current_cluster.id)
-                aggregate = self._get_aggregate(client, aggregate_id)
-                aggregate_host_ids = set(aggregate.hosts)
-                new_active_host_ids = set()
-                new_inactive_host_ids = set()
-                existing_active_host_ids = set()
-                existing_inactive_host_ids = set()
-                removed_host_ids = set()
-                nova_active_host_ids = set()
-                try:
-                    nodes = masakari.get_nodes_in_segment(self._token,
-                                                          segment_name)
-                    masakari_host_ids = set([node['name'] for node in nodes])
+                        if len(existing_inactive_host_ids) > 0:
+                            LOG.warn('existing inactive hosts in segment %s : %s , wait for hosts to become active',
+                                     segment_name, str(existing_inactive_host_ids))
 
-                    LOG.debug("hosts records from nova : %s",
-                              ','.join(list(aggregate_host_ids)))
-                    LOG.debug("hosts records from masakari : %s",
-                              ','.join(list(masakari_host_ids)))
-
-                    for host in aggregate_host_ids:
-                        if self._is_nova_service_active(host, client=client):
-                            nova_active_host_ids.add(host)
-
-                            if host not in masakari_host_ids:
-                                new_active_host_ids.add(host)
-                            else:
-                                existing_active_host_ids.add(host)
-                        else:
-                            if host in masakari_host_ids:
-                                # Only the host currently part of cluster that are
-                                # down are of interest
-                                existing_inactive_host_ids.add(host)
-                            else:
-                                new_inactive_host_ids.add(host)
-                                LOG.info('Ignoring down host %s as it is not part'
-                                         ' of the cluster', host)
-
-                    removed_host_ids = masakari_host_ids - aggregate_host_ids
-
-                    LOG.info('Found existing active hosts : %s ', str(existing_active_host_ids))
-                    LOG.info('Found existing inactive hosts : %s ', str(existing_inactive_host_ids))
-                    LOG.info('Found new active hosts : %s ', str(new_active_host_ids))
-                    LOG.info('Found new inactive hosts : %s ', str(new_inactive_host_ids))
-                    LOG.info('Found removed hosts : %s ', str(removed_host_ids))
-
-                    # only when the cluster state is completed
-                    if current_cluster.task_state not in [constants.TASK_COMPLETED]:
-                        continue
-
-                    # resume on maintenance hosts, and enforce pf9-ha-slave role on active hosts
-                    for hid in nova_active_host_ids:
-                        # already know the host is active in nova
-                        xhosts = [x for x in nodes if str(x['name']) == str(hid)]
-                        if len(xhosts) == 1 and xhosts[0]['on_maintenance']:
-                            LOG.info('toggle maintenance for host %s', str(hid))
-                            # need to unlock the host when the segment is not in use, otherwise will retry later
-                            if not masakari.is_failover_segment_under_recovery(self._token, segment_name):
-                                LOG.info('active host %s was found in maintenance state, unset maintentance state',
-                                         str(xhosts[0]))
-                                self._toggle_host_maintenance_state(hid, segment_name, False)
-
-                    found_hosts_added = len(new_active_host_ids) > 0 or len(new_inactive_host_ids) > 0
-                    found_hosts_removed = len(removed_host_ids) > 0
-                    found_hosts_changes = found_hosts_added or found_hosts_removed
-                    if not found_hosts_changes:
-                        LOG.info('no hosts added or removed, now make sure pf9-ha-slave is assigned on hosts %s',
-                                 str(nova_active_host_ids))
-                        # make sure ha-slave is enabled on existing active hosts
-                        current_roles = self._get_roles_for_hosts(nova_active_host_ids)
-                        LOG.debug("found roles : %s", str(current_roles))
-                        role_missed_host_ids = set()
-
-                        for hid in nova_active_host_ids:
-                            h_roles = current_roles[hid]
-                            LOG.debug("host %s  has roles : %s", str(hid), ','.join(h_roles))
-                            if "pf9-ha-slave" not in h_roles:
-                                role_missed_host_ids.add(hid)
-
-                        if len(role_missed_host_ids) > 0:
-                            txt_ids = ','.join(list(role_missed_host_ids))
-                            LOG.info("assign ha-slave role for hosts which is missing pf9-ha-slave: %s", txt_ids)
-                            # hosts are not changed but just missing pf9-ha-slave, it is ok to just re-assign roles
-                            self._assign_roles(client, aggregate_id, nova_active_host_ids)
-                            LOG.debug("ha-slave roles are assigned to : %s", txt_ids)
-                        else:
-                            LOG.info("all hosts already have pf9-ha-slave role")
-
-                    if len(new_active_host_ids) > 0:
-                        # need to put pf-ha-slave role on them
-                        LOG.info('new active hosts are added into aggregate %s but not in masakari : %s ',
-                                 str(aggregate_id),
-                                 str(new_active_host_ids))
-                        # same here, since we don't know the consul roles on existing hosts, so just
-                        # make thoese hosts as consul server, and trigger a role rebalance request
-                        self._add_ha_slave_if_not_exist(str(aggregate_id), new_active_host_ids, 'server',
-                                                        masakari_host_ids)
-                        # trigger consul role rebalance request
-                        time.sleep(30)
-                        self._rebalance_consul_roles_if_needed(constants.EVENT_HOST_ADDED)
-
-                    if len(new_inactive_host_ids) > 0:
-                        # need to wait for them become active so can put pf9-ha-slave role on them
-                        LOG.info('new inactive hosts are added into aggregate %s but not in masakari : %s, wait for '
-                                 'hosts to become active',
-                                 segment_name,
-                                 str(new_inactive_host_ids))
-
-                    if len(removed_host_ids) > 0:
-                        LOG.info('hosts are removed from nova aggregate %s : %s, now remove pf9-ha-slave role',
-                                 aggregate_id, str(removed_host_ids))
-                        self._remove_ha_slave_if_exist(removed_host_ids)
-                        LOG.info('try to rebalance consul roles after removed hosts : %s', str(removed_host_ids))
-                        time.sleep(30)
-                        self._rebalance_consul_roles_if_needed(constants.EVENT_HOST_REMOVED)
-
-                    if len(existing_inactive_host_ids) > 0:
-                        LOG.warn('existing inactive hosts in segment %s : %s , wait for hosts to become active',
-                                 segment_name, str(existing_inactive_host_ids))
-
-                except ha_exceptions.ClusterBusy:
-                    pass
-                except ha_exceptions.InsufficientHosts:
-                    LOG.warn('Detected number of aggregate %s hosts is '
-                             'insufficient', aggregate_id)
-                except ha_exceptions.SegmentNotFound:
-                    LOG.warn('Masakari segment for cluster: %s was not found',
-                             current_cluster.name)
-                except ha_exceptions.HostPartOfCluster:
-                    LOG.error("Not enabling cluster as cluster hosts are part of"
-                              "another cluster")
-                except Exception as e:
-                    LOG.exception('Exception while processing aggregate %s: %s',
-                                  aggregate_id, e)
-
-        with self.aggregate_task_lock:
-            LOG.debug('Aggregate changes task completed')
-            self.aggregate_task_running = False
+                    except ha_exceptions.ClusterBusy:
+                        pass
+                    except ha_exceptions.InsufficientHosts:
+                        LOG.warn('Detected number of aggregate %s hosts is '
+                                 'insufficient', aggregate_id)
+                    except ha_exceptions.SegmentNotFound:
+                        LOG.warn('Masakari segment for cluster: %s was not found',
+                                 current_cluster.name)
+                    except ha_exceptions.HostPartOfCluster:
+                        LOG.error("Not enabling cluster as cluster hosts are part of"
+                                  "another cluster")
+                    except Exception as e:
+                        LOG.exception('Exception while processing aggregate %s: %s',
+                                      aggregate_id, e)
+        except Exception as e:
+            LOG.exception('unhandled exception in host aggregate change processing task : %s', str(e))
+        finally:
+            with self.aggregate_task_lock:
+                LOG.debug('Aggregate changes task completed')
+                self.aggregate_task_running = False
         LOG.debug('host aggregate change processing task has finished at %s', str(datetime.utcnow()))
 
     def _rebalance_consul_roles_if_needed(self, event_type, event_uuid=None):
@@ -957,6 +961,7 @@ class NovaProvider(Provider):
         return json_resp
 
     def _get_cluster_ip(self, host_id, json_resp):
+        LOG.info('try to get cluster_ip for host %s from resp %s', str(host_id), str(json_resp))
         if 'cluster_ip' not in json_resp:
             raise ha_exceptions.ClusterIpNotFound(host_id)
         return str(json_resp['cluster_ip'])
@@ -1151,7 +1156,7 @@ class NovaProvider(Provider):
                 LOG.info('create masakari masakari segment during handling enabling request, ' \
                          'segment id %s, hosts %s', str(cluster_id), str(hosts))
                 masakari.create_failover_segment(self._token, str(cluster_id), hosts)
-            self.__perf_meter('masakari.create_failover_segment', time_begin)
+            self.__perf_meter('masakari.create_segment', time_begin)
 
             # 4. mark request as 'enabled' in status
             LOG.info('updating status of cluster %d to %s', cluster_id,
@@ -1289,11 +1294,12 @@ class NovaProvider(Provider):
         LOG.debug('ha status processing task starts to run at %s', str(datetime.utcnow()))
         try:
             requests = db_api.get_all_unhandled_enable_or_disable_requests()
-            for request in requests:
-                if request.status == constants.HA_STATE_REQUEST_ENABLE:
-                    self._handle_enable_request(request)
-                if request.status == constants.HA_STATE_REQUEST_DISABLE:
-                    self._handle_disable_request(request)
+            if requests:
+                for request in requests:
+                    if request.status == constants.HA_STATE_REQUEST_ENABLE:
+                        self._handle_enable_request(request)
+                    if request.status == constants.HA_STATE_REQUEST_DISABLE:
+                        self._handle_disable_request(request)
         finally:
             with self.ha_status_processing_lock:
                 self.ha_status_processing_running = False

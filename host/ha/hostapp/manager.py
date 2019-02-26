@@ -563,6 +563,11 @@ def config_needs_refresh():
         cfg_file = PF9_CONSUL_CONF_DIR + 'conf.d/client.json'
     else:
         cfg_file = PF9_CONSUL_CONF_DIR + 'conf.d/server.json'
+
+    if not os.path.exists(cfg_file):
+        LOG.info('file %s not exist (bootstrap_expect : %s)', cfg_file, str(CONF.consul.bootstrap_expect))
+        return True
+
     with open(cfg_file) as fptr:
         settings_consul = json.load(fptr)
 

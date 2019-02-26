@@ -127,15 +127,15 @@ class HaManagerReporter(Reporter):
             }
 
             host_url = '/'.join([self.hamgr_url, data.event['hostName']])
-            LOG.info('report to HA manager : %s', str(payload))
+            LOG.info('report to HA manager for host %s: %s', data.event['hostName'], str(payload))
             resp = requests.post(host_url, data=payload, headers=headers,
                                  verify=CONF.keystone_authtoken.insecure)
             if resp.status_code != requests.codes.ok:
-                LOG.error('report to HA manager failed, returned %d', resp.status_code)
+                LOG.error('report to HA manager for host %s failed, returned %d', data.event['hostName'], resp.status_code)
                 return False
             else:
-                LOG.info('Status reported successfully to HA manager')
+                LOG.info('Status reported successfully to HA manager for host %s ', data.event['hostName'])
                 return resp.json().get('success', False)
         except Exception:
-            LOG.error('Status report to HA manager failed', exc_info=True)
+            LOG.error('Status report to HA manager for host %s failed', data.event['hostName'], exc_info=True)
             return False

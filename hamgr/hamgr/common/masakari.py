@@ -188,7 +188,7 @@ def create_failover_segment(token, name, hosts):
                                   control_attributes=''))
             resp = requests.post(url, headers=headers, data=json.dumps(data))
             LOG.debug('resp when add host %s into segment %s : %s',
-                      str(h), str(seg['uuid']), str(resp.__dict__))
+                      str(h), str(seg['uuid']), 'status code : %s, reason : %s' % (str(resp.status_code), str(resp.reason)))
             resp.raise_for_status()
 
 
