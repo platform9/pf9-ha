@@ -606,3 +606,22 @@ class consul_status(object):
         except Exception as e:
             LOG.error(str(e))
             pass
+
+    def clean_incompatible_consul_reports(self):
+        try:
+            _, kv_list = self.cc.kv.get('', recurse=True)
+            LOG.info('searching kv store for old reports : %s', str(kv_list))
+            for kv in kv_list:
+                key = kv['Key']
+                value = kv['Value']
+                # all reports use hostid as key, which is uuid
+                if UUID_PATTERN.match(key):
+                    # check if the object does not have key 'event' and 'consul'
+                    obj = json.loads(value)
+                    if obj:
+                        keys = obj.keys()
+                        if ('event' not in keys) and ('consul' not in keys):
+                            LOG.info('removing old report, key=%s, value=%s', str(key), str(value))
+                            self.cc.kv.delete(key)
+        except Exception as e:
+            LOG.warn('unhandled exception while removing old : %s', str(e))

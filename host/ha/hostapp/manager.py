@@ -126,7 +126,7 @@ def loop():
     # TODO(pacharya): If consul was running beforehand we need to cleanup the
     #                 data dir of consul to get rid of the earlier state.
     start_loop = start_consul_service()
-
+    first_loop = True
     while start_loop:
         if not cluster_setup:
             # Running join against oneself generates a warning message in
@@ -147,6 +147,9 @@ def loop():
                 cluster_setup = True
                 ch.log_kvstore()
         elif ch.am_i_cluster_leader():
+            if first_loop:
+                ch.clean_incompatible_consul_reports()
+                first_loop = False
             cluster_stat = ch.get_cluster_status()
             if cluster_stat:
                 LOG.info('i am leader, found changes : %s', str(cluster_stat))
