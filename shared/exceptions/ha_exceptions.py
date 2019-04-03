@@ -115,3 +115,10 @@ class ConfigException(Exception):
     def __init__(self, message, innerException):
         message = '%s . %s' % (message, str(innerException))
         super(ConfigException, self).__init__(message)
+
+
+class NoCommonSharedNfsException(Exception):
+    def __init__(self, message, innerException = None):
+        message = '%s . %s' % (message, str(innerException))
+        super(NoCommonSharedNfsException, self).__init__(message)
+

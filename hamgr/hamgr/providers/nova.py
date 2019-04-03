@@ -2006,6 +2006,144 @@ class NovaProvider(Provider):
                 self.consul_encryption_processing_running = False
         LOG.info('consul encryption configuration processing task has finished at %s', str(datetime.utcnow()))
 
+    def get_common_hosts_configs(self, aggregate_id):
+        # the result object to be returned
+        common_configs = {
+            "shared_nfs" : []
+        }
+        host_ids = []
+        without_nfs = []
+        with_nfs = []
+        try:
+            self._token = self._get_v3_token()
+            nova_client = self._get_client()
+
+            cluster_exists = db_api.get_cluster(str(aggregate_id), raise_exception=False)
+            LOG.debug('found clusters %s : %s', str(aggregate_id), str(cluster_exists))
+            enabled = False
+            if cluster_exists:
+                enabled = cluster_exists.enabled
+
+            if not enabled:
+                # first get all hosts in this aggregate from nova
+                details = nova_client.aggregates.get_details(aggregate_id)
+                LOG.debug('host aggregate details : %s', str(details.__dict__))
+                host_ids = details.hosts
+            else:
+                # get hosts from masakari
+                hosts = masakari.get_nodes_in_segment(self._token, str(aggregate_id))
+                host_ids = [x['name'] for x in hosts]
+            LOG.debug('host ids found that associated with aggregate %s : %s', str(aggregate_id), str(host_ids))
+
+            # call resmgr for each host to get configs
+            headers = {'X-Auth-Token': self._token['id'], 'Content-Type': 'application/json'}
+            # check whether the mounted nfs are same for all hosts
+            for host_id in host_ids:
+                # object to carry necessary info for making decision
+                item = {
+                    'host': host_id,
+                    'mounted_nfs': [],
+                    'nova_instances_path_matched_nfs': [],
+                    'nova_instances_path': ''
+                }
+                # step 1 : get mounted_nfs from resmgr
+                url = '%s/v1/hosts/%s' % (self._resmgr_endpoint, host_id)
+                result = requests.get(url, headers=headers)
+                if result.status_code != requests.codes.ok:
+                    LOG.error('request %s was not success : %s', str(url), str(result.__dict__))
+                    continue
+                host_settings = result.json()
+                LOG.debug('resp of %s : %s', str(url), str(host_settings))
+                mounted_nfs_settings = host_settings['extensions'].get('mounted_nfs', None)
+                if mounted_nfs_settings:
+                    item['mounted_nfs'] = mounted_nfs_settings.get('data', {}).get('mounted', [])
+
+                # step 2 - get instances_path configured for role pf9-ostackhost-neutron
+                url = '%s/v1/hosts/%s/roles/pf9-ostackhost-neutron' % (self._resmgr_endpoint, host_id)
+                result = requests.get(url, headers=headers)
+                if result.status_code != requests.codes.ok:
+                    LOG.error('request %s was not success : %s', str(url), str(result.__dict__))
+                    continue
+                role_settings = result.json()
+                LOG.debug('resp of %s : %s', str(url), str(role_settings))
+                instances_path = role_settings.get('instances_path', '')
+                LOG.debug('instances_path configuration for host %s : %s', str(host_id), str(instances_path))
+                if instances_path:
+                    item['nova_instances_path'] = instances_path
+
+                # step 3 - store found info accordingly
+                if len(item['mounted_nfs']) <= 0:
+                    LOG.debug('host %s does not nfs mounted', str(host_id))
+                    without_nfs.append(item)
+                else:
+                    if instances_path:
+                        path_matched_nfs = \
+                            [x for x in item['mounted_nfs'] if x.get('destination', None) == instances_path]
+                        if len(path_matched_nfs) > 0 :
+                            item['nova_instances_path_matched_nfs'] = path_matched_nfs
+                    with_nfs.append(item)
+        except Exception:
+            LOG.exception('unhandled exception when get common hosts configs')
+            # raise to caller for handling
+            raise
+
+        LOG.debug('hosts without nfs : %s', str(without_nfs))
+        LOG.debug('hosts with nfs : %s', str(with_nfs))
+        # raise exception with those scenarios
+        # - no hosts found for given aggregate
+        # - unable to get settings from resmgr (mounted_nfs, instances_path)
+        # - all hosts without shared nfs or matched instances_path
+        # - only some hosts with shared nfs and match instances_path
+        error = None
+        if len(host_ids) <= 0:
+            error = "no hosts found for aggregate %s " % (str(aggregate_id))
+        else:
+            # when rest call to resmgr failed
+            if len(without_nfs) == 0 and len(with_nfs) == 0:
+                error = 'no settings found for hosts from resgmr: %s' % (str(host_ids))
+            # when all hosts have no nfs , or only some hosts have nfs
+            if len(without_nfs) > 0 or len(with_nfs) <= 0 or len(with_nfs) != len(host_ids):
+                ids_with_nfs = [] if len(with_nfs) <= 0 else [x['host'] for x in with_nfs]
+                ids_without_nfs = [x['host'] for x in without_nfs]
+                error = 'hosts %s have nfs mounted but hosts %s do not' % (str(ids_with_nfs), str(ids_without_nfs))
+            # when not all hosts with nfs that matches nova instances_path
+            path_matched_nfs = [x for x in with_nfs if len(x['nova_instances_path_matched_nfs']) > 0]
+            if len(host_ids) != len(path_matched_nfs):
+                ids_with_matched_path = [x['host'] for x in path_matched_nfs]
+                error = 'only hosts %s from %s have nfs setting matches instances_path %s : %s' % \
+                        (str(ids_with_matched_path), str(host_ids), str(instances_path), str(path_matched_nfs))
+        if error:
+            LOG.debug(error)
+            raise ha_exceptions.NoCommonSharedNfsException(error)
+
+        # find common nfs items that matches nova settings on all hosts
+        common_nfs_set = with_nfs[0]['nova_instances_path_matched_nfs']
+        for item in with_nfs:
+            common_nfs_set = self._get_common_nfs_set(common_nfs_set, item['nova_instances_path_matched_nfs'])
+
+        # when no common mounted nfs on all hosts
+        if len(common_nfs_set) <= 0:
+            error = 'no common nfs mounted on all hosts %s' % (str(host_ids))
+            LOG.debug(error)
+            raise ha_exceptions.NoCommonSharedNfsException(error)
+
+        LOG.debug('mounted nfs set of all hosts %s: %s', str(host_ids), str(common_nfs_set))
+        common_configs['shared_nfs'] = list(common_nfs_set)
+        LOG.debug('common configs for hosts in aggregate %s : %s', str(aggregate_id), str(common_configs))
+        return common_configs
+
+    def _get_common_nfs_set(self, common_set, set_for_check):
+        common = []
+        for comm in common_set:
+            for check in set_for_check:
+                if comm['source'] == check['source'] and \
+                        comm['permissions'] == check['permissions'] and \
+                        comm['destination'] == check['destination'] and \
+                        comm['destination_exist'] == check['destination_exist'] and \
+                        comm['fstype'] == check['fstype']:
+                    common.append(comm)
+        return common
+
 
 def get_provider(config):
     db_api.init(config)
