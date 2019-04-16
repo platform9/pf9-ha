@@ -51,6 +51,22 @@ class NovaProvider(Provider):
         self._tenant = config.get('keystone_middleware', 'admin_tenant_name')
         self._region = config.get('nova', 'region')
         self._resmgr_endpoint = config.get('DEFAULT', 'resmgr_endpoint')
+        self._max_auth_wait_seconds = 300
+        try:
+            self._max_auth_wait_seconds = config.getint('DEFAULT', 'max_role_auth_wait_seconds')
+        except:
+            LOG.warn("'max_role_auth_wait_seconds' not exist in config file " \
+                     "or its value not integer, use default 300")
+        if self._max_auth_wait_seconds <= 0:
+            self._max_auth_wait_seconds = 300
+        self._max_role_converged_wait_seconds = 900
+        try:
+            self._max_role_converged_wait_seconds = config.getint('DEFAULT', 'max_role_converged_wait_seconds')
+        except:
+            LOG.warn("'max_role_converged_wait_seconds' not exist in config file " \
+                     "or its value not integer, use default 900")
+        if self._max_role_converged_wait_seconds <= 0:
+            self._max_role_converged_wait_seconds = 900
         self._token = None
         self._config = config
         # make sure the waiting timeout for masakari to process notification
@@ -933,7 +949,7 @@ class NovaProvider(Provider):
                 time.sleep(5)
                 resp = requests.put(auth_url, headers=headers,
                                     json=data, verify=False)
-                if datetime.now() - start_time > timedelta(minutes=2):
+                if datetime.now() - start_time > timedelta(seconds=self._max_auth_wait_seconds):
                     break
             if resp.status_code != requests.codes.ok:
                 LOG.warn('authorize pf9-ha-slave on host %s failed, data %s, resp %s', node, str(data), str(resp))
@@ -1076,8 +1092,10 @@ class NovaProvider(Provider):
         aggregate = self._get_aggregate(client, aggregate_id)
         if not hosts:
             hosts = aggregate.hosts
-        self._validate_hosts(hosts)
-
+        # observed that hosts sometimes need longer time to get to converged state
+        # so here don't validate hosts, let the _handle_enable_request processor retry
+        # this method's role is to save the request to db
+        # this will avoid the REST API return 409
         try:
             LOG.info('create ha cluster for enabling request')
             cluster = db_api.create_cluster_if_needed(str_aggregate_id,
@@ -1112,9 +1130,24 @@ class NovaProvider(Provider):
         else:
             LOG.info('Enabling HA on some of the hosts %s of the %s aggregate',
                      str(hosts), str_aggregate_id)
-        time_begin = datetime.utcnow()
-        self._validate_hosts(hosts)
-        self.__perf_meter('_validate_hosts', time_begin)
+        try:
+            # observed that hosts sometimes need longer time to get to converged state
+            # if this happens, _validate_hosts will throw exceptions, then the request will
+            # not be processed until all requirements are met
+            self._validate_hosts(hosts)
+        except ha_exceptions.HostPartOfCluster:
+            # if because host in two clusters, just report the request in error status
+            db_api.update_request_status(cluster_id, constants.HA_STATE_ERROR)
+            LOG.warn('found hosts exist in other clusters')
+            raise
+        except (ha_exceptions.HostOffline,
+                ha_exceptions.InvalidHostRoleStatus,
+                ha_exceptions.InvalidHypervisorRoleStatus) as ex:
+            LOG.warn('exception when handle enable request : %s, will retry the request', str(ex))
+            return
+        except Exception:
+            LOG.exception('unhandled exception in validate hosts when handle enable request')
+            return
         time_begin = datetime.utcnow()
         self._token = self._get_v3_token()
         self.__perf_meter('utils.get_token', time_begin)
@@ -1219,7 +1252,7 @@ class NovaProvider(Provider):
             while resp.get('role_status', '') != 'ok':
                 time.sleep(30)
                 resp = self._get_settings_for_host(node)
-                if datetime.now() - start_time > timedelta(minutes=15):
+                if datetime.now() - start_time > timedelta(seconds=self._max_role_converged_wait_seconds):
                     LOG.info(
                         "host %s is not converged, starting from %s to %s ",
                         str(node), str(start_time), str(datetime.now()))
@@ -1242,7 +1275,7 @@ class NovaProvider(Provider):
                          'after 5 sec', node)
                 time.sleep(5)
                 resp = requests.delete(auth_url, headers=headers)
-                if datetime.now() - start_time > timedelta(minutes=2):
+                if datetime.now() - start_time > timedelta(seconds=self._max_auth_wait_seconds):
                     break
             resp.raise_for_status()
 
