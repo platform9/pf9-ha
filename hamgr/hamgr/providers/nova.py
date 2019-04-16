@@ -1076,8 +1076,10 @@ class NovaProvider(Provider):
         aggregate = self._get_aggregate(client, aggregate_id)
         if not hosts:
             hosts = aggregate.hosts
-        self._validate_hosts(hosts)
-
+        # observed that hosts sometimes need longer time to get to converged state
+        # so here don't validate hosts, let the _handle_enable_request processor retry
+        # this method's role is to save the request to db
+        # this will avoid the REST API return 409
         try:
             LOG.info('create ha cluster for enabling request')
             cluster = db_api.create_cluster_if_needed(str_aggregate_id,
@@ -1112,9 +1114,24 @@ class NovaProvider(Provider):
         else:
             LOG.info('Enabling HA on some of the hosts %s of the %s aggregate',
                      str(hosts), str_aggregate_id)
-        time_begin = datetime.utcnow()
-        self._validate_hosts(hosts)
-        self.__perf_meter('_validate_hosts', time_begin)
+        try:
+            # observed that hosts sometimes need longer time to get to converged state
+            # if this happens, _validate_hosts will throw exceptions, then the request will
+            # not be processed until all requirements are met
+            self._validate_hosts(hosts)
+        except ha_exceptions.HostPartOfCluster:
+            # if because host in two clusters, just report the request in error status
+            db_api.update_request_status(cluster_id, constants.HA_STATE_ERROR)
+            LOG.warn('found hosts exist in other clusters')
+            raise
+        except (ha_exceptions.HostOffline,
+                ha_exceptions.InvalidHostRoleStatus,
+                ha_exceptions.InvalidHypervisorRoleStatus) as ex:
+            LOG.warn('exception when handle enable request : %s, will retry the request', str(ex))
+            return
+        except Exception as ex:
+            LOG.warn('unhandled exception in validate hosts when handle enable request : %s', str(ex))
+            return
         time_begin = datetime.utcnow()
         self._token = self._get_v3_token()
         self.__perf_meter('utils.get_token', time_begin)
