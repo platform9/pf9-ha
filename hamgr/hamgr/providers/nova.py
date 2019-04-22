@@ -958,9 +958,10 @@ class NovaProvider(Provider):
     def _fetch_role_details_for_host(self, host_id, host_roles):
         LOG.info('find role details for host %s with role map %s', str(host_id), str(host_roles))
         roles = filter(lambda x: x.startswith('pf9-ostackhost'), host_roles)
+        # host can only have 'pf9-ostackhost' or 'pf9-ostackhost-neutron'
+        # can not have both
         if len(roles) != 1:
-            LOG.warn('pf9-ostackhost role not found in roles from resgmr for host %s : %s', str(host_id),
-                     str(host_roles))
+            LOG.warn('only allow one ostackhost role for host %s, but found : %s', str(host_id), str(roles))
             return None
         rolename = roles[0]
         # Query consul_ip from resmgr ostackhost role settings
@@ -977,6 +978,8 @@ class NovaProvider(Provider):
         return json_resp
 
     def _get_cluster_ip(self, host_id, json_resp):
+        if not json_resp:
+            return None
         LOG.info('try to get cluster_ip for host %s from resp %s', str(host_id), str(json_resp))
         if 'cluster_ip' not in json_resp:
             raise ha_exceptions.ClusterIpNotFound(host_id)
@@ -991,11 +994,11 @@ class NovaProvider(Provider):
 
     def _get_ips_for_hosts(self, client, hosts):
         all_hypervisors = client.hypervisors.list()
-        LOG.info('all hypervisors : %s', str(all_hypervisors))
-        hyperviros_host_ids = [x.service['host'] for x in all_hypervisors]
-        LOG.info('host ids of all hypervisors : %s', str(hyperviros_host_ids))
-        roles_map = self._get_roles_for_hosts(hyperviros_host_ids)
-        LOG.info('roles map of all hypervisors : %s', str(roles_map))
+        LOG.info('getting roles for hosts %s', str(hosts))
+        # only get roles for authorized hosts to avoid errors
+        # where resmgr has no state info for unauthorized hosts
+        roles_map = self._get_roles_for_hosts(hosts)
+        LOG.info('roles map of hosts %s : %s', str(hosts), str(roles_map))
         lookup = set(hosts)
         ip_lookup = dict()
         cluster_ip_lookup = dict()
@@ -1014,11 +1017,20 @@ class NovaProvider(Provider):
                                  consul_ip)
                         ip_lookup[host_id] = consul_ip
                     cluster_ip = self._get_cluster_ip(host_id, json_resp)
-                    LOG.info('Using cluster ip %s from ostackhost role',
-                             cluster_ip)
+                    if cluster_ip:
+                        LOG.info('Using cluster ip %s from ostackhost role',
+                                 cluster_ip)
+                        cluster_ip_lookup[host_id] = cluster_ip
                 else:
                     LOG.warn('no role map for hypervisor %s', str(host_id))
-            cluster_ip_lookup[host_id] = cluster_ip
+        # throw exception if num of items in both ip_lookup and cluster_ip_lookup
+        # not equals to num of hosts, this will fail the caller earlier
+        if len(ip_lookup.keys()) != len(hosts):
+            ids = set(hosts).difference(set(ip_lookup.keys()))
+            raise ha_exceptions.HostsIpNotFound(list(ids))
+        if len(cluster_ip_lookup.keys()) != len(hosts):
+            ids = set(hosts).difference(set(cluster_ip_lookup.keys()))
+            raise ha_exceptions.HostsIpNotFound(list(ids))
         return ip_lookup, cluster_ip_lookup
 
     def _assign_roles(self, client, aggregate_id, hosts):
