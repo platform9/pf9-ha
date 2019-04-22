@@ -975,11 +975,11 @@ class NovaProvider(Provider):
 
     def _get_ips_for_hosts(self, client, hosts):
         all_hypervisors = client.hypervisors.list()
-        LOG.info('all hypervisors : %s', str(all_hypervisors))
-        hyperviros_host_ids = [x.service['host'] for x in all_hypervisors]
-        LOG.info('host ids of all hypervisors : %s', str(hyperviros_host_ids))
-        roles_map = self._get_roles_for_hosts(hyperviros_host_ids)
-        LOG.info('roles map of all hypervisors : %s', str(roles_map))
+        LOG.info('getting roles for hosts %s', str(hosts))
+        # only get roles for authorized hosts to avoid errors
+        # where resmgr has no state info for unauthorized hosts
+        roles_map = self._get_roles_for_hosts(hosts)
+        LOG.info('roles map of hosts %s : %s', str(hosts), str(roles_map))
         lookup = set(hosts)
         ip_lookup = dict()
         cluster_ip_lookup = dict()
