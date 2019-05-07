@@ -135,6 +135,7 @@ def add_consul_secure_settings(conf):
 
 def generate_consul_conf():
     try:
+        retry_join = CONF.consul.join.split(',')
         ip_address = consul_helper.get_ip_address()
         bind_address = consul_helper.get_bind_address()
         log_levels=["trace", "debug", "info", "warn", "err"]
@@ -149,6 +150,7 @@ def generate_consul_conf():
                 agent_conf['log_level'] = CONF.consul.consul_log_level
             agent_conf['datacenter'] = CONF.consul.cluster_name
             agent_conf['node_name'] = CONF.host
+            agent_conf['retry_join'] = retry_join
 
             # add secure settings
             agent_conf = add_consul_secure_settings(agent_conf)
@@ -167,6 +169,7 @@ def generate_consul_conf():
                 server_conf['log_level'] = CONF.consul.consul_log_level
             server_conf['datacenter'] = CONF.consul.cluster_name
             server_conf['node_name'] = CONF.host
+            server_conf['retry_join'] = retry_join
 
             # add secure settings
             server_conf = add_consul_secure_settings(server_conf)
