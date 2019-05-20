@@ -73,10 +73,17 @@ install -d -m 755 %{buildroot}%{_localstatedir}/log/pf9/%{project}
 # pid directory
 install -d -m 755 %{buildroot}%{_localstatedir}/run/%{project}
 
+# logrotate
+install -d -m 755  %{buildroot}%{_sysconfdir}/logrotate.d
+install -p -D -m 755  etc/logrotate.hamgr  %{buildroot}%{_sysconfdir}/logrotate.d/hamgr
+
 %clean
 
 %files
 %defattr(-,%{_svcuser},%{_svcgroup},-)
+
+%{_sysconfdir}/logrotate.d
+%attr(0644, root, root) %{_sysconfdir}/logrotate.d/hamgr
 
 # the virtualenv
 %dir /opt/pf9/%{project}
