@@ -88,7 +88,7 @@ class NovaProviderTest(unittest.TestCase):
                                  "3": "fake_cluster_ip_3"}
             return ip_lookup, cluster_ip_lookup
 
-        self._provider._get_client = get_client
+        self._provider._get_nova_client = get_client
         self._provider._get_ips_for_hosts = get_ips
 
     def tearDown(self):
@@ -103,8 +103,8 @@ class NovaProviderTest(unittest.TestCase):
         mock_resp = mock.Mock()
         mock_resp.status_code = 200
         mock_resp.raise_for_status = lambda *args: None
-        mock_resp.json = lambda *args: dict(
-            host, segment=dict(name='fake1', uuid='fake'), role_status='ok')
+        mock_resp.json = lambda *args: [dict(
+            host, segment=dict(name='fake1', uuid='fake'), role_status='ok')]
         mock_post.return_value = mock_resp
         mock_get.return_value = mock_resp
         mock_put.return_value = mock_resp
