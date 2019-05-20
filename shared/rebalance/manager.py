@@ -115,7 +115,7 @@ class RebalanceManager(object):
         self.message_buffers = None
 
     def _on_consul_role_rebalance_messages(self, message):
-        LOG.info('received role rebalance message %s', str(message))
+        LOG.debug('received role rebalance message %s', str(message))
         if not message:
             LOG.warning('received message is empty')
             return
@@ -123,7 +123,7 @@ class RebalanceManager(object):
         payload = message['body']
         if payload:
             type = payload['type']
-            LOG.info('received message with payload type %s : %s', type, str(payload))
+            LOG.debug('received message with payload type %s : %s', type, str(payload))
             if type in message_schemas.valid_message_types():
                 self.message_buffers[type].put(message)
             else:
@@ -182,13 +182,13 @@ class RebalanceManager(object):
                     tag = item['tag']
                     payload = item['body']
                     return payload
-        LOG.info('no request found')
+        LOG.debug('no role rebalance request found')
         return None
 
     def get_role_rebalance_response(self, request_id, response_type=message_types.MSG_ROLE_REBALANCE_RESPONSE,
                                     timeout_seconds=30):
         if response_type not in message_schemas.valid_response_types():
-            LOG.info('response type %s for request %s is unknown, default to %s', response_type,
+            LOG.debug('response type %s for request %s is unknown, default to %s', response_type,
                      str(request_id),
                      message_types.MSG_ROLE_REBALANCE_RESPONSE)
             response_type = message_types.MSG_ROLE_REBALANCE_REQUEST
@@ -215,15 +215,15 @@ class RebalanceManager(object):
                     timestamp = datetime.datetime.strptime(payload['timestamp'], '%Y-%m-%d %H:%M:%S')
                     if (datetime.datetime.utcnow() - timestamp) < datetime.timedelta(seconds=120):
                         self.message_buffers[response_type].put(item, block=False)
-                        LOG.info('response %s is not for request id %s, so put it back until timeout',
+                        LOG.debug('response %s is not for request id %s, so put it back until timeout',
                                  str(item),
                                  request_id)
                     else:
-                        LOG.info('response %s is not for request id %s, removed from receive buffer as it is timedout',
+                        LOG.debug('response %s is not for request id %s, removed from receive buffer as it is timedout',
                                  str(item), request_id)
             else:
                 if datetime.datetime.utcnow() - time_start > time_delta:
-                    LOG.info('rebalance response not received after %s seconds for request %s', str(timeout_seconds),
+                    LOG.debug('rebalance response not received after %s seconds for request %s', str(timeout_seconds),
                              str(request_id))
                     break
         LOG.info('no response found for request id %s', str(request_id))

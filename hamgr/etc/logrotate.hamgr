@@ -1,0 +1,9 @@
+/var/log/pf9/hamgr/*.log {
+    daily
+    rotate 4
+    missingok
+    notifempty
+    copytruncate
+    compress
+    minsize 50M
+}

@@ -17,7 +17,7 @@ import uuid
 import mock
 import time
 import json
-
+import sys
 
 class ConsulStatusTest(unittest.TestCase):
 
@@ -48,11 +48,9 @@ class ConsulStatusTest(unittest.TestCase):
 
     @mock.patch('logging.getLogger')
     @mock.patch('logging.config.dictConfig')
-    @mock.patch('consul.Consul')
     @mock.patch('oslo_config.cfg.CONF')
     def setUp(self,
               mock_conf,
-              mock_consul,
               mock_config_dictConfig,
               mock_logger
               ):
@@ -62,26 +60,39 @@ class ConsulStatusTest(unittest.TestCase):
         mock_conf.consul.report_interval = self._report_interval_seconds
         mock_conf.node.ip_address = self._base_ip_format % str(0)
 
-        consul_instance = mock_consul.return_value
-        consul_instance.kv.get.side_effect = self._consul_kv_get
-        consul_instance.kv.put.side_effect = self._consul_kv_put
-        consul_instance.kv.delete.side_effect = self._consul_kv_delete
-        consul_instance.agent.members.side_effect = self._consul_agent_members
-        consul_instance.status.leader.side_effect = self._consul_status_leader
-        consul_instance.status.peers.side_effect = self._consul_status_peers
-
         logger_instance = mock_logger.return_value
         logger_instance.debug.side_effect = self._logging_to_console
         logger_instance.info.side_effect = self._logging_to_console
         logger_instance.warn.side_effect = self._logging_to_console
         logger_instance.exception.side_effect = self._logging_to_console
 
+        self._logging_to_console('setup mock for consul and consul.Consul')
+        mock_consul = mock.MagicMock()
+        consul_instance = mock_consul.return_value
+        consul_instance.kv.get = self._consul_kv_get
+        consul_instance.kv.put = self._consul_kv_put
+        consul_instance.kv.delete = self._consul_kv_delete
+        consul_instance.agent.members = self._consul_agent_members
+        consul_instance.status.leader = self._consul_status_leader
+        consul_instance.status.peers = self._consul_status_peers
+
+        consul = mock.MagicMock()
+        consul.Consul = mock_consul
+        sys.modules['consul'] = consul
+        sys.modules['consul.Consul'] = mock_consul
+
         # delay import after all mocks are setup
         from ha.utils import consul_helper
         self._consul_helper = consul_helper.consul_status(self._host_id)
 
+
     def tearDown(self):
-        pass
+        self._host_ids = []
+        self._consul_cache = []
+        self._host_status = dict()
+        self._host_id_to_ip_map = dict()
+        del sys.modules['consul']
+        del sys.modules['consul.Consul']
 
     def _logging_to_console(self, *args, **kwargs):
         if len(args) > 0:
@@ -142,8 +153,13 @@ class ConsulStatusTest(unittest.TestCase):
     def _consul_status_peers(self, *args, **kwargs):
         # the rest hosts are peers
         peers = []
+        if len(self._consul_cache) <= 0 :
+            return  peers
+
         for i in range(1, 5):
             if i == 1:
+                continue
+            if i > len(self._consul_cache):
                 continue
             peers.append(self._consul_cache[i - 1]["Key"])
         return peers
@@ -151,6 +167,17 @@ class ConsulStatusTest(unittest.TestCase):
     def _assert_initial_consul_status(self):
         # simulate the consul leader role
         self._consul_helper.leader = True
+        # clean existing reports by reset host to up
+        for k in self._host_status.keys():
+            # status code for host alive in consule is 1.
+            # any other status code means host is down
+            self._host_status[k] = 1
+            self._consul_helper.refresh_cache_from_consul()
+            time.sleep(self._report_interval_seconds + 6)
+            status = self._consul_helper.get_cluster_status()
+            if status:
+                self._consul_helper.update_reported_status(status)
+                self._consul_helper.refresh_cache_from_consul()
         # get initial consul status before any host goes down
         status = self._consul_helper.get_cluster_status()
         # initially there are no status to report
@@ -194,42 +221,42 @@ class ConsulStatusTest(unittest.TestCase):
         report = self._consul_kv_get(host_id)
         self.assertIsNone(report[1])
 
-    def test_initial_consul_cluster_runs(self):
+    def _test_initial_consul_cluster_runs(self):
         self._assert_initial_consul_status()
 
-    def test_one_non_leader_host_down(self):
+    def _test_one_non_leader_host_down(self):
         # setup initial status
         self._assert_initial_consul_status()
         # set second host (non leader) as down
         host_index = 1
         host_id = self._consul_cache[host_index]["Value"]
-        self._assert_host_status_change(host_index, 2)
+        self._assert_host_status_change(host_index, 3)
         self._assert_report_status(host_id, True)
 
-    def test_leader_host_down(self):
+    def _test_leader_host_down(self):
         # since we don't know whether consul cluster will be
         # still working as the leader is down, the cluster itself
         # should re-elect a new leader, then the scenario will be
         # the same as non leader host down
         pass
 
-    def test_two_or_more_non_leader_hosts_down_continuously(self):
+    def _test_two_or_more_non_leader_hosts_down_continuously(self):
         # setup initial status
         self._assert_initial_consul_status()
 
         # make second host down
         host_index = 1
         host_id = self._consul_cache[host_index]["Value"]
-        self._assert_host_status_change(host_index, 2)
+        self._assert_host_status_change(host_index, 5)
         self._assert_report_status(host_id, True)
 
         # make third host down
         host_index = 2
         host_id = self._consul_cache[host_index]["Value"]
-        self._assert_host_status_change(host_index, 2)
+        self._assert_host_status_change(host_index, 7)
         self._assert_report_status(host_id, True)
 
-    def test_non_leader_host_down_then_up(self):
+    def _test_non_leader_host_down_then_up(self):
         # setup initial status
         self._assert_initial_consul_status()
 
@@ -237,7 +264,7 @@ class ConsulStatusTest(unittest.TestCase):
         host_index = 1
         self._assert_host_down_then_up(host_index)
 
-    def test_non_leader_host_repeatedly_down_and_up(self):
+    def _test_non_leader_host_repeatedly_down_and_up(self):
         # setup initial status
         self._assert_initial_consul_status()
 
@@ -249,15 +276,25 @@ class ConsulStatusTest(unittest.TestCase):
             host_index = host_index + 1
             time.sleep(.100)
 
-    def test_consul_kv_store_cleanup(self):
+    def _test_consul_kv_store_cleanup(self):
         # setup initial status
         self._assert_initial_consul_status()
         # make host down so there will be report in consul
         host_index = 1
         host_id = self._consul_cache[host_index]["Value"]
-        self._assert_host_status_change(host_index, 2)
+        self._assert_host_status_change(host_index, 9)
         # check the reported report will be cleaned out
         time.sleep(self._report_interval_seconds + 60)
         self._consul_helper.cleanup_consul_kv_store()
         report = self._consul_kv_get(host_id)
         self.assertIsNone(report[1])
+
+
+    def test_run_scenario_one_at_a_time(self):
+        self._test_initial_consul_cluster_runs()
+        self._test_one_non_leader_host_down()
+        self._test_leader_host_down()
+        self._test_two_or_more_non_leader_hosts_down_continuously()
+        self._test_non_leader_host_down_then_up()
+        self._test_non_leader_host_repeatedly_down_and_up()
+        self._test_consul_kv_store_cleanup()

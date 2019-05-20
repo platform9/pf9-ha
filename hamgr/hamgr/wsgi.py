@@ -133,7 +133,8 @@ def get_consul_status(aggregate_id=None):
         aggregate_host_ids = aggregate.hosts
 
         leader = record.leader
-        members = json.loads(record.members)
+        # need to remove the prefix u int string json , otherwise loads will fail
+        members = json.loads(str(record.members).replace('u\'', '\'').replace('\'','\"'))
         for host_id in aggregate_host_ids:
             matches = [x for x in members if x['Name'] == host_id]
             if len(matches) <= 0:
