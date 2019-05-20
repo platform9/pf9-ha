@@ -62,20 +62,37 @@ def clean_openssl_index_db():
         execute_shell_command('touch %s' % file_index)
 
 
-def get_consul_gossip_encryption_key(cluster_name=""):
+def get_consul_gossip_encryption_key(cluster_name="", seed=""):
     # the key is composed with starting magic code 'pf9-dc'
     # and the cluster name (host aggregate id), if longer
     # than require 16 bytes, then trim it, when shorter ,
     # append 0 until length is 16
-    key = 'pf9-dc-%s' % str(cluster_name)
+    str_name = "-" + str(cluster_name)
+    key = 'pf9-dc%s' % str_name
+    if seed:
+        key = seed
     # key needs to be 16 bytes
-    if len(key) > 16:
-        key = key[:16]
+    total = len(key) + len(str_name)
+    if total <= 16:
+        key = key + str_name
     else:
-        key = key + '-'
-        needed = 16 - len(key)
-        for i in range(needed):
-            key = key + '0'
+        if len(key) > 16:
+            if len(str_name) > 16:
+                key = key[0:16]
+            else:
+                key = key[0:(16 - len(str_name))] + str_name
+        else:
+            if len(str_name) < 16:
+                key = key[0:(16 - len(str_name))] + str_name
+
+    needed = 16 - len(key)
+    if needed <= 0:
+        key = key[0:16]
+    else:
+        while len(key) < 16:
+            key = key + '-0'
+        key = key[0:16]
+    LOG.info('consul gossip encryption key clear text : %s', key)
     # key needs to be 64 base encoded
     return base64.b64encode(key)
 

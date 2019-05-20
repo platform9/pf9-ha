@@ -30,16 +30,14 @@ def getLogger(name, conf=None):
                 conf.readfp(fp)
 
     log_file = conf.get("log", "location") if conf.has_option("log", "location") else hamgr.DEFAULT_LOG_FILE
-    log_count = conf.get("log", "rotate_counts") if conf.has_option("log", "rotate_counts") else hamgr.DEFAULT_ROTATE_COUNT
-    log_size = conf.get("log", "size_bytes") if conf.has_option("log", "size_bytes") else hamgr.DEFAULT_ROTATE_SIZE
     log_level = conf.get("log", "level") if conf.has_option("log", "level") else hamgr.DEFAULT_LOG_LEVEL
     log_mode = 'a'
 
     # the basic config for logging
     log_format = '%(asctime)s %(name)-12s %(levelname)-8s %(message)s'
     logging.basicConfig(filename=log_file, level=log_level, format=log_format)
-
     logger = logging.getLogger(name)
+    logger.setLevel(log_level)
 
     try:
         if dirname(log_file) != '' and not exists(dirname(log_file)):
@@ -47,11 +45,4 @@ def getLogger(name, conf=None):
     except Exception as e:
         logger.exception(e)
         raise
-
-    file_formatter = logging.Formatter(log_format)
-    file_handler = logging.handlers.RotatingFileHandler(log_file, mode=log_mode, maxBytes=long(log_size),
-                                                        backupCount=long(log_count))
-    file_handler.setFormatter(file_formatter)
-    logger.setLevel(log_level)
-    logger.addHandler(file_handler)
     return logger

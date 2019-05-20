@@ -21,6 +21,7 @@ from os import makedirs
 import json
 import optparse
 import sys
+import subprocess
 
 HA_CONF_FILE = '/opt/pf9/etc/pf9-ha/conf.d/pf9-ha.conf'
 SERVICES = ['pf9-ha-slave']
@@ -46,6 +47,22 @@ def get_config(option, opt_str, value, parser):
     sys.stdout.write(json.dumps({"ha_slave_conf": cfg}))
     sys.exit(0)
 
+def _run_command(cmd, env=None, exit=True):
+    proc = subprocess.Popen(cmd, shell=True,
+                            stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            env=env)
+    out, err = proc.communicate()
+    code = proc.returncode
+
+    if code and exit:
+        # Consider any non zero code as error
+        sys.stdout.write(out)
+        sys.stderr.write("Command: %s failed. {%d}:%s" % (cmd, code, err))
+        sys.exit(1)
+
+    return code
 
 def set_config(option, opt_str, value_str, parser):
     cfgparser = ConfigParser()
@@ -59,6 +76,13 @@ def set_config(option, opt_str, value_str, parser):
             cfgparser.set(section, opt, opt_val)
     with open(HA_CONF_FILE, 'w') as fptr:
         cfgparser.write(fptr)
+
+    # !!! important
+    # oslo_config will not reload changes unless restart service
+    # otherwise pf9-ha-slave will not get updated configs for pf9-consul
+    cmd = "sudo service pf9-ha-slave restart"
+    _run_command(cmd)
+
     sys.exit(0)
 
 
