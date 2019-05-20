@@ -158,7 +158,7 @@ def dbsession():
 def _get_all_clusters(session, read_deleted=False):
     query = session.query(Cluster)
     if read_deleted is False:
-        query = query.filter_by(deleted=None)
+        query = query.filter_by(deleted=0)
     return query.all()
 
 
@@ -177,14 +177,18 @@ def get_all_active_clusters():
         return _get_all_active_clusters(session)
 
 
-def _get_cluster(session, cluster_name_or_id, read_deleted=False, ):
+def _get_cluster(session, cluster_name_or_id, read_deleted=False):
     query = session.query(Cluster)
-    if read_deleted is False:
-        query = query.filter_by(deleted=None)
+    # since id or name are unique, no matter it is deleted,
+    # when filter by name or id, the record will always be returned
+    if read_deleted:
+        query = query.filter(Cluster.deleted != 0)
+
     if isinstance(cluster_name_or_id, basestring):
         query = query.filter_by(name=cluster_name_or_id)
     else:
         query = query.filter_by(id=cluster_name_or_id)
+
     return query.first()
 
 
@@ -223,7 +227,11 @@ def update_request_status(cluster_id, status):
         raise exceptions.ArgumentException('status is null or empty or invalid')
     with dbsession() as session:
         db_cluster = _get_cluster(session, cluster_id)
+        if not db_cluster:
+            LOG.info('update_request_status: no cluster found with id %s', str(cluster_id))
+            return
         db_cluster.status = status
+        db_cluster.updated_at = datetime.datetime.utcnow()
 
 
 def _create_cluster(session, cluster_name, task_state):
@@ -231,6 +239,9 @@ def _create_cluster(session, cluster_name, task_state):
         clstr = Cluster()
         clstr.name = cluster_name
         clstr.task_state = task_state
+        clstr.deleted = 0
+        clstr.updated_at = datetime.datetime.utcnow()
+        clstr.created_at = datetime.datetime.utcnow()
         session.add(clstr)
         return clstr
     except SQLAlchemyError as se:
@@ -263,12 +274,26 @@ def create_cluster_if_needed(cluster_name, task_state):
 def update_cluster(cluster_id, enabled):
     with dbsession() as session:
         db_cluster = _get_cluster(session, cluster_id)
+        if not db_cluster:
+            LOG.info('update_cluster: no cluster found with id %s for action %s', str(cluster_id), str(enabled))
+            return
+        db_cluster.updated_at = datetime.datetime.utcnow()
         db_cluster.enabled = enabled
+        if not enabled:
+            db_cluster.deleted = db_cluster.id
+            db_cluster.deleted_at = datetime.datetime.utcnow()
+        else:
+            db_cluster.deleted = 0
+            db_cluster.deleted_at = None
 
 
 def update_cluster_task_state(cluster_id, state):
     with dbsession() as session:
         db_cluster = _get_cluster(session, cluster_id)
+        if not db_cluster:
+            LOG.info('update_cluster_task_state: no cluster found with id %s for new task state %s',
+                     str(cluster_id), str(state))
+            return
         task_state = db_cluster.task_state
         if task_state and state is not None:
             if task_state == state:
@@ -283,6 +308,7 @@ def update_cluster_task_state(cluster_id, state):
         if state not in constants.VALID_TASK_STATES:
             raise exceptions.InvalidTaskState(state)
         db_cluster.task_state = state
+        db_cluster.updated_at = datetime.datetime.utcnow()
 
 
 def create_change_event(cluster_id, events, event_id=''):
@@ -303,6 +329,19 @@ def create_change_event(cluster_id, events, event_id=''):
         except SQLAlchemyError as se:
             LOG.error('DB error when create change event : %s', se)
 
+
+def get_change_event_by_id(uuid):
+    if uuid is None:
+        raise exceptions.ArgumentException('uuid is empty')
+    with dbsession() as session:
+        try:
+            query = session.query(ChangeEvents)
+            query = query.filter_by(uuid=uuid)
+            ep = query.first()
+            return ep
+        except Exception:
+            LOG.error('failed to get change event %s', str(uuid), exc_info=True)
+    return None
 
 # get change envents between given time range for cluster id, host name
 # and event type
@@ -341,7 +380,7 @@ def get_change_events_between_times(cluster_id,
 
 
 # create event, return event created to caller
-def create_processing_event(event_uuid, event_type, host_name, cluster_id):
+def create_processing_event(event_uuid, event_type, host_name, cluster_id, notification_status = '', error_state=''):
     if event_type not in constants.VALID_EVENT_TYPES:
         raise exceptions.ArgumentException('event_type not in %s' % \
                                            str(constants.VALID_EVENT_TYPES))
@@ -357,6 +396,8 @@ def create_processing_event(event_uuid, event_type, host_name, cluster_id):
             ep.event_time = datetime.datetime.utcnow()
             ep.host_name = str(host_name)
             ep.cluster_id = str(cluster_id)
+            ep.notification_status = notification_status
+            ep.error_state = error_state
             session.add(ep)
             return ep
         except Exception:

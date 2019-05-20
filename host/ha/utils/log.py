@@ -40,8 +40,7 @@ def setup_log_dir_and_file(filename, mode='a', encoding=None, owner=None):
             makedirs(dirname(filename))
         if not exists(filename):
             open(filename, mode).close()
-        return logging.handlers.RotatingFileHandler(
-            filename, mode=mode, maxBytes=500*1024*1024, backupCount=10)
+        return logging.FileHandler(filename, mode=mode)
     except Exception:
         return logging.NullHandler()
 

@@ -133,7 +133,8 @@ def get_consul_status(aggregate_id=None):
         aggregate_host_ids = aggregate.hosts
 
         leader = record.leader
-        members = json.loads(record.members)
+        # need to remove the prefix u int string json , otherwise loads will fail
+        members = json.loads(str(record.members).replace('u\'', '\'').replace('\'','\"'))
         for host_id in aggregate_host_ids:
             matches = [x for x in members if x['Name'] == host_id]
             if len(matches) <= 0:
@@ -141,10 +142,10 @@ def get_consul_status(aggregate_id=None):
             member = matches[0]
             if not member:
                 LOG.warn('host %s exists in aggregate %s but does not '
-                            'in consul members report : %s',
-                            str(host_id),
-                            str(aggregate_id),
-                            str(members))
+                         'in consul members report : %s',
+                         str(host_id),
+                         str(aggregate_id),
+                         str(members))
                 continue
 
             # get host status in consul members
@@ -157,10 +158,10 @@ def get_consul_status(aggregate_id=None):
                 is_leader = (leader == ('%s:%s' % (member['Addr'], member['Tags']['port'])))
 
             result = {
-                'aggregateName':aggregate_name,
+                'aggregateName': aggregate_name,
                 'zoneName': aggregate_zone,
-                'hostId' : host_id,
-                'hostStatus' : host_status,
+                'hostId': host_id,
+                'hostStatus': host_status,
                 'consulRole': host_role,
                 'isLeader': is_leader,
                 'lastUpdate': datetime.strftime(record.lastUpdate,

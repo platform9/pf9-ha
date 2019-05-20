@@ -32,6 +32,7 @@ from shared.rebalance.manager import RebalanceManager
 from shared.messages.rebalance_response import ConsulRoleRebalanceResponse
 from shared.messages.consul_response import ConsulRefreshResponse
 from shared.messages import message_types
+from shared.exceptions import ha_exceptions
 
 LOG = logging.getLogger('ha-manager')
 
@@ -50,56 +51,61 @@ def _show_conf(conf):
 
 CONF = cfg.CONF
 
-consul_grp = cfg.OptGroup('consul', title='Opt group for consul')
-consul_opts = [
-    cfg.IntOpt('status_check_interval', default=10,
-               help='Time interval in seconds between status checks'),
-    cfg.StrOpt('join',
-               help='Comma separated list of IP addresses of the '
-                    'servers to connect to'),
-    cfg.IntOpt('bootstrap_expect', default=0,
-               help='Whether to start consul as server or agent. Valid '
-                    'values are 0, 1, 3 and 5. 0 indicates that consul is '
-                    'started in agent mode while 1, 3 and 5 indicate that '
-                    'consul is started in server mode with bootstrap_expect '
-                    'being that specified value.'),
-    cfg.StrOpt('cluster_name', default='', help='the name of consul cluster'),
-    cfg.StrOpt('encrypt', default='', help='the encrypt key for encryption of Consul network traffic'),
-    cfg.StrOpt('verify_incoming', default='false', help='whether to verify consul incoming traffice'),
-    cfg.StrOpt('verify_outgoing', default='false', help='whether to verify consul outgoing traffice'),
-    cfg.StrOpt('verify_server_hostname', default='false', help='whether to verify consul server name'),
-    cfg.StrOpt('ca_file_content', default='', help='base64 encoded consul CA cert content'),
-    cfg.StrOpt('cert_file_content', default='', help='base64 encoded consul server cert content'),
-    cfg.StrOpt('key_file_content', default='', help='base64 encoded consul server key content'),
-    cfg.StrOpt('consul_log_level', default='info', help='log level of consul agent')
-]
+# make it a method so test can use it
+def setup_conf_options():
+    consul_grp = cfg.OptGroup('consul', title='Opt group for consul')
+    consul_opts = [
+        cfg.IntOpt('status_check_interval', default=10,
+                   help='Time interval in seconds between status checks'),
+        cfg.StrOpt('join',
+                   help='Comma separated list of IP addresses of the '
+                        'servers to connect to'),
+        cfg.IntOpt('bootstrap_expect', default=0,
+                   help='Whether to start consul as server or agent. Valid '
+                        'values are 0, 1, 3 and 5. 0 indicates that consul is '
+                        'started in agent mode while 1, 3 and 5 indicate that '
+                        'consul is started in server mode with bootstrap_expect '
+                        'being that specified value.'),
+        cfg.StrOpt('cluster_name', default='', help='the name of consul cluster'),
+        cfg.StrOpt('encrypt', default='', help='the encrypt key for encryption of Consul network traffic'),
+        cfg.StrOpt('verify_incoming', default='false', help='whether to verify consul incoming traffice'),
+        cfg.StrOpt('verify_outgoing', default='false', help='whether to verify consul outgoing traffice'),
+        cfg.StrOpt('verify_server_hostname', default='false', help='whether to verify consul server name'),
+        cfg.StrOpt('ca_file_content', default='', help='base64 encoded consul CA cert content'),
+        cfg.StrOpt('cert_file_content', default='', help='base64 encoded consul server cert content'),
+        cfg.StrOpt('key_file_content', default='', help='base64 encoded consul server key content'),
+        cfg.StrOpt('consul_log_level', default='info', help='log level of consul agent')
+    ]
 
-default_opts = [
-    cfg.StrOpt('host', default='',
-               help='Platform9 Host ID')
-]
+    default_opts = [
+        cfg.StrOpt('host', default='',
+                   help='Platform9 Host ID')
+    ]
 
-CONF.register_group(consul_grp)
-CONF.register_opts(consul_opts, consul_grp)
+    CONF.register_group(consul_grp)
+    CONF.register_opts(consul_opts, consul_grp)
 
-role_balance_grp = cfg.OptGroup(name='consul_role_rebalance', title='group of options for consul_role_rebalance')
-role_balance_opts = [
-    cfg.StrOpt('role_rebalance_enabled', default='True', help='whether the auto rebalance is enabled'),
-    cfg.StrOpt('amqp_host', default='localhost', help='the RPC host fqdn or ip'),
-    cfg.StrOpt('amqp_port', default='5672', help='the RPC host port'),
-    cfg.StrOpt('amqp_user', default='', help='the user name for accessing RPC host'),
-    cfg.StrOpt('amqp_password', default='', help='the password for accessing RPC host'),
-    cfg.StrOpt('amqp_virtualhost', default='/', help='the RPC virtual host path'),
-    cfg.StrOpt('amqp_exchange_name', default='consul-role-rebalance-exchange', help='the RPC exchange name'),
-    cfg.StrOpt('amqp_exchange_type', default='topic', help='the RPC exchange type'),
-    cfg.StrOpt('amqp_routingkey_sending', default='receiving', help='the RPC message routing key for sending to du'),
-    cfg.StrOpt('amqp_routingkey_receiving', default='sending', help='the RPC message routing key for receiving from du')
-]
+    role_balance_grp = cfg.OptGroup(name='consul_role_rebalance', title='group of options for consul_role_rebalance')
+    role_balance_opts = [
+        cfg.StrOpt('role_rebalance_enabled', default='True', help='whether the auto rebalance is enabled'),
+        cfg.StrOpt('amqp_host', default='localhost', help='the RPC host fqdn or ip'),
+        cfg.StrOpt('amqp_port', default='5672', help='the RPC host port'),
+        cfg.StrOpt('amqp_user', default='', help='the user name for accessing RPC host'),
+        cfg.StrOpt('amqp_password', default='', help='the password for accessing RPC host'),
+        cfg.StrOpt('amqp_virtualhost', default='/', help='the RPC virtual host path'),
+        cfg.StrOpt('amqp_exchange_name', default='consul-role-rebalance-exchange', help='the RPC exchange name'),
+        cfg.StrOpt('amqp_exchange_type', default='topic', help='the RPC exchange type'),
+        cfg.StrOpt('amqp_routingkey_sending', default='receiving', help='the RPC message routing key for sending to du'),
+        cfg.StrOpt('amqp_routingkey_receiving', default='sending', help='the RPC message routing key for receiving from du')
+    ]
 
-CONF.register_group(role_balance_grp)
-CONF.register_opts(role_balance_opts, role_balance_grp)
+    CONF.register_group(role_balance_grp)
+    CONF.register_opts(role_balance_opts, role_balance_grp)
 
-CONF.register_opts(default_opts)
+    CONF.register_opts(default_opts)
+
+# call setup
+setup_conf_options()
 
 PF9_CONSUL_DATA_DIR='/opt/pf9/consul-data-dir'
 PF9_CONSUL_CONF_DIR = '/opt/pf9/etc/pf9-consul/'
@@ -130,16 +136,19 @@ def add_consul_secure_settings(conf):
         with open(file, 'w') as keyfp:
             keyfp.write(content)
         conf['key_file'] = file
+    LOG.info('consul secure settings : %s', str(conf))
     return conf
 
 
 def generate_consul_conf():
     try:
+        LOG.info('try to generate consul config ...')
         retry_join = CONF.consul.join.split(',')
         ip_address = consul_helper.get_ip_address()
         bind_address = consul_helper.get_bind_address()
         log_levels=["trace", "debug", "info", "warn", "err"]
         if CONF.consul.bootstrap_expect == 0:
+            LOG.info('generate consul config as slave , as bootstrap_expect is %', str(CONF.consul.bootstrap_expect))
             # Start consul with agent conf
             with open(PF9_CONSUL_CONF_DIR + 'client.json.template') as fptr:
                 agent_conf = json.load(fptr)
@@ -158,6 +167,7 @@ def generate_consul_conf():
             with open(PF9_CONSUL_CONF_DIR + 'conf.d/client.json', 'w') as fptr:
                 json.dump(agent_conf, fptr)
         else:
+            LOG.info('generate consul config as server , as bootstrap_expect is %', str(CONF.consul.bootstrap_expect))
             # Start consul with server conf
             with open(PF9_CONSUL_CONF_DIR + 'server.json.template') as fptr:
                 server_conf = json.load(fptr)
@@ -176,8 +186,12 @@ def generate_consul_conf():
             LOG.info('create consul server configure file with data : %s', str(server_conf))
             with open(PF9_CONSUL_CONF_DIR + 'conf.d/server.json', 'w') as fptr:
                 json.dump(server_conf, fptr)
+        LOG.info('consul config file is now generated')
+        return True
     except Exception as ex:
         LOG.warn('unhandled exception when generate consul config : %s', str(ex))
+    LOG.info('consul config file fail to be generated')
+    return False
 
 
 def run_cmd(cmd):
@@ -605,6 +619,7 @@ def config_needs_refresh():
     #     "verify_outgoing": true,
     #     "verify_server_hostname": false
     # }
+    LOG.info('checking config changes for consul')
     settings_source = dict(
         advertise_addr=consul_helper.get_ip_address(),
         bind_addr=consul_helper.get_bind_address(),
@@ -615,7 +630,7 @@ def config_needs_refresh():
         cert_file_content=CONF.consul.cert_file_content,
         key_file_content=CONF.consul.key_file_content
     )
-
+    LOG.info('found settings for consul from pf9-ha : %s', str(settings_source))
     settings_consul = {}
     cfg_file = ""
     if CONF.consul.bootstrap_expect == 0:
@@ -629,24 +644,25 @@ def config_needs_refresh():
 
     with open(cfg_file) as fptr:
         settings_consul = json.load(fptr)
+    LOG.info('found settings of consul used from %s : %s', cfg_file, str(settings_consul))
 
     # check whether settings in source do not exist or not match in consul settings
-    if settings_source['advertise_addr'] != settings_consul.get('advertise_addr', None):
+    if str(settings_source['advertise_addr']) != str(settings_consul.get('advertise_addr', None)):
         LOG.info('detected changes in advertise_addr, source : %s , consul cfg : %s',
                  settings_source['advertise_addr'],
                  settings_consul.get('advertise_addr', None))
         return True
-    if settings_source['bind_addr']!= settings_consul.get('bind_addr', None):
+    if str(settings_source['bind_addr']) != str(settings_consul.get('bind_addr', None)):
         LOG.info('detected changes in bind_addr, source : %s , consul cfg : %s',
                  settings_source['bind_addr'],
                  settings_consul.get('bind_addr', None))
         return True
-    if settings_source['datacenter']!= settings_consul.get('datacenter', None):
+    if str(settings_source['datacenter']) != str(settings_consul.get('datacenter', None)):
         LOG.info('detected changes in datacenter, source : %s , consul cfg : %s',
                  settings_source['datacenter'],
                  settings_consul.get('datacenter', None))
         return True
-    if settings_source['encrypt']!= settings_consul.get('encrypt', None):
+    if str(settings_source['encrypt']) != str(settings_consul.get('encrypt', None)):
         LOG.info('detected changes in encrypt, source : %s , consul cfg : %s',
                  settings_source['encrypt'],
                  settings_consul.get('encrypt', None))
@@ -659,6 +675,7 @@ def config_needs_refresh():
     for item in file_maps:
         file_path = os.path.join(PF9_CONSUL_CONF_DIR, item[0])
         content_key = item[1]
+
         if settings_source[content_key] and os.path.exists(file_path) == False:
             LOG.info('detected changes in file %s, source content: %s , consul cfg exists ?: %s',
                      file_path,
@@ -702,13 +719,18 @@ def loop():
 
     LOG.info('create consul config file now')
     # TODO(pacharya): Handle restart of pf9-ha-slave service
-    generate_consul_conf()
+    consul_configured = generate_consul_conf()
+    LOG.info('are consul configurations generated ? %s', str(consul_configured))
 
     # Assume that consul was not running beforehand
     # TODO(pacharya): If consul was running beforehand we need to cleanup the
     #                 data dir of consul to get rid of the earlier state.
     LOG.info('start consul service deamon')
     start_loop = start_consul_service()
+    LOG.info('is consul running ? %s', str(start_loop))
+
+    if not consul_configured or not start_loop:
+        raise ha_exceptions.ConfigException('failed to generate consul configuration file or consul cluster fail to run')
 
     # find out consul join ips
     join_ips = get_join_ips()
@@ -762,6 +784,7 @@ def loop():
             LOG.info('thread processing_rebalance_requests started')
 
         # the main thread handling host down events
+        LOG.info('start main loop ...')
         while start_loop:
             try:
                 if config_needs_refresh():
@@ -802,6 +825,7 @@ def loop():
                     else:
                         leader = ch.cluster_leader()
                         if ch.am_i_cluster_leader():
+                            ch.log_kvstore()
                             cluster_stat = ch.get_cluster_status()
                             if cluster_stat:
                                 LOG.info('i am leader %s, found changes : %s', str(leader), str(cluster_stat))
@@ -809,11 +833,13 @@ def loop():
                                 if reporter.report_status(cluster_stat):
                                     LOG.info('consul status is reported to hamgr: %s',
                                              cluster_stat)
+                                    ch.log_kvstore()
                                     ch.update_reported_status(cluster_stat)
                                 else:
                                     LOG.info('report consul status to hamgr failed')
                             else:
                                 LOG.debug('i am leader %s, but no changes to report for now', str(leader))
+                            ch.log_kvstore()
                             ch.cleanup_consul_kv_store()
                         else:
                             LOG.debug('i am not leader so do nothing, leader : %s', str(leader))
@@ -824,6 +850,8 @@ def loop():
                 # multiple updates.
                 LOG.info('publish current host id %s', hostid)
                 ch.publish_hostid()
+                # dump kv store to file so we can check what happened
+                ch.log_kvstore()
             except Exception as e:
                 LOG.exception('unhandled exception in pf9-ha-slave loop : %s', str(e))
 
@@ -836,4 +864,5 @@ def loop():
         rebalance_thread.join(5)
         rebalance_thread = None
     del rebalance_mgr
-    LOG.error('pf9-ha-slave service exiting...')
+    LOG.error('pf9-ha-slave service exiting (start_loop=%s, consul_configured=%s)...',
+              str(start_loop), str(consul_configured))

@@ -28,7 +28,7 @@ def get_failover_segment(token, name):
     headers = {'X-Auth-Token': token['id'],
                'Content-Type': 'application/json'}
     resp = requests.get(url, headers=headers)
-    LOG.info('resp when get segment %s : %s', name, str(resp.__dict__))
+    LOG.debug('resp when get segment %s : %s', name, str(resp.__dict__))
     resp.raise_for_status()
 
     if 'segments' in resp.json():
@@ -254,6 +254,23 @@ def get_notification_status(token, uuid):
     resp.raise_for_status()
     obj = resp.json()
     return obj['notification']['status']
+
+def is_host_on_maintenance(token, host_id, segment_name):
+    # confirm the given segment_id eixist
+    target_segment = get_failover_segment(token, segment_name)
+    LOG.debug('found segment %s : %s', segment_name, str(target_segment))
+    # confirm host exist in target segment
+    hosts = get_nodes_in_segment(token, segment_name)
+    xhosts = filter(lambda x: x['name'] == str(host_id), hosts)
+    if len(xhosts) != 1:
+        LOG.error('host %s does not exist in masakari segment %s', host_id,
+                  segment_name)
+        return False
+
+    host_uuid = xhosts[0]['uuid']
+    on_maintenance = xhosts[0]['on_maintenance']
+    LOG.debug('uuid of host %s : %s , on_maintenance : %s', host_id, str(host_uuid), str(on_maintenance))
+    return on_maintenance
 
 
 def update_host_maintenance(token, host_id, segment_name, on_maintenance):

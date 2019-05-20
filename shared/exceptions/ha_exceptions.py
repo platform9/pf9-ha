@@ -105,6 +105,11 @@ class ClusterIpNotFound(Exception):
         super(ClusterIpNotFound, self).__init__(message)
 
 
+class HostsIpNotFound(Exception):
+    def __init__(self, hosts):
+        message = "IP for hosts %s not found" % str(hosts)
+        super(HostsIpNotFound, self).__init__(message)
+
 class ArgumentException(Exception):
     def __init__(self, message, innerException):
         message = 'Invalid argument. %s . %s' % (message, str(innerException))
@@ -115,3 +120,10 @@ class ConfigException(Exception):
     def __init__(self, message, innerException):
         message = '%s . %s' % (message, str(innerException))
         super(ConfigException, self).__init__(message)
+
+
+class NoCommonSharedNfsException(Exception):
+    def __init__(self, message, innerException = None):
+        message = '%s . %s' % (message, str(innerException))
+        super(NoCommonSharedNfsException, self).__init__(message)
+
