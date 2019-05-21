@@ -27,4 +27,3 @@ rm -f ${CONSUL_CONF}
 rm -f ${LOCKFILE}
 rm -f /var/consul-status/last_update
 rm -rf /opt/pf9/etc/pf9-consul*
-rm -rf /etc/logrotate.d/ha

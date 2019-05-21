@@ -75,6 +75,7 @@ install -d -m 755 ${buildroot}/etc/init.d/
 install -d -m 755 ${buildroot}/opt/pf9/pf9-ha-slave
 install -d -m 755 ${buildroot}/var/consul-status
 
+
 # Copy init files specific to OS
 if [ "x$systemtype" = "xrpm" ]; then
 
@@ -98,9 +99,4 @@ install -p -m 644 -t ${buildroot}/opt/pf9/etc/pf9-consul/ \
     ${srcroot}/ha/pf9app/opt/pf9/etc/pf9-consul/conf.d/*
 install -p -m 755 -t ${buildroot}/opt/pf9/pf9-ha-slave/ \
     ${srcroot}/ha/pf9app/config
-
-# install the /etc/logrotate.d/
-install -d -m 755 ${buildroot}/etc/logrotate.d/
-install -p -m 644 ${srcroot}/ha/pf9app/etc/logrotate.ha \
-                  ${buildroot}/etc/logrotate.d/ha
 
