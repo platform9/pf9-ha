@@ -53,12 +53,12 @@ def start_server(conf, paste_ini):
         LOG.debug('get ha provider')
         provider = provider_factory.ha_provider()
         LOG.debug('add task process_consul_encryption_configuration')
-        periodic_task.add_task(provider.process_consul_encryption_configuration, 30, run_now=True)
+        periodic_task.add_task(provider.process_consul_encryption_configuration, 120, run_now=True)
         LOG.debug('add task process_host_aggregate_changes')
-        periodic_task.add_task(provider.process_host_aggregate_changes, 30, run_now=True)
+        periodic_task.add_task(provider.process_host_aggregate_changes, 120, run_now=True)
         # dedicated task to handle host events
         LOG.debug('add task process_host_events')
-        periodic_task.add_task(provider.process_host_events, 30, run_now=True)
+        periodic_task.add_task(provider.process_host_events, 120, run_now=True)
         # task to handle consul role rebalance
         LOG.debug('add task process_consul_role_rebalance_requests')
         periodic_task.add_task(provider.process_consul_role_rebalance_requests, 30, run_now=True)
