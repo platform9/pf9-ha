@@ -1123,9 +1123,9 @@ class NovaProvider(Provider):
         cluster_ip_lookup = dict()
         for hyp in all_hypervisors:
             host_id = hyp.service['host']
-            ip_lookup[host_id] = hyp.host_ip
             cluster_ip = ''
             if host_id in lookup:
+                ip_lookup[host_id] = hyp.host_ip
                 # Overwrite host_ip value with consul_ip or cluster_ip
                 # from ostackhost role
                 if roles_map.get(host_id, None) is not None:
