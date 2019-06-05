@@ -273,7 +273,9 @@ class NovaProvider(Provider):
                         if not masakari.is_failover_segment_under_recovery(self._token, cluster.name):
                             LOG.info('in event %s %s for host %s, try to reset maintenance state in masakari '
                                      'which is active in nova', event_type, event_uuid, host_name)
-                            self._toggle_host_maintenance_state(host_name, cluster.name, False)
+                            self._reset_masakari_hosts_maintenance_status(segment_name=cluster.name,
+                                                                          host_ids=[host_name],
+                                                                          ignore_nova_state=True)
                             LOG.info('try to check whether host %s in cluster %s in masakari is on maintenance',
                                      str(host_name), str(cluster.name))
                             masakari_host_on_maintenance = masakari.is_host_on_maintenance(self._token, host_name,
@@ -304,7 +306,8 @@ class NovaProvider(Provider):
                         if not masakari.is_failover_segment_under_recovery(self._token, cluster.name):
                             LOG.info('in event %s %s for host %s, try to reset maintenance state in masakari '
                                      'which is active in nova', event_type, event_uuid, host_name)
-                            self._toggle_host_maintenance_state(host_name, cluster.name, False)
+                            self._reset_masakari_hosts_maintenance_status(segment_name=cluster.name,
+                                                                          host_ids=[host_name])
                         else:
                             LOG.info('need to retry toggle maintence state for host %s as cluster %s under recovery ',
                                      str(host_name), str(cluster.name))
@@ -595,17 +598,8 @@ class NovaProvider(Provider):
                     # resume on maintenance hosts, and enforce pf9-ha-slave role on active hosts
                     LOG.debug('try to reset hosts maintenance state in masakari for active hosts in nova %s',
                               str(nova_active_host_ids))
-                    for hid in nova_active_host_ids:
-                        # already know the host is active in nova
-                        xhosts = [x for x in nodes if str(x['name']) == str(hid)]
-                        LOG.debug('matched active nova host %s : %s', str(hid), str(xhosts))
-                        if len(xhosts) == 1 and xhosts[0]['on_maintenance']:
-                            LOG.debug('toggle maintenance for host %s', str(hid))
-                            # need to unlock the host when the segment is not in use, otherwise will retry later
-                            if not masakari.is_failover_segment_under_recovery(self._token, segment_name):
-                                LOG.info('active host %s was found in maintenance state, reset maintentance state',
-                                         str(xhosts[0]['name']))
-                                self._toggle_host_maintenance_state(hid, segment_name, False)
+                    self._reset_masakari_hosts_maintenance_status(segment_name=segment_name,
+                                                                  host_ids=nova_active_host_ids)
 
                     # only when the cluster state is completed
                     if current_cluster.task_state not in [constants.TASK_COMPLETED]:
@@ -690,6 +684,96 @@ class NovaProvider(Provider):
                 LOG.debug('Aggregate changes task completed')
                 self.aggregate_task_running = False
         LOG.debug('host aggregate change processing task has finished at %s', str(datetime.utcnow()))
+
+    def _reset_masakari_hosts_maintenance_status(self, segment_name="", host_ids=[], ignore_nova_state=False):
+        try:
+            self._token = self._get_v3_token()
+            nova_client = self._get_nova_client()
+
+            # figure out the targeting failover segments for resting
+            segment_hosts_map = []
+            if segment_name:
+                if not masakari.is_failover_segment_exist(self._token, str(segment_name)):
+                    LOG.debug('vmha cluster with name %s does not exist, so not reset hosts maintenance status',
+                              str(segment_name))
+                    return
+
+                masakari_hosts = masakari.get_nodes_in_segment(self._token, str(segment_name))
+                # always use the hosts found for the given segment, in case the hosts passed in
+                # not belong to the given segment
+                hosts = [x['name'] for x in masakari_hosts]
+
+                # when pass in host ids, just use the intersection, because data from masakari is the trusted source
+                if host_ids and len(host_ids) > 0 :
+                    common = list(set(hosts).intersection(set(host_ids)))
+                    if len(common) > 0 :
+                        hosts = common
+
+                segment_hosts_map.append({
+                    'segment_name': segment_name,
+                    'host_ids': hosts
+                })
+            else:
+                # find all active ha clusters
+                nova_aggres = nova_client.aggregates.list()
+                hamgr_clusters = db_api.get_all_clusters()
+                for agg in nova_aggres:
+                    # make sure vmha group for this aggregate actually exists
+                    existings = [x for x in hamgr_clusters if x.name == str(agg.id)]
+                    if len(existings) == 0:
+                        LOG.debug('vmha cluster with name %s does not exist or disabled, so not reset hosts maintenance status',
+                                  str(agg.id))
+                        continue
+
+                    # make sure masakari failover segment exists
+                    if not masakari.is_failover_segment_exist(self._token, str(agg.id)):
+                        LOG.error('vmha cluster with name %s exists, but masakari segment %s does not exist',
+                                  str(agg.id), str(agg.id))
+                        continue
+
+                    masakari_hosts = masakari.get_nodes_in_segment(self._token, str(agg.id))
+                    hosts = [x['name'] for x in masakari_hosts]
+
+                    # if not pass in aggregate id but just host ids, then use those host id to figure which
+                    # aggregate they belong to, or just ignore host ids and check for every aggregates
+                    if host_ids and len(host_ids) > 0 :
+                        common = list(set(hosts).intersection(set(host_ids)))
+                        if len(common) > 0:
+                            hosts = common
+
+                   # otherwise will check all hosts
+                    segment_hosts_map.append({
+                        'segment_name': str(agg.id),
+                        'host_ids': hosts
+                    })
+
+            # reset hosts maintenance status
+            for entry in segment_hosts_map:
+                target_name = entry['segment_name']
+
+                # don't reset host maintenance state there is vm migration task running
+                if masakari.is_failover_segment_under_recovery(self._token, target_name):
+                    LOG.debug('not reset maintenance state for hosts in segment %s, as it is under recovery',
+                              str(target_name))
+                    continue
+
+                target_ids = entry['host_ids']
+                for hid in target_ids:
+                    # is this host up and active in nova ?
+                    active_in_nova = self._is_nova_service_active(hid, nova_client)
+                    if not ignore_nova_state:
+                        if not active_in_nova:
+                            LOG.debug('not reset maintenance state for host %s in segment %s, as it is not active in nova',
+                                      str(hid), str(target_name))
+                            continue
+                    else:
+                        LOG.debug('will reset maintenance state for host %s (active in nova : %s)',
+                                  str(hid), str(active_in_nova))
+                    LOG.info('host %s in segment %s was found in maintenance state, now reset it',
+                             str(hid), str(target_name))
+                    self._toggle_host_maintenance_state(hid, target_name, False)
+        except Exception:
+            LOG.exception('unhandled exception when reset masakari host maintenance state')
 
     def _rebalance_consul_roles_if_needed(self, cluster_name, event_type, event_uuid=None):
         if event_type not in constants.HOST_EVENTS:
@@ -1567,6 +1651,9 @@ class NovaProvider(Provider):
                 LOG.info('not disable cluster %s for now, as masakari segment %s is under recovery, '
                          'will retry disabling request later', aggregate_name, aggregate_name)
                 return
+
+            # since the failover segment is not under recovery , so force to reset host maintenance status
+            self._reset_masakari_hosts_maintenance_status(segment_name=aggregate_name, ignore_nova_state=True)
 
             # change status from 'request-disable' to 'disabling'
             LOG.info('set cluster id %s task state to %s', str(cluster.id), str(constants.HA_STATE_DISABLING))
