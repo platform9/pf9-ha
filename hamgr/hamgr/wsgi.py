@@ -21,6 +21,7 @@ from flask import request
 from hamgr import app
 from hamgr.context import error_handler
 from shared.exceptions import ha_exceptions as exceptions
+import shared.constants as constants
 from hamgr import provider_factory
 from shared.constants import LOGGER_PREFIX
 
@@ -83,15 +84,16 @@ def update_status(aggregate_id, action):
             dict(success=False, error=ex.message)), 412, CONTENT_TYPE_HEADER
 
 
-@app.route('/v1/ha/<uuid:host_id>', methods=['POST'])
+@app.route('/v1/ha/<uuid:host_uuid>', methods=['POST'])
 @error_handler
-def update_host_status(host_id):
+def update_host_status(host_uuid):
+    host_id = str(host_uuid)
     json_obj = request.get_json()
     event = json_obj.get('event', None)
     event_details = json_obj.get('event_details', {})
-    event_details['host_id'] = str(host_id)
+    event_details['host_id'] = host_id
     postby = event_details['event'].get('reportedBy', '')
-    LOG.info('received event %s for host %s from host %s : %s', str(event), str(host_id), str(postby),
+    LOG.info('received event %s for host %s from host %s : %s', str(event), host_id, str(postby),
              str(event_details))
     provider = get_provider()
     if event and event == 'host-down':
@@ -102,7 +104,7 @@ def update_host_status(host_id):
         LOG.warning('Invalid request')
         return jsonify(dict(success=False)), 422, CONTENT_TYPE_HEADER
     LOG.info('received %s event for host %s has been processed, result : %s',
-             event, str(host_id), str(masakari_notified))
+             event, host_id, str(masakari_notified))
     if masakari_notified:
         return jsonify(dict(success=True)), 200, CONTENT_TYPE_HEADER
     return jsonify(dict(success=False)), 403, CONTENT_TYPE_HEADER
@@ -123,6 +125,7 @@ def get_consul_status(aggregate_id=None):
     records = db_provider.get_latest_consul_status(aggregate_id)
     results = []
     staled = False
+    LOG.debug('latest consul status for aggregate %s : %s', str(aggregate_id), str(records))
     for record in records:
         if record is None:
             continue
@@ -135,7 +138,12 @@ def get_consul_status(aggregate_id=None):
         #  - 'last update'
 
         # get zone name by cluster id
+        LOG.debug('find host aggregate for record : %s', str(record))
         aggregate = ha_provider.get_aggregate_info_for_cluster(int(record.clusterId))
+        if not aggregate:
+            LOG.debug('no host aggregate found with id : %s', str(record.clusterId))
+            continue
+        LOG.debug('host aggregate found : %s', str(aggregate))
         aggregate_name = aggregate.name
         aggregate_zone = aggregate.availability_zone
         aggregate_host_ids = aggregate.hosts
@@ -271,6 +279,44 @@ def get_vmha_cluster_by_id(aggregate_id):
     ha_provider = provider_factory.ha_provider()
     results = ha_provider.get_active_clusters(id=aggregate_id)
     return jsonify(results)
+
+
+@app.route('/v1/consul/<int:aggregate_id>/agent/<uuid:host_uuid>/role/<role>', methods=['PUT'])
+@error_handler
+def set_consul_role(aggregate_id, host_uuid, role):
+    """
+    set the consul cluster role (master or slave) for a host in given cluster.
+    :param aggregate_id:  the id of ha cluster
+    :param host_id: the uuid of host in ha cluster
+    :param role: the consul agent role, 'server' or 'client'
+    :return:
+    """
+    host_id = str(host_uuid)
+    if role not in [constants.CONSUL_ROLE_SERVER, constants.CONSUL_ROLE_CLIENT]:
+        return jsonify(dict(error='Invalid role')), 400, CONTENT_TYPE_HEADER
+    ha_provider = provider_factory.ha_provider()
+    try:
+        ha_provider.set_consul_agent_role(aggregate_id, host_id, role)
+        return jsonify(dict(success=True)), 200, CONTENT_TYPE_HEADER
+    except exceptions.AggregateNotFound:
+        LOG.error('Aggregate %s was not found', str(aggregate_id))
+        return jsonify(dict(success=False)), 412, CONTENT_TYPE_HEADER
+    except exceptions.ClusterNotFound:
+        LOG.error('Cluster %s was not found', str(aggregate_id))
+        return jsonify(dict(success=False)), 412, CONTENT_TYPE_HEADER
+    except exceptions.HostNotFound:
+        LOG.error("Host %s was not found", host_id)
+        return jsonify(dict(success=False)), 412, CONTENT_TYPE_HEADER
+    except exceptions.HostNotInCluster:
+        LOG.error("Host %s is not in cluster %s", host_id, str(aggregate_id))
+        return jsonify(dict(success=False)), 412, CONTENT_TYPE_HEADER
+    except exceptions.RoleSettingsNotFound:
+        LOG.error("Host %s does not have required role settings", host_id)
+        return jsonify(dict(success=False)), 412, CONTENT_TYPE_HEADER
+    except Exception as e:
+        LOG.error(e)
+        return jsonify(dict(success=False, error=e.message)), 412, CONTENT_TYPE_HEADER
+
 
 def app_factory(global_config, **local_conf):
     return app

@@ -43,6 +43,12 @@ class HostPartOfCluster(Exception):
         super(HostPartOfCluster, self).__init__(message)
 
 
+class HostNotInCluster(Exception):
+    def __init__(self, host, cluster):
+        message = 'Hosts %s is not in cluster %s' % (host, str(cluster))
+        super(HostNotInCluster, self).__init__(message)
+
+
 class HostOffline(Exception):
     def __init__(self, host):
         message = 'Host %s is offline' % (host)
@@ -79,6 +85,17 @@ class RoleConvergeFailed(Exception):
         message = 'Host %s failed to converge' % host
         super(RoleConvergeFailed, self).__init__(message)
 
+
+class RoleNotExists(Exception):
+    def __init__(self, host, role):
+        message = 'Role %s does not exist on Host %s ' % (role, host)
+        super(RoleNotExists, self).__init__(message)
+
+
+class RoleSettingsNotFound(Exception):
+    def __init__(self, host, role, settings):
+        message = 'Settings for Role %s for Host %s does not exist : %s ' % (role, host, settings)
+        super(RoleSettingsNotFound, self).__init__(message)
 
 class UpdateConflict(Exception):
     def __init__(self, cluster, old_task, new_task):

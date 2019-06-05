@@ -14,6 +14,7 @@
 
 from shared.messages import message_types as message_types
 from shared.messages.message_base import MessageBase
+from shared.messages.cluster_event import ClusterEvent
 from shared.messages.rebalance_request import ConsulRoleRebalanceRequest
 from shared.messages.rebalance_response import ConsulRoleRebalanceResponse
 from shared.messages.consul_request import ConsulRefreshRequest
@@ -26,6 +27,7 @@ MSG_SCHEMAS = [
     # +------------------------+--------------------+---------------------+-----------------+
     # | message_type           | message_category   |  message_class      |   not_used      |
     # +------------------------+--------------------+---------------------+-----------------+
+    (message_types.MSG_CLUSTER_EVENT,            MSG_CATEGORY_REQUEST,   ClusterEvent,                 None),
     (message_types.MSG_ROLE_REBALANCE_REQUEST,   MSG_CATEGORY_REQUEST,   ConsulRoleRebalanceRequest,   None),
     (message_types.MSG_ROLE_REBALANCE_RESPONSE,  MSG_CATEGORY_RESPONSE,  ConsulRoleRebalanceResponse,  None),
     (message_types.MSG_CONSUL_REFRESH_REQUEST,   MSG_CATEGORY_REQUEST,   ConsulRefreshRequest,         None),

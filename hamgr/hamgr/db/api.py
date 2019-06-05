@@ -443,7 +443,8 @@ def get_processing_events_between_times(event_type,
                                         host_name,
                                         cluster_id,
                                         start_time,
-                                        end_time):
+                                        end_time,
+                                        unhandled_only=True):
     if not event_type or event_type not in constants.VALID_EVENT_TYPES:
         raise exceptions.ArgumentException('event_type is null or empty or invalid')
     if host_name is None:
@@ -457,6 +458,8 @@ def get_processing_events_between_times(event_type,
                 EventsProcessing.cluster_id == cluster_id)
             query = query.filter(EventsProcessing.event_time >= start_time,
                                  EventsProcessing.event_time <= end_time)
+            if unhandled_only:
+                query = query.filter(~EventsProcessing.notification_status.in_(constants.HANDLED_STATES))
             return query.all()
         except Exception:
             LOG.error('failed to query events for %s', str(host_name),
@@ -557,11 +560,12 @@ def add_consul_status(cluster_id,
 def add_consul_role_rebalance_record(event_name,
                                      event_uuid,
                                      before_rebalance,
-                                     rebalance_action):
+                                     rebalance_action,
+                                     request_uuid):
     with dbsession() as session:
         try:
             record = ConsulRoleRebalanceRecord()
-            record.uuid = str(uuid4())
+            record.uuid = str(request_uuid)
             record.event_name = event_name
             record.event_uuid = str(event_uuid)
             record.before_rebalance = before_rebalance

@@ -209,11 +209,26 @@ class consul_status(object):
             LOG.warning('failed to publish host id %s, error : %s', key, str(e))
 
     def get_consul_status_report(self):
-        _, kv_list = self.kv_fetch('', recurse=True)
+        leader = ''
+        peers = {}
+        members = {}
+        try:
+            leader = self.cc.status.leader()
+        except Exception as e:
+            LOG.warning('unable to get consul leader : %s', str(e))
+        try:
+            peers = self.cc.status.peers()
+        except Exception as e:
+            LOG.warning('unable to get consul peers : %s', str(e))
+        try:
+            members = self.cc.agent.members()
+        except Exception as e:
+            LOG.warning('unable to get consul members : %s', str(e))
+
         consul_report = {
-            'leader': self.cc.status.leader(),
-            'peers': self.cc.status.peers(),
-            'members': self.cc.agent.members(),
+            'leader': leader,
+            'peers': peers,
+            'members': members,
             'kv': '',  # don't take kv store to avoid too large string
             'joins': str(CONF.consul.join),
         }
@@ -714,7 +729,7 @@ class consul_status(object):
             k, v = self.cc.kv.get(key, recurse=recurse)
             return k, v
         except Exception as e:
-            LOG.warning('error when fetch value for key %s : %s', key, e)
+            LOG.warning('unable to fetch value for key %s : %s', key, e)
         return None, None
 
     def kv_update(self, key, value):
