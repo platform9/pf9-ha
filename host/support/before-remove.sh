@@ -12,19 +12,36 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+logfile=/opt/pf9/pf9-ha-rpm-before-remove.log
+touch "${logfile}"
+chown pf9:pf9group "${logfile}"
+
+echo "begin of before-remove.sh ($(date '+%FT%T'))" > "${logfile}"
 
 PIDFILE=/var/run/pf9-consul/pf9-consul.pid
-LOCKFILE=/var/lock/subsys/pf9-consul
-DATADIR=/opt/pf9/consul-data-dir
-HA_CONF=/opt/pf9/etc/pf9-ha/conf.d/pf9-ha.conf
-CONSUL_CONF=/opt/pf9/etc/pf9-consul/conf.d/*.json
 pid=`cat ${PIDFILE}`
+
+echo "kill -TERM ${pid}" >> "${logfile}"
 kill -TERM ${pid}
-rm -f ${PIDFILE}
-rm -rf ${DATADIR}
-rm -f ${HA_CONF}
-rm -f ${CONSUL_CONF}
-rm -f ${LOCKFILE}
-rm -f /var/consul-status/last_update
-rm -rf /opt/pf9/etc/pf9-consul*
-rm -rf /etc/logrotate.d/pf9-ha
+echo "exit code : $?" >> "${logfile}"
+echo "" >> "${logfile}"
+
+files=(
+    "${PIDFILE}"
+    "/var/lock/subsys/pf9-consul"
+    "/var/consul-status/last_update"
+    "/opt/pf9/consul-data-dir"
+    "/opt/pf9/etc/pf9-consul*"
+    "/opt/pf9/etc/pf9-ha/conf.d/pf9-ha.conf"
+    "/opt/pf9/etc/pf9-consul/conf.d/*.json"
+    "/etc/logrotate.d/pf9-ha"
+)
+
+for file in ${files[@]}; do
+    echo "rm -rf ${file}" >> "${logfile}"
+    rm -rf "${file}"
+    echo "exit code : $?" >> "${logfile}"
+    echo "" >> "${logfile}"
+done
+
+echo "end of before-remove.sh ($(date '+%FT%T'))" > "${logfile}"
