@@ -38,7 +38,8 @@ class RpcConsumer(RpcBase):
                  exchange_type,
                  queue_name,
                  routing_key='',
-                 virtual_host="/"):
+                 virtual_host="/",
+                 auto_delete_queue=True):
         self._host = host
         self._port = port
         self._user = user
@@ -48,6 +49,7 @@ class RpcConsumer(RpcBase):
         self._queue_name = queue_name
         self._virtual_host = virtual_host
         self._routing_key = routing_key
+        self._auto_delete_queue = auto_delete_queue
 
         super(RpcConsumer, self).__init__(host,
                                           port,
@@ -88,7 +90,7 @@ class RpcConsumer(RpcBase):
 
     def _setup_queue(self, queue_name):
         LOG.info('declaring queue %s', queue_name)
-        self._channel.queue_declare(self._on_queue_declare_ok, queue_name)
+        self._channel.queue_declare(self._on_queue_declare_ok, queue_name, auto_delete=self._auto_delete_queue)
 
     def _on_queue_declare_ok(self, method_frame):
         LOG.info('queue declared')

@@ -149,10 +149,14 @@ class report_object(dict):
 
     @classmethod
     def from_str(cls, string):
-        obj = json.loads(string)
-        e_obj = obj['event']
-        c_obj = obj['consul']
-        return cls(e_obj, c_obj)
+        try:
+            obj = json.loads(string)
+            e_obj = obj['event']
+            c_obj = obj['consul']
+            return cls(e_obj, c_obj)
+        except:
+            LOG.exception('failed to parse json string : %s ', str(string))
+        return None
 
 
 class consul_status(object):
@@ -166,12 +170,29 @@ class consul_status(object):
     changed_clusters = []
     leader = False
 
-    def __init__(self, host_id):
+    def __init__(self, host_id, hosts_ips):
         self.cc = consul.Consul()
         self.host_id = host_id
+        self.hosts_ips = []
+        if hosts_ips and len(hosts_ips) > 0:
+            self.hosts_ips = hosts_ips
         reap_interval = CONF.consul.key_reap_interval
         self.reap_interval = timedelta(minutes=reap_interval)
         self.publish_hostid()
+
+    def _get_ip_id_maps(self):
+        id_to_ip = {}
+        ip_to_id = {}
+        for hip in self.hosts_ips:
+            key = '%s:%s' % (hip, '8301')
+            try:
+                hid = self.kv_fetch(key)
+                id_to_ip[hid] = hip
+                ip_to_id[hip] = hid
+            except Exception as e:
+                LOG.warn('fail to get value from kv store for key %s : %s', key, str(e))
+        LOG.info('hosts_ips: %s , id_to_ip: %s , ip_to_id: %s', str(self.hosts_ips), str(id_to_ip), str(ip_to_id))
+        return id_to_ip, ip_to_id
 
     def publish_hostid(self):
         """This function updates the KV store with the
@@ -279,8 +300,14 @@ class consul_status(object):
                 if addr in current_state and current_state[addr].event['eventType'] \
                         == change.event['eventType']:
                     if change.event['reported']:
-                        LOG.info('ignore detected change of event %s for host %s that has been reported, details : %s',
-                                 str(change.event['eventType']), hostname,  str(change))
+                        staled = False
+                        if change.event['reportedAt']:
+                            reported_at = datetime.strptime(change.event['reportedAt'], "%Y-%m-%d %H:%M:%S")
+                            staled = True if datetime.utcnow() - reported_at > self.reap_interval else False
+
+                        LOG.info('ignore detected change of event %s for host %s that has been reported, details : %s'
+                                 ' , is report staled ? %s',
+                                 str(change.event['eventType']), hostname,  str(change), str(staled))
                         continue
                     reported_cls = change
                     retval = change
@@ -457,6 +484,16 @@ class consul_status(object):
                      'from kv store : %s , from agent : %s',
                      str(member_ids_in_kvstore), str(member_ids_in_consul))
 
+        # also check all cluster nodes are registered
+        id_to_ip, ip_to_id = self._get_ip_id_maps()
+        for hip in self.hosts_ips:
+            hid = ip_to_id.get(hip, None)
+            if not hid:
+                LOG.warn('node with ip %s has not registered ', str(hip))
+            else:
+                if hid not in member_ids_in_consul:
+                    LOG.warn('node with ip %s id %s not exist in consul cluster', str(hip), str(hid))
+
         LOG.debug("cache is refreshed by using reports from kv store : %s ",
                   str(self.changed_clusters))
         # If the leader node goes down, then host down event is not
@@ -513,6 +550,7 @@ class consul_status(object):
                 if cls_obj not in self.changed_clusters:
                     # check whether this down node has been reported before
                     reported_before = False
+                    reported_but_staled = False
                     hostid = data.event['hostName']
                     _, existing_data = self.kv_fetch(hostid)
                     LOG.info('host % status is down, check if report exist in kv store',
@@ -522,14 +560,18 @@ class consul_status(object):
                         existing_cls = report_object.from_str(existing_data)
                         if existing_cls.event['reported']:
                             reported_before = True
+                            reported_time = datetime.strptime(existing_cls.event['reportedAt'],
+                                                              "%Y-%m-%d %H:%M:%S")
+                            if datetime.utcnow() - reported_time > self.reap_interval:
+                                reported_but_staled = True
                             LOG.info('host % status is down, and report exist in kv store.'
-                                     ' report : %s',
-                                     hostid, str(existing_data))
+                                     ' report : %s , reported time : %s , is it staled ? %s',
+                                     hostid, str(existing_data), str(reported_time), str(reported_but_staled))
                     else:
                         LOG.info('host % status is down, no report exist in kv store',
                                  hostid)
                     # when host down, and not reported
-                    if not reported_before:
+                    if not reported_before or reported_but_staled:
                         self.changed_clusters.append(cls_obj)
 
                 else:
