@@ -482,7 +482,7 @@ class NovaProvider(Provider):
                             self._add_ha_slave_if_not_exist(cluster_name, nova_delta_ids, 'server', common_ids)
                             # trigger a consul role rebalance request
                             time.sleep(30)
-                            self._rebalance_consul_roles_if_needed(constants.EVENT_HOST_ADDED)
+                            self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_ADDED)
 
                 masakari_hosts=[]
                 # remove host found in masakari segment but not in nova aggregate
@@ -516,7 +516,7 @@ class NovaProvider(Provider):
                             LOG.info('try to rebalance consul roles after removed hosts : %s',
                                      str(masakari_delta_ids))
                             time.sleep(30)
-                            self._rebalance_consul_roles_if_needed(constants.EVENT_HOST_REMOVED)
+                            self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_REMOVED)
 
                 # when cluster is enabled, make sure pf9-ha-slave role is on all active hosts
                 # ----------------------------------------------------------
@@ -543,7 +543,7 @@ class NovaProvider(Provider):
 
                 LOG.debug('cluster %s is enabled, now checking slave role ', str(cluster_name))
                 aggregate_id = current_cluster.name
-                segment_name = str(current_cluster.id)
+                segment_name = str(cluster_name)
                 aggregate = self._get_aggregate(nova_client, aggregate_id)
                 aggregate_host_ids = set(aggregate.hosts)
                 new_active_host_ids = set()
@@ -648,7 +648,7 @@ class NovaProvider(Provider):
                                                         masakari_host_ids)
                         # trigger consul role rebalance request
                         time.sleep(30)
-                        self._rebalance_consul_roles_if_needed(constants.EVENT_HOST_ADDED)
+                        self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_ADDED)
 
                     if len(new_inactive_host_ids) > 0:
                         # need to wait for them become active so can put pf9-ha-slave role on them
@@ -663,7 +663,7 @@ class NovaProvider(Provider):
                         self._remove_ha_slave_if_exist(removed_host_ids)
                         LOG.info('try to rebalance consul roles after removed hosts : %s', str(removed_host_ids))
                         time.sleep(30)
-                        self._rebalance_consul_roles_if_needed(constants.EVENT_HOST_REMOVED)
+                        self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_REMOVED)
 
                     if len(existing_inactive_host_ids) > 0:
                         LOG.warn('existing inactive hosts in segment %s : %s , wait for hosts to become active',
@@ -691,15 +691,15 @@ class NovaProvider(Provider):
                 self.aggregate_task_running = False
         LOG.debug('host aggregate change processing task has finished at %s', str(datetime.utcnow()))
 
-    def _rebalance_consul_roles_if_needed(self, event_type, event_uuid=None):
+    def _rebalance_consul_roles_if_needed(self, cluster_name, event_type, event_uuid=None):
         if event_type not in constants.HOST_EVENTS:
             LOG.warn('ignore invalided rebalance consul role for requested event type %s', event_type)
             return
         controller = get_rebalance_controller(self._config)
-        request = ConsulRefreshRequest('refresh')
+        request = ConsulRefreshRequest(cluster=cluster_name, cmd='refresh')
         status = controller.ask_for_consul_cluster_status(request)
         LOG.info('current consul report: %s', str(status))
-        if status and status['status'] == constants.REBALANCE_STATE_FINISHED:
+        if status and status['status'] == constants.RPC_TASK_STATE_FINISHED:
             report = json.loads(status['report'])
             LOG.debug('consul status refresh report : %s', str(report))
 
@@ -789,7 +789,7 @@ class NovaProvider(Provider):
             LOG.warn('call to %s was unsuccessful, result : %s', req_url, str(result))
         if 'pf9-ha-slave' not in data['roles']:
             error = 'host %s does not have pf9-ha-slave role' % target_host_id
-            return {'status': constants.REBALANCE_STATE_ABORTED, 'error': error}
+            return {'status': constants.RPC_TASK_STATE_ABORTED, 'error': error}
 
         data = self._customize_pf9_ha_slave_config(cluster_name, join_ips, host_ip, host_ip)
         # step 1 : modify 'bootstrap_expect' base on the new role
@@ -808,7 +808,7 @@ class NovaProvider(Provider):
                      target_host_id,
                      str(data),
                      str(result))
-            return {'status': constants.REBALANCE_STATE_ABORTED, 'error': 'failed to update resmgr'}
+            return {'status': constants.RPC_TASK_STATE_ABORTED, 'error': 'failed to update resmgr'}
         else:
             # step 2 : notify pf9-ha-slave with RPC message contains the rebalance request
             LOG.info('sending consul role rebalance request %s ', str(rebalance_request))
@@ -818,7 +818,7 @@ class NovaProvider(Provider):
             return {'status': resp['status'], 'error': ''}
         else:
             msg = 'empty consul role rebalance response for request : %s' % str(rebalance_request)
-            return {'status': constants.REBALABCE_STATE_ERROR, 'error': msg}
+            return {'status': constants.RPC_TASK_STATE_ERROR, 'error': msg}
 
     def _add_ha_slave_if_not_exist(self, cluster_name, host_ids_for_adding, consul_role, peer_host_ids):
         if consul_role not in ['server', 'agent']:
@@ -1894,7 +1894,7 @@ class NovaProvider(Provider):
                         db_api.update_consul_role_rebalance(old_req.uuid,
                                                             None,
                                                             None,
-                                                            constants.REBALANCE_STATE_ABORTED,
+                                                            constants.RPC_TASK_STATE_ABORTED,
                                                             error)
                 # check nova again to make sure the candidate host is still active
                 if not self._is_nova_service_active(host_id, self._get_nova_client()):
@@ -1964,12 +1964,12 @@ class NovaProvider(Provider):
                     db_api.update_consul_role_rebalance(req.uuid,
                                                         None,
                                                         None,
-                                                        constants.REBALANCE_STATE_ABORTED,
+                                                        constants.RPC_TASK_STATE_ABORTED,
                                                         error)
                     continue
                 # then check by status, query the same request again to get most recent status (in case it is canceled )
                 req = db_api.get_consul_role_balance_record_by_uuid(req.uuid)
-                if req is None or req.action_status == constants.REBALANCE_STATE_ABORTED:
+                if req is None or req.action_status == constants.RPC_TASK_STATE_ABORTED:
                     LOG.warn('ignore consul role rebalance request %s, as it was already in state %s',
                              req.uuid,
                              req.action_status)
@@ -1989,7 +1989,7 @@ class NovaProvider(Provider):
                     db_api.update_consul_role_rebalance(req.uuid,
                                                         None,
                                                         None,
-                                                        constants.REBALANCE_STATE_ABORTED,
+                                                        constants.RPC_TASK_STATE_ABORTED,
                                                         error)
                     continue
 
@@ -2002,7 +2002,7 @@ class NovaProvider(Provider):
                         db_api.update_consul_role_rebalance(req.uuid,
                                                             None,
                                                             None,
-                                                            constants.REBALANCE_STATE_ABORTED,
+                                                            constants.RPC_TASK_STATE_ABORTED,
                                                             error)
                         continue
 
@@ -2014,7 +2014,7 @@ class NovaProvider(Provider):
                         db_api.update_consul_role_rebalance(req.uuid,
                                                             None,
                                                             None,
-                                                            constants.REBALANCE_STATE_ABORTED,
+                                                            constants.RPC_TASK_STATE_ABORTED,
                                                             error)
                         continue
 
@@ -2040,7 +2040,7 @@ class NovaProvider(Provider):
                         db_api.update_consul_role_rebalance(req.uuid,
                                                             None,
                                                             None,
-                                                            constants.REBALANCE_STATE_ABORTED,
+                                                            constants.RPC_TASK_STATE_ABORTED,
                                                             error)
                         continue
 
@@ -2053,7 +2053,7 @@ class NovaProvider(Provider):
                         db_api.update_consul_role_rebalance(req.uuid,
                                                             None,
                                                             None,
-                                                            constants.REBALANCE_STATE_ABORTED,
+                                                            constants.RPC_TASK_STATE_ABORTED,
                                                             error)
                         continue
 
@@ -2067,7 +2067,7 @@ class NovaProvider(Provider):
                         db_api.update_consul_role_rebalance(req.uuid,
                                                             None,
                                                             None,
-                                                            constants.REBALANCE_STATE_ABORTED,
+                                                            constants.RPC_TASK_STATE_ABORTED,
                                                             error)
                         continue
 
@@ -2077,13 +2077,10 @@ class NovaProvider(Provider):
 
                 # for all valid events, start to process the rebalance request
                 # set db status to running
-                rebalance_request = ConsulRoleRebalanceRequest(host_id=target_host_id,
-                                                               old_role=target_old_role,
-                                                               new_role=target_new_role)
                 db_api.update_consul_role_rebalance(req.uuid,
                                                     None,
                                                     None,
-                                                    constants.REBALABCE_STATE_RUNNING,
+                                                    constants.RPC_TASK_STATE_RUNNING,
                                                     None)
 
                 consul_status_before = json.loads(req.before_rebalance)
@@ -2095,13 +2092,17 @@ class NovaProvider(Provider):
                     db_api.update_consul_role_rebalance(req.uuid,
                                                         None,
                                                         None,
-                                                        constants.REBALANCE_STATE_ABORTED,
+                                                        constants.RPC_TASK_STATE_ABORTED,
                                                         error)
                     continue
 
                 join_ips = ','.join(consul_addresses)
                 cluster_ip = target_consuls[0]['Addr']
                 cluster_name = target_consuls[0]['Tags']['dc']
+                rebalance_request = ConsulRoleRebalanceRequest(cluster=cluster_name,
+                                                               host_id=target_host_id,
+                                                               old_role=target_old_role,
+                                                               new_role=target_new_role)
 
                 # data = self._customize_pf9_ha_slave_config(join_ips, cluster_ip, cluster_ip)
                 LOG.info('run consul role rebalance request with ip %s to join %s : %s',
@@ -2120,11 +2121,11 @@ class NovaProvider(Provider):
                 # if the error code is not none , means something happened (most cases are the target host is down
                 # before the above process happened, so get empty response), let's just create new rebalance
                 # request
-                if status_code == constants.REBALABCE_STATE_ERROR:
+                if status_code == constants.RPC_TASK_STATE_ERROR:
                     LOG.info('rebalance request %s failed for event %s (%s), re-try rebalance for this event if needed'
                              '. code : %s, message : %s',
                              str(req.uuid), event_uuid, event_type, status_code, status_msg)
-                    self._rebalance_consul_roles_if_needed(req.event_name, event_uuid=event_uuid)
+                    self._rebalance_consul_roles_if_needed(cluster_name, req.event_name, event_uuid=event_uuid)
         except Exception as ex:
             error = 'exception : %s' % str(ex)
             LOG.exception('unhandled exception in process_consul_role_rebalance_requests, %s', error)
@@ -2132,7 +2133,7 @@ class NovaProvider(Provider):
                 db_api.update_consul_role_rebalance(req_id,
                                                     None,
                                                     None,
-                                                    constants.REBALANCE_STATE_ABORTED,
+                                                    constants.RPC_TASK_STATE_ABORTED,
                                                     error)
         finally:
             # release thread lock
@@ -2411,6 +2412,22 @@ class NovaProvider(Provider):
                     common.append(comm)
         return common
 
+    def refresh_consul_status(self):
+        report = {}
+        controller = get_rebalance_controller(self._config)
+        # send the cmd to all active clusters
+        active_clusters = db_api.get_all_active_clusters()
+        for cluster in active_clusters:
+            cluster_name = cluster.name
+            LOG.info('refresh consul status for cluster %s', str(cluster_name))
+            request = ConsulRefreshRequest(cluster=cluster_name, cmd='refresh')
+            status = controller.ask_for_consul_cluster_status(request)
+            LOG.info('refreshed consul report for cluster %s: %s', str(cluster_name), str(status))
+            if status and status['status'] == constants.RPC_TASK_STATE_FINISHED:
+                report[cluster_name] = json.loads(status['report'])
+            else:
+                report[cluster_name] = {}
+        return report
 
 def get_provider(config):
     db_api.init(config)

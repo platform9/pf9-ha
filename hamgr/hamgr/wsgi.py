@@ -108,6 +108,12 @@ def update_host_status(host_id):
 
 
 @app.route('/v1/consul/', methods=['GET'])
+@error_handler
+def get_all_consul_status():
+    ha_provider = provider_factory.ha_provider()
+    status = ha_provider.refresh_consul_status()
+    return jsonify(status)
+
 @app.route('/v1/consul/<int:aggregate_id>', methods=['GET'])
 @error_handler
 def get_consul_status(aggregate_id=None):
