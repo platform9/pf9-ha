@@ -17,12 +17,14 @@ from shared.messages import message_types as message_types
 
 
 class ConsulRefreshResponse(MessageBase):
-    def __init__(self, request_id, status, report, message, *args, **kwargs):
+    def __init__(self, cluster, request_id, status, report, message, *args, **kwargs):
+        self._cluster = cluster
         self._req_id = request_id
         self._status = status
         self._report = report
         self._message = message
         super(ConsulRefreshResponse, self).__init__(type=message_types.MSG_CONSUL_REFRESH_RESPONSE,
+                                                    cluster=self._cluster,
                                                     req_id=self._req_id,
                                                     status=self._status,
                                                     report = self._report,
@@ -41,3 +43,6 @@ class ConsulRefreshResponse(MessageBase):
 
     def report(self):
         return self._report
+
+    def cluster(self):
+        return self._cluster

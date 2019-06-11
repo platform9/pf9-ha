@@ -52,7 +52,9 @@ class RpcBase(object):
     def _open_connection(self):
         LOG.info('connecting to amqp://%s:%s@%s:%s/', self._user, self._password, self._host, str(self._port))
         return pika.SelectConnection(self._connection_parameters,
-                                     self._on_connection_open,
+                                     on_open_callback=self._on_connection_open,
+                                     on_open_error_callback=self._on_connection_open_error,
+                                     on_close_callback=self._on_connection_closed,
                                      stop_ioloop_on_close=False)
 
     def _close_connection(self):
@@ -60,21 +62,24 @@ class RpcBase(object):
         self._closing = True
         self._connection.close()
 
-    def _add_on_connection_close_callback(self):
-        LOG.info('adding connection close callback')
-        self._connection.add_on_close_callback(self._on_connection_closed)
+    def _on_connection_open_error(self, _unused_connection, err):
+        LOG.error('error when open connection, %s', str(err))
+        LOG.info('reconnect when unable to open connection')
+        self._reconnect()
 
     def _on_connection_closed(self, connection, reply_code, reply_text):
+        LOG.info('connection was closed')
         self._channel = None
         if self._closing:
+            LOG.info('stop ioloop since connection was closed.')
             self._connection.ioloop.stop()
         else:
-            LOG.warning('connection closed, reopening in 5 seconds: (%s) %s', reply_code, reply_text)
-            self._connection.add_timeout(5, self._reconnect)
+            LOG.info('connection already closed, not stop connection ioloop')
+            LOG.warning('connection was closed, will reopen. error status : (%s) %s', reply_code, reply_text)
+            self._reconnect()
 
     def _on_connection_open(self, unused_connection):
         LOG.info('connection opened')
-        self._add_on_connection_close_callback()
         self._open_channel()
 
     def _open_channel(self):
@@ -87,10 +92,14 @@ class RpcBase(object):
             self._channel.close()
 
     def _reconnect(self):
+        LOG.info('try to reconnect')
         self._connection.ioloop.stop()
         if not self._closing:
+            LOG.info('reconnect and start connection ioloop')
             self._connection = self._open_connection()
             self._connection.ioloop.start()
+        else:
+            LOG.info('not reconnect as connection is still in closing')
 
     def _add_on_channel_close_callback(self):
         LOG.info('adding channel close callback')
@@ -99,7 +108,10 @@ class RpcBase(object):
     def _on_channel_closed(self, channel, reply_code, reply_text):
         LOG.warning('channel was closed: (%s) %s', reply_code, reply_text)
         if not self._closing:
+            LOG.info('close connection since channel was closed')
             self._connection.close()
+        else:
+            LOG.info('connection already closed when channel was closed ? %s', str(self._connection.is_closed))
 
     def _on_channel_open(self, channel):
         LOG.info('channel opened')
