@@ -35,6 +35,7 @@ g_consul_port = '8301'
 g_kv_key_format = '%s:%s' % (g_base_ip_format, g_consul_port)
 g_report_interval_seconds = 1
 g_host_id = None
+g_join_ips = ''
 
 
 def g_init():
@@ -47,6 +48,7 @@ def g_init():
     global g_kv_key_format
     global g_report_interval_seconds
     global g_host_id
+    global g_join_ips
 
     g_host_ids = []
     g_consul_cache = []
@@ -65,6 +67,7 @@ def g_init():
             'Key': kv_key,
             'Value': xid
         })
+        g_join_ips = g_join_ips + ' ' + g_base_ip_format % str(i-1)
     g_host_id = g_host_ids[0]
 
 
@@ -225,7 +228,7 @@ class ConsulStatusTest(unittest.TestCase):
         import importlib
         my_module = importlib.import_module('ha.utils.consul_helper')
         my_class = getattr(my_module, 'consul_status')
-        self._consul_helper = my_class(g_host_id)
+        self._consul_helper = my_class(g_host_id, g_join_ips)
         self._consul_helper.leader = True
 
     def tearDown(self):
