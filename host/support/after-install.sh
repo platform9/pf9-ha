@@ -12,16 +12,37 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+logfile=/var/log/pf9/pf9-ha-rpm-after-install.log
+touch "${logfile}"
+echo "" > "${logfile}"
+chown pf9:pf9group "${logfile}"
 
-mkdir -p /opt/pf9/consul-data-dir
-mkdir -p /var/run/pf9-consul/
-mkdir -p /var/run/pf9-ha/
-mkdir -p /var/consul-status/
-chown -R pf9:pf9group /var/run/pf9-consul
-chown -R pf9:pf9group /var/run/pf9-ha
-chown -R pf9:pf9group /opt/pf9/consul-data-dir
-chown -R pf9:pf9group /opt/pf9/pf9-ha
-chown -R pf9:pf9group /opt/pf9/pf9-ha-slave
-chown -R pf9:pf9group /opt/pf9/etc/pf9-consul
-chown -R pf9:pf9group /opt/pf9/etc/pf9-ha
-chown -R pf9:pf9group /var/consul-status
+echo "begin of after-install.sh ($(date '+%FT%T'))" >> "${logfile}"
+echo "--------------------------" >> "${logfile}"
+folders=(
+    "/opt/pf9/pf9-ha"
+    "/opt/pf9/pf9-ha-slave"
+    "/opt/pf9/consul-data-dir"
+    "/opt/pf9/etc/pf9-consul"
+    "/opt/pf9/etc/pf9-ha"
+    "/var/run/pf9-consul/"
+    "/var/run/pf9-ha/"
+    "/var/consul-status/"
+)
+
+for folder in ${folders[@]}; do
+    echo "mkdir ${folder}" >> "${logfile}"
+    mkdir -p "${folder}"
+    echo "exit code : $?" >> "${logfile}"
+    echo "" >> "${logfile}"
+    stat "${folder}" >> "${logfile}"
+    echo "" >> "${logfile}"
+    echo "chown -R pf9:pf9group ${folder}" >> "${logfile}"
+    chown -R pf9:pf9group "${folder}"
+    echo "exit code : $?" >> "${logfile}"
+    echo "" >> "${logfile}"
+    stat "${folder}" >> "${logfile}"
+    echo "" >> "${logfile}"
+done
+echo "--------------------------" >> "${logfile}"
+echo "end of after-install.sh ($(date '+%FT%T'))" >> "${logfile}"
