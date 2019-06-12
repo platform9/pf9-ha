@@ -76,6 +76,13 @@ install -d -m 755 ${buildroot}/opt/pf9/pf9-ha-slave
 install -d -m 755 ${buildroot}/var/consul-status
 install -d -m 755 ${buildroot}/opt/pf9/support
 
+# need to explicitly set owner and user group
+chown -R pf9:pf9group ${buildroot}/opt/pf9/etc/pf9-consul/conf.d
+chown -R pf9:pf9group ${buildroot}/opt/pf9/etc/pf9-ha/conf.d
+chown -R pf9:pf9group ${buildroot}/opt/pf9/pf9-ha
+chown -R pf9:pf9group ${buildroot}/opt/pf9/pf9-ha-slave
+chown -R pf9:pf9group ${buildroot}/var/consul-status
+
 # Copy init files specific to OS
 if [ "x$systemtype" = "xrpm" ]; then
 
