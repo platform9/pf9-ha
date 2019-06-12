@@ -23,6 +23,8 @@ folders=(
     "/opt/pf9/pf9-ha"
     "/opt/pf9/pf9-ha-slave"
     "/opt/pf9/consul-data-dir"
+    "/opt/pf9/etc/pf9-consul"
+    "/opt/pf9/etc/pf9-ha"
     "/var/run/pf9-consul/"
     "/var/run/pf9-ha/"
     "/var/consul-status/"
