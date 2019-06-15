@@ -167,7 +167,7 @@ def generate_consul_conf():
             with open(PF9_CONSUL_CONF_DIR + 'conf.d/client.json', 'w') as fptr:
                 json.dump(agent_conf, fptr)
         else:
-            LOG.info('generate consul config as server , as bootstrap_expect is %', str(CONF.consul.bootstrap_expect))
+            LOG.info('generate consul config as server , as bootstrap_expect is %s', str(CONF.consul.bootstrap_expect))
             # Start consul with server conf
             with open(PF9_CONSUL_CONF_DIR + 'server.json.template') as fptr:
                 server_conf = json.load(fptr)
