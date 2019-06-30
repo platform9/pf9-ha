@@ -74,6 +74,10 @@
     "amqp_routingkey_receiving": {
       "path": "config/ha_slave_conf/consul_role_rebalance",
       "default": "sending"
+    },
+    "level": {
+      "path": "config/ha_slave_conf/log",
+      "default": "INFO"
     }
   },
   "rabbit_permissions": {
@@ -104,6 +108,7 @@
           "consul": {
             "report_interval": "180"
           },
+          "log":{},
           "node": {},
           "consul_role_rebalance": {
             "amqp_host": "localhost",

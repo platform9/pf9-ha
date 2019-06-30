@@ -236,6 +236,35 @@ class NovaProvider(Provider):
                     LOG.debug('host %s in event does not exist in nova %s',
                               host_name, str(nova_aggregate.hosts))
                     continue
+
+                # when same event type for the same host was reported
+                # within short time, means they are duplicated, this
+                # could happen when consul cluster switch leader, already
+                # threshold them when receive them, but if this process happens
+                # within very short time, because of this hamgr tries to check
+                # whether similar ones exist will fail, as db has not flushed.
+                # so we do similar check to skipp duplicated report.
+                end_time = datetime.utcnow()
+                start_time = end_time - timedelta(
+                        seconds=self._event_report_threshold_seconds)
+                existing_events = db_api.get_processing_events_between_times(
+                        event_type,
+                        host_name,
+                        event.cluster_id,
+                        start_time,
+                        end_time)
+                if existing_events and len(existing_events) > 0:
+                    ids = [x['event_uuid'] for x in existing_events]
+                    error = 'similar events happened within %s seconds : %s' % (
+                        str(self._event_report_threshold_seconds),
+                        str(ids))
+                    db_api.update_processing_event_with_notification(
+                            event_uuid, None, None,
+                            constants.STATE_ABORTED,
+                            error
+                    )
+                    LOG.warn('event %s is aborted, as %s', str(event_uuid), str(error))
+                    continue
                 # if the event happened long time ago, just abort
                 if datetime.utcnow() - event_time > time_out:
                     if event.notification_uuid and event.notification_status != constants.STATE_FINISHED:
@@ -358,8 +387,8 @@ class NovaProvider(Provider):
                 return notification_obj
         except Exception:
             LOG.error('failed to create masakari notification, error', exc_info=True)
-        LOG.warn('no valid masakari notification was created for event %s for host %s: %s', str(event.event_type),
-                 str(event.host_name), str(notification_obj))
+        LOG.warn('no valid masakari notification was created for event %s %s for host %s: %s', str(event.event_type),
+                 str(event.event_uuid), str(event.host_name), str(notification_obj))
         return None
 
     def _tracking_masakari_notification(self, event):
@@ -369,8 +398,8 @@ class NovaProvider(Provider):
         notification_uuid = event.notification_uuid
         state = masakari.get_notification_status(self._token, notification_uuid)
         # save the state to event
-        LOG.info('updating event %s with masakari notification %s status : %s',
-                 str(event.event_uuid), str(notification_uuid), str(state))
+        LOG.info('updating event %s %s with masakari notification %s status : %s',
+                 str(event.event_type), str(event.event_uuid), str(notification_uuid), str(state))
         db_api.update_processing_event_with_notification(event.event_uuid,
                                                          event.notification_uuid,
                                                          event.notification_created,
@@ -1827,7 +1856,7 @@ class NovaProvider(Provider):
                         LOG.info('change event record is created for host %s in cluster '
                                  '%s', host_name, target_cluster_id)
                     else:
-                        LOG.warn('ingnore reporing event %s for host %s, as it is already reported within %s seconds',
+                        LOG.warn('ignore reporting event %s for host %s, as it is already reported within %s seconds',
                                  event_type, host_name, self._event_report_threshold_seconds)
 
                     # similarly, suppress events that has been recorded within given
