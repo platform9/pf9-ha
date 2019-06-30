@@ -371,8 +371,8 @@ def get_change_events_between_times(cluster_id,
                 ChangeEvents.events.contains(host_name),
                 ChangeEvents.events.contains(etype))
             query = query.filter(
-                ChangeEvents.timestamp - start_time >= 0,
-                ChangeEvents.timestamp - end_time <= 0
+                ChangeEvents.timestamp >= start_time,
+                ChangeEvents.timestamp <= end_time
             )
             return query.all()
         except SQLAlchemyError as se:
@@ -454,8 +454,8 @@ def get_processing_events_between_times(event_type,
                 EventsProcessing.event_type == event_type,
                 EventsProcessing.host_name == host_name,
                 EventsProcessing.cluster_id == cluster_id)
-            query = query.filter(EventsProcessing.event_time - start_time >= 0,
-                                 EventsProcessing.event_time - end_time <= 0)
+            query = query.filter(EventsProcessing.event_time >= start_time,
+                                 EventsProcessing.event_time <= end_time)
             return query.all()
         except Exception:
             LOG.error('failed to query events for %s', str(host_name),
