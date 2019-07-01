@@ -108,6 +108,12 @@ def update_host_status(host_id):
 
 
 @app.route('/v1/consul/', methods=['GET'])
+@error_handler
+def get_all_consul_status():
+    ha_provider = provider_factory.ha_provider()
+    status = ha_provider.refresh_consul_status()
+    return jsonify(status)
+
 @app.route('/v1/consul/<int:aggregate_id>', methods=['GET'])
 @error_handler
 def get_consul_status(aggregate_id=None):
@@ -169,6 +175,29 @@ def get_consul_status(aggregate_id=None):
             }
             results.append(result)
     return jsonify(results)
+
+
+@app.route('/v1/config/<int:aggregate_id>', methods=['GET'])
+@error_handler
+def get_hosts_configs(aggregate_id):
+    """
+    return the reported hosts configs from resmgr,
+    :param aggregate_id: the host aggregate name
+    :return:
+    """
+    try:
+        ha_provider = provider_factory.ha_provider()
+        # scenario 1 - called before /enable API is called
+        # to determine whether there is shared nfs server
+        # use nova to get list of hosts for given aggregate id
+        # scenario 2 - called after the /enable API is called
+        # use masakari to get list of host
+        config = ha_provider.get_common_hosts_configs(aggregate_id)
+        return jsonify(config)
+    except exceptions.NoCommonSharedNfsException as e1:
+        return jsonify(dict(success=False, error=e1.message)), 500, CONTENT_TYPE_HEADER
+    except Exception as e2:
+        return jsonify(dict(success=False, error=e2.message)), 500, CONTENT_TYPE_HEADER
 
 
 def app_factory(global_config, **local_conf):

@@ -40,10 +40,10 @@ HA_STATE_ALL = [HA_STATE_REQUEST_ENABLE, HA_STATE_ENABLING,
                 HA_STATE_ENABLED, HA_STATE_REQUEST_DISABLE,
                 HA_STATE_DISABLING, HA_STATE_DISABLED, HA_STATE_ERROR]
 
-REBALABCE_STATE_RUNNING = 'running'
-REBALABCE_STATE_ERROR = 'error'
-REBALANCE_STATE_ABORTED = 'aborted'
-REBALANCE_STATE_FINISHED = 'finished'
+RPC_TASK_STATE_RUNNING = 'running'
+RPC_TASK_STATE_ERROR = 'error'
+RPC_TASK_STATE_ABORTED = 'aborted'
+RPC_TASK_STATE_FINISHED = 'finished'
 
 # Blank i.e. NULL task state means that the task was completed. Hence the
 # valid task states are only creating, deleting, updating and error-removing.

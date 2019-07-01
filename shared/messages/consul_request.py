@@ -21,12 +21,17 @@ LOG = logging.getLogger(__name__)
 
 
 class ConsulRefreshRequest(MessageBase):
-    def __init__(self, cmd, *args, **kwargs):
+    def __init__(self, cluster, cmd, *args, **kwargs):
+        self._cluster = cluster
         self._command = cmd
         super(ConsulRefreshRequest, self).__init__(type=message_types.MSG_CONSUL_REFRESH_REQUEST,
+                                                   cluster=self._cluster,
                                                    command=cmd,
                                                    *args,
                                                    **kwargs)
 
     def command(self):
         return self._command
+
+    def cluster(self):
+        return self._cluster

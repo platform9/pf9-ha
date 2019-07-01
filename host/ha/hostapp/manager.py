@@ -112,6 +112,10 @@ PF9_CONSUL_CONF_DIR = '/opt/pf9/etc/pf9-consul/'
 STOPPING = False
 REBALANCE_IN_PROGRESS = False
 
+# global variables
+global_hostid = None
+global_join_ips = None
+global_rebalance_mgr = None
 
 def add_consul_secure_settings(conf):
     conf['encrypt'] = CONF.consul.encrypt
@@ -167,7 +171,7 @@ def generate_consul_conf():
             with open(PF9_CONSUL_CONF_DIR + 'conf.d/client.json', 'w') as fptr:
                 json.dump(agent_conf, fptr)
         else:
-            LOG.info('generate consul config as server , as bootstrap_expect is %', str(CONF.consul.bootstrap_expect))
+            LOG.info('generate consul config as server , as bootstrap_expect is %s', str(CONF.consul.bootstrap_expect))
             # Start consul with server conf
             with open(PF9_CONSUL_CONF_DIR + 'server.json.template') as fptr:
                 server_conf = json.load(fptr)
@@ -238,7 +242,7 @@ def start_consul_service():
     return retval
 
 
-def switch_to_new_consul_role(rebalance_mgr, request, current_host_id, join_ips):
+def switch_to_new_consul_role(rebalance_mgr, request, cluster, current_host_id, join_ips):
     LOG.debug('start to process consul role rebalance request : %s', str(request))
     req_id = request['id']
     current_role = request['old_role']
@@ -261,9 +265,10 @@ def switch_to_new_consul_role(rebalance_mgr, request, current_host_id, join_ips)
 
         if no_need_to_change:
             LOG.info('host %s in consul cluster is already in expected role %s', current_host_id, target_role)
-            resp = ConsulRoleRebalanceResponse(req_id,
-                                               current_host_id,
-                                               status=constants.REBALANCE_STATE_FINISHED,
+            resp = ConsulRoleRebalanceResponse(cluster=cluster,
+                                               request_id=req_id,
+                                               host_id=current_host_id,
+                                               status=constants.RPC_TASK_STATE_FINISHED,
                                                message='already in expected role %s' % target_role)
             LOG.debug('send consul role rebalance response : %s', str(resp))
             rebalance_mgr.send_role_rebalance_response(resp)
@@ -289,9 +294,10 @@ def switch_to_new_consul_role(rebalance_mgr, request, current_host_id, join_ips)
     if not exist:
         LOG.info('unable to switch consul role, current role is %s, but config file %s does not exist', current_role,
                  original_file)
-        resp = ConsulRoleRebalanceResponse(req_id,
-                                           current_host_id,
-                                           status=constants.REBALANCE_STATE_ABORTED,
+        resp = ConsulRoleRebalanceResponse(cluster=cluster,
+                                           request_id=req_id,
+                                           host_id=current_host_id,
+                                           status=constants.RPC_TASK_STATE_ABORTED,
                                            message='file %s not exist' % target_file)
         LOG.debug('send consul role rebalance response : %s', str(resp))
         rebalance_mgr.send_role_rebalance_response(resp)
@@ -302,9 +308,10 @@ def switch_to_new_consul_role(rebalance_mgr, request, current_host_id, join_ips)
     result = run_cmd(cmd)
     if result != 0:
         LOG.debug('unable to switch consul role, as failed to copy from file %s to %s', original_file, target_file)
-        resp = ConsulRoleRebalanceResponse(req_id,
-                                           current_host_id,
-                                           status=constants.REBALANCE_STATE_ABORTED,
+        resp = ConsulRoleRebalanceResponse(cluster=cluster,
+                                           request_id=req_id,
+                                           host_id=current_host_id,
+                                           status=constants.RPC_TASK_STATE_ABORTED,
                                            message='failed to create file %s' % target_file)
         LOG.debug('send consul role rebalance response : %s', str(resp))
         rebalance_mgr.send_role_rebalance_response(resp)
@@ -338,9 +345,10 @@ def switch_to_new_consul_role(rebalance_mgr, request, current_host_id, join_ips)
 
     if not cfg_obj:
         LOG.info('unable to switch consul role, as failed to modify consul config file %s', target_file)
-        resp = ConsulRoleRebalanceResponse(req_id,
-                                           current_host_id,
-                                           status=constants.REBALANCE_STATE_ABORTED,
+        resp = ConsulRoleRebalanceResponse(cluster=cluster,
+                                           request_id=req_id,
+                                           host_id=current_host_id,
+                                           status=constants.RPC_TASK_STATE_ABORTED,
                                            message='failed to modify file %s' % target_file)
         LOG.debug('send consul role rebalance response : %s', str(resp))
         rebalance_mgr.send_role_rebalance_response(resp)
@@ -358,9 +366,10 @@ def switch_to_new_consul_role(rebalance_mgr, request, current_host_id, join_ips)
     succeeded = False
     while not succeeded:
         if retry > 3:
-            resp = ConsulRoleRebalanceResponse(req_id,
-                                               current_host_id,
-                                               status=constants.REBALANCE_STATE_ABORTED,
+            resp = ConsulRoleRebalanceResponse(cluster=cluster,
+                                               request_id=req_id,
+                                               host_id=current_host_id,
+                                               status=constants.RPC_TASK_STATE_ABORTED,
                                                message=error)
             LOG.debug('failed after 3 retries, now send consul role rebalance response : %s', str(resp))
             rebalance_mgr.send_role_rebalance_response(resp)
@@ -415,15 +424,19 @@ def switch_to_new_consul_role(rebalance_mgr, request, current_host_id, join_ips)
 
     # finally send response with finished status
     msg = 'successfully switched consul role from %s to %s' % (current_role, target_role)
-    resp = ConsulRoleRebalanceResponse(req_id,
-                                       current_host_id,
-                                       status=constants.REBALANCE_STATE_FINISHED,
+    resp = ConsulRoleRebalanceResponse(cluster=cluster,
+                                       request_id=req_id,
+                                       host_id=current_host_id,
+                                       status=constants.RPC_TASK_STATE_FINISHED,
                                        message=msg)
     rebalance_mgr.send_role_rebalance_response(resp)
     return True
 
 
-def handle_consul_refresh_request(rebalance_mgr, hostid, request=None):
+def handle_consul_refresh_request(rebalance_mgr, hostid, cluster, request):
+    if not request:
+        LOG.debug('ignore empty consul status refresh request.')
+        return
     try:
         key_prefix = 'request-'
         ch = consul_helper.consul_status(hostid)
@@ -434,32 +447,32 @@ def handle_consul_refresh_request(rebalance_mgr, hostid, request=None):
         # - receiver is not consul leader :
         #     won't reply
         # so better to save the request in consul, with flag for if it is reported.
-        if request:
-            msg_type = request['type']
-            req_id = request['id']
+        msg_type = request['type']
+        req_id = request['id']
 
-            if msg_type != message_types.MSG_CONSUL_REFRESH_REQUEST:
-                LOG.info('not a consul refresh request : %s', str(request))
-                resp = ConsulRefreshResponse(req_id,
-                                             status=constants.REBALANCE_STATE_ABORTED,
-                                             report='',
-                                             message='not a consul refresh request')
-                rebalance_mgr.send_role_rebalance_response(resp, type=message_types.MSG_CONSUL_REFRESH_RESPONSE)
-                return
+        if msg_type != message_types.MSG_CONSUL_REFRESH_REQUEST:
+            LOG.info('not a consul refresh request : %s', str(request))
+            resp = ConsulRefreshResponse(cluster=cluster,
+                                         request_id=req_id,
+                                         status=constants.RPC_TASK_STATE_ABORTED,
+                                         report='',
+                                         message='not a consul refresh request')
+            rebalance_mgr.send_role_rebalance_response(resp, type=message_types.MSG_CONSUL_REFRESH_RESPONSE)
+            return
 
-            # for valid request , store in kv first if not exist
-            key = key_prefix + request['id']
-            _, existing = ch.kv_fetch(key)
-            if existing is None:
-                data = json.dumps({'request': request,
-                                   'processed': False,
-                                   'timestamp': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
-                                   'createdBy': hostid
-                                   })
-                ch.kv_update(key, data)
-                LOG.info('consul refresh request %s is stored in kv store : %s', req_id, data)
-            else:
-                LOG.info('consul refresh request %s already exist in kv store : %s', req_id, str(existing))
+        # for valid request , store in kv first if not exist
+        key = key_prefix + request['id']
+        _, existing = ch.kv_fetch(key)
+        if existing is None:
+            data = json.dumps({'request': request,
+                               'processed': False,
+                               'timestamp': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                               'createdBy': hostid
+                               })
+            ch.kv_update(key, data)
+            LOG.info('consul refresh request %s is stored in kv store : %s', req_id, data)
+        else:
+            LOG.info('consul refresh request %s already exist in kv store : %s', req_id, str(existing))
 
         # only leader can act on the request
         is_leader = ch.am_i_cluster_leader()
@@ -497,8 +510,9 @@ def handle_consul_refresh_request(rebalance_mgr, hostid, request=None):
             if req_type == message_types.MSG_CONSUL_REFRESH_REQUEST:
                 report = ch.get_consul_status_report()
                 report['reportedBy'] = hostid
-                resp = ConsulRefreshResponse(req_id,
-                                             status=constants.REBALANCE_STATE_FINISHED,
+                resp = ConsulRefreshResponse(cluster=cluster,
+                                             request_id=req_id,
+                                             status=constants.RPC_TASK_STATE_FINISHED,
                                              report=json.dumps(report),
                                              message='')
                 rebalance_mgr.send_role_rebalance_response(resp, type=message_types.MSG_CONSUL_REFRESH_RESPONSE)
@@ -511,45 +525,61 @@ def handle_consul_refresh_request(rebalance_mgr, hostid, request=None):
     except Exception as e:
         LOG.exception('unhandled exception when process consul refresh request : %s', str(e))
 
-
-def processing_rebalance_requests(rebalance_mgr, hostid, join_ips):
-    global STOPPING
+def on_consul_role_rebalance_request(role_rebalance_request):
+    global global_rebalance_mgr
+    global global_hostid
+    global global_join_ips
     global REBALANCE_IN_PROGRESS
-    while not STOPPING:
-        try:
-            if not rebalance_mgr:
-                sleep(1)
-                continue
 
-            # check for any rebalance requests
-            LOG.debug('check consul role rebalance request at %s', str(datetime.utcnow()))
-            req = rebalance_mgr.get_role_rebalance_request(request_type=message_types.MSG_ROLE_REBALANCE_REQUEST)
-            LOG.info('found consul role rebalance request : %s', str(req))
-            if req:
-                msg_type = req['type']
-                LOG.info('received consul role rebalance request : %s', str(req))
+    cluster = CONF.consul.cluster_name
+    LOG.info('found consul role rebalance request : %s', str(role_rebalance_request))
+    if not role_rebalance_request:
+        LOG.warn('ignore empty consul role rebalance request')
+        return
+    msg_type = role_rebalance_request['type']
+    if msg_type != message_types.MSG_ROLE_REBALANCE_REQUEST:
+        LOG.warn('ignore non consul role rebalance request : %s', str(role_rebalance_request))
+        return
+    if str(role_rebalance_request['cluster']) != str(cluster):
+        LOG.warn('ignore consul role rebalance request not for cluster %s but for %s: %s', str(cluster),
+                 str(role_rebalance_request['cluster']), str(role_rebalance_request))
+        return
+    if role_rebalance_request['host_id'] != global_hostid:
+        LOG.warn('ignore consul role rebalance request not for me %s but for %s: %s', str(global_hostid),
+                 role_rebalance_request['host_id'], str(role_rebalance_request))
+        return
+    try:
+        REBALANCE_IN_PROGRESS = True
+        LOG.info('received consul role rebalance request for me %s : %s', global_hostid, str(role_rebalance_request))
+        cluster_setup = switch_to_new_consul_role(global_rebalance_mgr, role_rebalance_request, cluster, global_hostid, global_join_ips)
+        LOG.info('is consul role rebalance succeeded ? %s', str(cluster_setup))
+        REBALANCE_IN_PROGRESS = False
+    except Exception:
+        REBALANCE_IN_PROGRESS = False
+        LOG.exception('unhandled exception in on_consul_role_rebalance_request')
 
-                # is the payload a rebalance request ?
-                if msg_type == message_types.MSG_ROLE_REBALANCE_REQUEST:
-                    if req['host_id'] == hostid:
-                        REBALANCE_IN_PROGRESS = True
-                        LOG.debug('received consul role rebalance request for me %s : %s', hostid, str(req))
-                        cluster_setup = switch_to_new_consul_role(rebalance_mgr, req, hostid, join_ips)
-                        LOG.debug('is consul role rebalance succeeded ? %s', str(cluster_setup))
-                        REBALANCE_IN_PROGRESS = False
-                    else:
-                        LOG.warn('received consul role rebalance request is not for me : %s', str(req))
 
-            # check for any consul refresh requests
-            req = rebalance_mgr.get_role_rebalance_request(request_type=message_types.MSG_CONSUL_REFRESH_REQUEST)
-            if req:
-                LOG.info('received consul refresh request at %s : %s', str(datetime.utcnow()), str(req))
-            handle_consul_refresh_request(rebalance_mgr, hostid, request=req)
-        except:
-            REBALANCE_IN_PROGRESS = False
-            LOG.exception('unhandled exception in processing_rebalance_requests')
-        sleep(1)
+def on_consul_status_request(status_request):
+    global global_rebalance_mgr
+    global global_hostid
+    global global_join_ips
 
+    cluster = CONF.consul.cluster_name
+
+    if not status_request:
+        LOG.warn('ignore null or empty consul status request')
+        return
+    msg_type = status_request['type']
+    if msg_type != message_types.MSG_CONSUL_REFRESH_REQUEST:
+        LOG.warn('ignore non consul refresh request : %s', str(status_request))
+        return
+    if str(status_request['cluster']) != str(cluster):
+        LOG.warn('ignore consul refresh request which is not for cluster %s but for %s: %s', str(cluster),
+                 str(status_request['cluster']), str(status_request))
+        return
+
+    LOG.info('received consul refresh request at %s : %s', str(datetime.utcnow()), str(status_request))
+    handle_consul_refresh_request(global_rebalance_mgr, global_hostid, cluster=cluster, request=status_request)
 
 def repair_consul_wiped_files_if_needed():
     try:
@@ -600,25 +630,6 @@ def repair_consul_wiped_files_if_needed():
         LOG.exception('unhandled exception when repair consul wiped files')
 
 def config_needs_refresh():
-    # if settings in /opt/pf9/etc/pf9-ha/conf.d/pf9-ha.conf are updated from resmgr by hostagent
-    # but the /opt/pf9/etc/pf9-consul/conf.d/xx.json does not have it, then need to refresh it
-    # {
-    #     "advertise_addr": "10.97.0.18",
-    #     "bind_addr": "10.97.0.18",
-    #     "bootstrap_expect": 3,
-    #     "ca_file": "/opt/pf9/etc/pf9-consul/consul_ca.pem",
-    #     "cert_file": "/opt/pf9/etc/pf9-consul/consul_cert.pem",
-    #     "data_dir": "/opt/pf9/consul-data-dir/",
-    #     "datacenter": "72",
-    #     "disable_remote_exec": true,
-    #     "encrypt": "cGY5LWRjLTcyLTAwMDAwMA==",
-    #     "key_file": "/opt/pf9/etc/pf9-consul/consul_key.pem",
-    #     "node_name": "19977b82-5ed5-49ed-be08-971b7e3c983f",
-    #     "server": true,
-    #     "verify_incoming": true,
-    #     "verify_outgoing": true,
-    #     "verify_server_hostname": false
-    # }
     LOG.info('checking config changes for consul')
     settings_source = dict(
         advertise_addr=consul_helper.get_ip_address(),
@@ -704,15 +715,74 @@ def get_join_ips():
         join_ips = ' '.join([x.strip() for x in ips if x])
     return join_ips
 
+def start_rpc_process():
+    global global_rebalance_mgr
+    global global_hostid
+    global global_join_ips
+    rebalance_thread = None
+    try:
+        # start dedicated rebalance request handling thread
+        role_rebalance_enabled = bool(CONF.consul_role_rebalance.role_rebalance_enabled)
+        LOG.info('is consul role rebalance enabled ? %s', str(role_rebalance_enabled))
+        if role_rebalance_enabled:
+            amqp_host = CONF.consul_role_rebalance.amqp_host
+            amqp_virtualhost = CONF.consul_role_rebalance.amqp_virtualhost
+            amqp_port = CONF.consul_role_rebalance.amqp_port
+            amqp_user = CONF.consul_role_rebalance.amqp_user
+            amqp_passwd = CONF.consul_role_rebalance.amqp_password
+            amqp_exchange = CONF.consul_role_rebalance.amqp_exchange_name
+            amqp_exchange_type = CONF.consul_role_rebalance.amqp_exchange_type
+            # queue name needs to be unique in order to get broadcast message from rabbitmq exchange in 'fanout' or 'direct'
+            # exchange type.
+            amqp_queue_for_receiving = 'queue-receiving-for-host-%s' % global_hostid
+            amqp_routingkey_sending = CONF.consul_role_rebalance.amqp_routingkey_sending
+            amqp_routingkey_receiving = CONF.consul_role_rebalance.amqp_routingkey_receiving
+            parameters = 'host: %s, port: %s, user: %s, password: %s, exchange: %s, type: %s, queue: %s, send routing: %s, receiving routing: %s' % (
+                amqp_host, amqp_port, amqp_user, amqp_passwd, amqp_exchange, amqp_exchange_type,
+                amqp_queue_for_receiving, amqp_routingkey_sending, amqp_routingkey_receiving
+            )
+            msg = 'create consul role rebalance manager with : %s' % parameters
+            LOG.info(msg)
+            global_rebalance_mgr = RebalanceManager(amqp_host,
+                                             amqp_port,
+                                             amqp_user,
+                                             amqp_passwd,
+                                             amqp_virtualhost,
+                                             amqp_exchange,
+                                             amqp_exchange_type,
+                                             amqp_routingkey_sending,
+                                             amqp_queue_for_receiving,
+                                             amqp_routingkey_receiving
+                                             )
+            LOG.info('consul role rebalance manager is created')
+
+            # to get better performance , rather than polling message from rabbitmq (which causes too much CPU usage)
+            # redesign it to be event based by invoke callbacks once the driver received messages
+            # so here register the callbacks to handle the received messages
+            global_rebalance_mgr.subscribe_message(message_types.MSG_ROLE_REBALANCE_REQUEST, on_consul_role_rebalance_request)
+            global_rebalance_mgr.subscribe_message(message_types.MSG_CONSUL_REFRESH_REQUEST, on_consul_status_request)
+    except Exception:
+        LOG.exception('unhandled exception when start RPC process')
+    return global_rebalance_mgr, rebalance_thread
+
 def loop():
     global STOPPING
     global REBALANCE_IN_PROGRESS
+    global global_hostid
+    global global_join_ips
+    global global_rebalance_mgr
+
     _show_conf(CONF)
     cfgparser = ConfigParser()
     cfgparser.read('/var/opt/pf9/hostagent/data.conf')
-    hostid = cfgparser.get('DEFAULT', 'host_id')
+    global_hostid = cfgparser.get('DEFAULT', 'host_id')
     sleep_time = CONF.consul.status_check_interval
-    ch = consul_helper.consul_status(hostid)
+
+    # find out consul join ips
+    global_join_ips = get_join_ips()
+    LOG.debug('consul join addresses from config file :%s', global_join_ips)
+
+    ch = consul_helper.consul_status(global_hostid, global_join_ips.split(' '))
     reporter = report.HaManagerReporter()
     start_loop = False
     cluster_setup = False
@@ -732,56 +802,12 @@ def loop():
     if not consul_configured or not start_loop:
         raise ha_exceptions.ConfigException('failed to generate consul configuration file or consul cluster fail to run')
 
-    # find out consul join ips
-    join_ips = get_join_ips()
-    LOG.debug('consul join addresses from config file :%s', join_ips)
-
     rebalance_thread = None
-    rebalance_mgr = None
+    global_rebalance_mgr = None
 
     try:
         # start dedicated rebalance request handling thread
-        role_rebalance_enabled = bool(CONF.consul_role_rebalance.role_rebalance_enabled)
-        LOG.info('is consul role rebalance enabled ? %s', str(role_rebalance_enabled))
-        if role_rebalance_enabled:
-            amqp_host = CONF.consul_role_rebalance.amqp_host
-            amqp_virtualhost = CONF.consul_role_rebalance.amqp_virtualhost
-            amqp_port = CONF.consul_role_rebalance.amqp_port
-            amqp_user = CONF.consul_role_rebalance.amqp_user
-            amqp_passwd = CONF.consul_role_rebalance.amqp_password
-            amqp_exchange = CONF.consul_role_rebalance.amqp_exchange_name
-            amqp_exchange_type = CONF.consul_role_rebalance.amqp_exchange_type
-            # queue name needs to be unique in order to get broadcast message from rabbitmq exchange in 'fanout' or 'direct'
-            # exchange type.
-            amqp_queue_for_receiving = 'queue-receiving-for-host-%s' % hostid
-            amqp_routingkey_sending = CONF.consul_role_rebalance.amqp_routingkey_sending
-            amqp_routingkey_receiving = CONF.consul_role_rebalance.amqp_routingkey_receiving
-            parameters = 'host: %s, port: %s, user: %s, password: %s, exchange: %s, type: %s, queue: %s, send routing: %s, receiving routing: %s' % (
-                amqp_host, amqp_port, amqp_user, amqp_passwd, amqp_exchange, amqp_exchange_type,
-                amqp_queue_for_receiving, amqp_routingkey_sending, amqp_routingkey_receiving
-            )
-            msg = 'create consul role rebalance manager with : %s' % parameters
-            LOG.info(msg)
-            rebalance_mgr = RebalanceManager(amqp_host,
-                                             amqp_port,
-                                             amqp_user,
-                                             amqp_passwd,
-                                             amqp_virtualhost,
-                                             amqp_exchange,
-                                             amqp_exchange_type,
-                                             amqp_routingkey_sending,
-                                             amqp_queue_for_receiving,
-                                             amqp_routingkey_receiving
-                                             )
-            LOG.info('consul role rebalance manager is created')
-
-            # start dedicated thread to handle the rebalance requests
-            LOG.info('starting thread processing_rebalance_requests')
-            rebalance_thread = threading.Thread(target=processing_rebalance_requests,
-                                                args=(rebalance_mgr, hostid, join_ips,))
-            rebalance_thread.daemon = True
-            rebalance_thread.start()
-            LOG.info('thread processing_rebalance_requests started')
+        global_rebalance_mgr, rebalance_thread = start_rpc_process()
 
         # the main thread handling host down events
         LOG.info('start main loop ...')
@@ -794,24 +820,24 @@ def loop():
                 if not cluster_setup:
                     # Running join against oneself generates a warning message in
                     # logs but does not cause consul to crash
-                    join_ips = get_join_ips()
-                    if not join_ips:
+                    global_join_ips = get_join_ips()
+                    if not global_join_ips:
                         LOG.error('null or empty consul join ip list in config file')
                         sleep(sleep_time)
                         continue
-                    LOG.info('try to join cluster members %s', join_ips)
-                    retcode = run_cmd('consul join {ip}'.format(ip=join_ips))
+                    LOG.info('try to join cluster members %s', global_join_ips)
+                    retcode = run_cmd('consul join {ip}'.format(ip=global_join_ips))
                     leader = None
                     if retcode == 0:
                         leader = ch.cluster_leader()
                         LOG.info('joined consul cluster members {ip}, with leader {lead}'.format(
-                            ip=join_ips, lead=leader))
+                            ip=global_join_ips, lead=leader))
                         if leader:
                             cluster_setup = True
                             ch.log_kvstore()
                     if not leader or retcode != 0:
                         LOG.info('join consul cluster %s failed, code %s, leader %s . try to re-config and re-start',
-                                 join_ips,
+                                 global_join_ips,
                                  str(retcode),
                                  str(leader))
                         # refresh the config file and restart consul, in case there is no leader or join failed
@@ -848,7 +874,7 @@ def loop():
                 # helper was created as the cluster was not yet formed. Since this
                 # operation is idempotent calling it in a loop will not cause
                 # multiple updates.
-                LOG.info('publish current host id %s', hostid)
+                LOG.info('publish current host id %s', global_hostid)
                 ch.publish_hostid()
                 # dump kv store to file so we can check what happened
                 ch.log_kvstore()
@@ -863,6 +889,6 @@ def loop():
         STOPPING = True
         rebalance_thread.join(5)
         rebalance_thread = None
-    del rebalance_mgr
+    del global_rebalance_mgr
     LOG.error('pf9-ha-slave service exiting (start_loop=%s, consul_configured=%s)...',
               str(start_loop), str(consul_configured))

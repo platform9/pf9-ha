@@ -16,6 +16,7 @@ import logging
 import Queue
 import time
 import datetime
+import threading
 from shared.exceptions import ha_exceptions
 from shared.rpc.rpc_producer import RpcProducer
 from shared.rpc.rpc_consumer import RpcConsumer
@@ -44,11 +45,14 @@ class RebalanceManager(object):
                  exchange_type,
                  routingkey_for_sending,
                  queue_for_receiving,
-                 routingkey_for_receiving):
+                 routingkey_for_receiving,
+                 auto_delete_consumer_queue=True):
 
         self.message_buffers = dict()
+        self.message_callbacks = dict()
         for msg_type in message_schemas.valid_message_types():
             self.message_buffers[msg_type] = Queue.Queue()
+            self.message_callbacks[msg_type] = []
 
         error = "empty value for %s"
         if not host:
@@ -98,7 +102,8 @@ class RebalanceManager(object):
                                                            exchange_type=exchange_type,
                                                            queue_name=queue_for_receiving,
                                                            virtual_host=virtual_host,
-                                                           routing_key=routingkey_for_receiving)
+                                                           routing_key=routingkey_for_receiving,
+                                                           auto_delete_queue=auto_delete_consumer_queue)
             LOG.info('set rpc consumer message callback')
             self.role_rebalance_rpc_consumer.consume(self._on_consul_role_rebalance_messages)
             LOG.info('start RPC consumer , %s', msg)
@@ -115,7 +120,7 @@ class RebalanceManager(object):
         self.message_buffers = None
 
     def _on_consul_role_rebalance_messages(self, message):
-        LOG.debug('received role rebalance message %s', str(message))
+        LOG.debug('received rpc message %s', str(message))
         if not message:
             LOG.warning('received message is empty')
             return
@@ -126,8 +131,27 @@ class RebalanceManager(object):
             LOG.debug('received message with payload type %s : %s', type, str(payload))
             if type in message_schemas.valid_message_types():
                 self.message_buffers[type].put(message)
+                # use thread to unblock message processing
+                threading.Thread(target=self._call_subscribers, args=(type, payload,)).start()
             else:
                 LOG.warn('unknown message type received %s : %s', type, str(message))
+
+    def _call_subscribers(self, msg_type, msg_payload):
+        for msg_callback in self.message_callbacks[msg_type]:
+            msg_callback(msg_payload)
+
+    def subscribe_message(self, msg_type, msg_callback):
+        if msg_type not in message_schemas.valid_message_types():
+            LOG.error('not suported message type %s with callback %s', str(msg_type), str(msg_callback))
+            return
+        if not msg_callback:
+            LOG.warn('callback for message type %s is null or empty', str(msg_type))
+            return
+        if str(msg_callback) in self.message_callbacks[msg_type]:
+            LOG.warn('callback %s has already subscribed to message type %s', str(msg_callback), str(msg_type))
+            return
+
+        self.message_callbacks[msg_type].append(msg_callback)
 
     def send_role_rebalance_request(self, request, type=message_types.MSG_ROLE_REBALANCE_REQUEST):
         if request is None:
@@ -146,7 +170,7 @@ class RebalanceManager(object):
             LOG.warn('ignore rebalance request as the RPC producer is not connected to server')
             return
         producer.publish(request)
-        LOG.info('successfully sent rebalance request')
+        LOG.info('successfully sent request : %s', str(request))
 
     def send_role_rebalance_response(self, response, type=message_types.MSG_ROLE_REBALANCE_RESPONSE):
         if response is None:
@@ -165,7 +189,7 @@ class RebalanceManager(object):
             LOG.warn('ignore sending rebalance response as the producer is not connected to remote server')
             return
         producer.publish(response)
-        LOG.info('successfully sent rebalance response')
+        LOG.info('successfully sent response : %s', str(response))
 
     def get_role_rebalance_request(self, request_type=message_types.MSG_ROLE_REBALANCE_REQUEST):
         if request_type not in message_schemas.valid_request_types():
