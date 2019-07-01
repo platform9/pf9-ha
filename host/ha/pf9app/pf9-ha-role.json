@@ -108,7 +108,7 @@
           "consul": {
             "report_interval": "180"
           },
-          "log":{},
+          "log": {},
           "node": {},
           "consul_role_rebalance": {
             "amqp_host": "localhost",
