@@ -344,7 +344,7 @@ class consul_status(object):
                          str(retval.event['eventType']), retval.event['hostName'], json.dumps(reported_cls))
                 self.kv_update(retval.event['hostName'], json.dumps(reported_cls))
             else:
-                LOG.info('founded change of event % for host %s already exist in kv store, '
+                LOG.info('founded change of event %s for host %s already exist in kv store, '
                          'change : %s, report : %s',
                          str(reported_cls.event['eventType']), str(reported_cls.event['hostName']),
                          str(reported_cls), str(data))
@@ -553,7 +553,7 @@ class consul_status(object):
                     reported_but_staled = False
                     hostid = data.event['hostName']
                     _, existing_data = self.kv_fetch(hostid)
-                    LOG.info('host % status is down, check if report exist in kv store',
+                    LOG.info('host %s status is down, check if report exist in kv store',
                              hostid)
                     # if report exist, check whether reported
                     if existing_data:
@@ -564,11 +564,11 @@ class consul_status(object):
                                                               "%Y-%m-%d %H:%M:%S")
                             if datetime.utcnow() - reported_time > self.reap_interval:
                                 reported_but_staled = True
-                            LOG.info('host % status is down, and report exist in kv store.'
+                            LOG.info('host %s status is down, and report exist in kv store.'
                                      ' report : %s , reported time : %s , is it staled ? %s',
                                      hostid, str(existing_data), str(reported_time), str(reported_but_staled))
                     else:
-                        LOG.info('host % status is down, no report exist in kv store',
+                        LOG.info('host %s status is down, no report exist in kv store',
                                  hostid)
                     # when host down, and not reported
                     if not reported_before or reported_but_staled:
@@ -725,7 +725,7 @@ class consul_status(object):
     def log_kvstore(self):
         try:
             _, kv_list = self.kv_fetch('', recurse=True)
-            LOG.info('kv store after join: %s', str(kv_list))
+            LOG.debug('kv store after join: %s', str(kv_list))
             # dump current kv store into file
             record = {
                 'timestamp': str(datetime.utcnow()),
