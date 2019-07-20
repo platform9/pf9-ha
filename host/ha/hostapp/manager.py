@@ -232,6 +232,14 @@ def start_consul_service():
                     LOG.warn('Consul service stopped. Retrying...')
             else:
                 LOG.warn('Consul service could not be started')
+
+            # clean old data if failed to start consul
+            consul_raft_db = os.path.join(PF9_CONSUL_DATA_DIR, "raft/raft.db")
+            consul_raft_snapshots = os.path.join(PF9_CONSUL_DATA_DIR, "raft/snapshots")
+            if os.path.exists(consul_raft_db):
+                os.remove(consul_raft_db)
+            if os.path.exists(consul_raft_snapshots):
+                os.rmdir(consul_raft_snapshots)
             # when failed to start consul, check whether needs to repairs node-id or keyring
             # those are the two files messed up by consul itself
             repair_consul_wiped_files_if_needed()

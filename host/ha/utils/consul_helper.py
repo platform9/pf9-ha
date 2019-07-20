@@ -557,7 +557,9 @@ class consul_status(object):
                              hostid)
                     # if report exist, check whether reported
                     if existing_data:
-                        existing_cls = report_object.from_str(existing_data)
+                        LOG.debug('checking whether existing data for host %s has already reported : %s',
+                                  hostid, str(existing_data))
+                        existing_cls = report_object.from_str(existing_data['Value'])
                         if existing_cls.event['reported']:
                             reported_before = True
                             reported_time = datetime.strptime(existing_cls.event['reportedAt'],
