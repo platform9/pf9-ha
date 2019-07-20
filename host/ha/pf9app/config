@@ -55,7 +55,7 @@ def _run_command(cmd, env=None, exit=True):
                             env=env)
     out, err = proc.communicate()
     code = proc.returncode
-
+    sys.stdout.write("Run command : %s , code : %s , error : %s" % (cmd, out, err))
     if code and exit:
         # Consider any non zero code as error
         sys.stdout.write(out)
