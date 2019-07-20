@@ -823,7 +823,7 @@ class NovaProvider(Provider):
         data = self._customize_pf9_ha_slave_config(cluster_name, join_ips, host_ip, host_ip)
         # step 1 : modify 'bootstrap_expect' base on the new role
         data['bootstrap_expect'] = 3 if target_new_role == constants.CONSUL_ROLE_SERVER else 0
-        LOG.info('update resmgr for consul role rebalance host %s with data %s', target_host_id, str(data))
+        LOG.info('update resmgr for consul role rebalance for host %s with data %s', target_host_id, str(data))
         # update resmgr with the new settings
         req_url = '%s/%s/roles/pf9-ha-slave' % (url, target_host_id)
         result = requests.put(req_url,
@@ -1081,7 +1081,7 @@ class NovaProvider(Provider):
             data = self._customize_pf9_ha_slave_config(aggregate_id, ips, ip_lookup[node], cluster_ip_lookup[node])
             data['bootstrap_expect'] = 3 if role == 'server' else 0
             auth_url = '/'.join([url, node, 'roles', 'pf9-ha-slave'])
-            LOG.info('authorize pf9-ha-slave on host %s with consul role %s, data %s', node, role, str(data))
+            LOG.info('authorize pf9-ha-slave on host with consul role %s for host %s with data %s', role, node, str(data))
             resp = requests.put(auth_url, headers=headers,
                                 json=data, verify=False)
             if resp.status_code == requests.codes.not_found and \
@@ -2281,6 +2281,8 @@ class NovaProvider(Provider):
                             data = self._customize_pf9_ha_slave_config(cluster_name, join_ips, host_ip, host_ip)
                             # update resmgr with the new settings
                             req_url = '%s/%s/roles/pf9-ha-slave' % (url, host_id)
+                            LOG.info('update certs settings for cluster %s for host %s with data %s',
+                                     str(cluster_name), str(host_ip), str(data))
                             result = requests.put(req_url,
                                                   headers=headers,
                                                   json=data)
