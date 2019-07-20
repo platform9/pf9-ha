@@ -292,10 +292,10 @@ class consul_status(object):
                  'cached changes : %s', str(self.changed_clusters))
         for change in self.changed_clusters:
             detectedAt = datetime.strptime(change.event['detectedAt'], "%Y-%m-%d %H:%M:%S")
+            hostname = change.event['hostName']
             if datetime.now() - detectedAt > report_interval:
                 current_state = self.get_cluster_report()
                 addr = change.event['hostAddr']
-                hostname = change.event['hostName']
                 LOG.debug('checking cluster : %s', str(change))
                 if addr in current_state and current_state[addr].event['eventType'] \
                         == change.event['eventType']:
@@ -557,7 +557,9 @@ class consul_status(object):
                              hostid)
                     # if report exist, check whether reported
                     if existing_data:
-                        existing_cls = report_object.from_str(existing_data)
+                        LOG.debug('checking whether existing data for host %s has already reported : %s',
+                                  hostid, str(existing_data))
+                        existing_cls = report_object.from_str(existing_data['Value'])
                         if existing_cls.event['reported']:
                             reported_before = True
                             reported_time = datetime.strptime(existing_cls.event['reportedAt'],

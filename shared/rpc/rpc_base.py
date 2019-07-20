@@ -60,12 +60,14 @@ class RpcBase(object):
     def _close_connection(self):
         LOG.info('closing connection')
         self._closing = True
-        self._connection.close()
+        if self._connection is not None:
+            self._connection.close()
 
     def _on_connection_open_error(self, _unused_connection, err):
         LOG.error('error when open connection, %s', str(err))
         LOG.info('reconnect when unable to open connection')
-        self._reconnect()
+        time.sleep(5)
+        self._connection.ioloop.stop()
 
     def _on_connection_closed(self, connection, reply_code, reply_text):
         LOG.info('connection was closed')
@@ -76,7 +78,8 @@ class RpcBase(object):
         else:
             LOG.info('connection already closed, not stop connection ioloop')
             LOG.warning('connection was closed, will reopen. error status : (%s) %s', reply_code, reply_text)
-            self._reconnect()
+            time.sleep(5)
+            self._connection.ioloop.stop()
 
     def _on_connection_open(self, unused_connection):
         LOG.info('connection opened')
@@ -88,18 +91,8 @@ class RpcBase(object):
 
     def close_channel(self):
         LOG.info('closing the channel')
-        if self._channel and not self._channel.is_closing:
+        if self._channel is not None:
             self._channel.close()
-
-    def _reconnect(self):
-        LOG.info('try to reconnect')
-        self._connection.ioloop.stop()
-        if not self._closing:
-            LOG.info('reconnect and start connection ioloop')
-            self._connection = self._open_connection()
-            self._connection.ioloop.start()
-        else:
-            LOG.info('not reconnect as connection is still in closing')
 
     def _add_on_channel_close_callback(self):
         LOG.info('adding channel close callback')
@@ -133,8 +126,15 @@ class RpcBase(object):
         self._connection_ready = True
 
     def _run(self):
-        self._connection = self._open_connection()
-        self._connection.ioloop.start()
+        while not self._stopping:
+            self._connection = None
+            try:
+                self._connection = self._open_connection()
+                self._connection.ioloop.start()
+            except Exception as e:
+                LOG.exception('unhandled exception for ioloop : %s', str(e))
+                time.sleep(5)
+        LOG.info('IOLoop stopped')
 
     def start(self):
         LOG.info('start client')
@@ -166,7 +166,6 @@ class RpcBase(object):
         self.on_stopping()
         self.close_channel()
         self._close_connection()
-        self._connection.ioloop.start()
         self._connection_ready = False
         LOG.info('client stopped')
 
