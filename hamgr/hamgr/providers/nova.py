@@ -1942,23 +1942,31 @@ class NovaProvider(Provider):
         obj = Notification(action, target, identifier)
         get_notification_manager(self._config).send_notification(obj)
 
-    def get_aggregate_info_for_cluster(self, cluster_id):
+    def get_aggregate_info_for_cluster(self, cluster_id_or_name):
         try:
+            if not isinstance(cluster_id_or_name, basestring) and \
+                    not isinstance(cluster_id_or_name, int):
+                LOG.info('cluster_id_or_name %s can only be string or int', str(cluster_id_or_name))
+                return None
+
             nova_client = self._get_nova_client()
             clusters = db_api.get_all_active_clusters()
-            for cluster in clusters:
-                if cluster.id != cluster_id:
-                    continue
+            targets = []
+            if isinstance(cluster_id_or_name, basestring):
+                targets = [cluster for cluster in clusters if cluster.name == cluster_id_or_name]
+            elif isinstance(cluster_id_or_name, int):
+                targets = [cluster for cluster in clusters if cluster.id == cluster_id_or_name]
 
-                aggregate_id = cluster.name
+            if len(targets) > 0:
+                aggregate_id = targets[0].name
                 aggregate = self._get_aggregate(nova_client, aggregate_id)
                 LOG.debug('host aggregate details for cluster %s : %s',
-                          str(cluster_id), str(aggregate))
+                          str(cluster_id_or_name), str(aggregate))
                 return aggregate
             return None
         except:
             LOG.exception('unhandled exception when get aggregate info '
-                          'for cluster %s', str(cluster_id))
+                          'for cluster %s', str(cluster_id_or_name))
         return None
 
     def process_consul_role_rebalance_requests(self):
@@ -2459,6 +2467,43 @@ class NovaProvider(Provider):
             else:
                 report[cluster_name] = {}
         return report
+
+    def get_active_clusters(self, id=None):
+        results = []
+        try:
+            active_clusters = db_api.get_all_active_clusters()
+            if id:
+                active_clusters = [cluster for cluster in active_clusters if cluster.id == id]
+
+            self._token = self._get_v3_token()
+            for cluster in active_clusters:
+                name = cluster.name
+                nodes = masakari.get_nodes_in_segment(self._token, name)
+                hosts = []
+                for node in nodes:
+                    hosts.append({
+                        'uuid': node['name'],
+                        "on_maintenance": node['on_maintenance'],
+                    })
+                cluster_info = {
+                    'id': cluster.id,
+                    'status': cluster.status,
+                    'enabled': cluster.enabled,
+                    'created_at': cluster.created_at,
+                    'name': cluster.name,
+                    'hosts': hosts
+                }
+                results.append(cluster_info)
+        except Exception as e:
+            LOG.exception('unhandled exception when get clusters: %s', str(e))
+
+        if id:
+            if len(results) > 0:
+                return results[0]
+            else:
+                return {}
+
+        return results
 
 def get_provider(config):
     db_api.init(config)

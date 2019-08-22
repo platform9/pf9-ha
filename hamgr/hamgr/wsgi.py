@@ -15,7 +15,7 @@
 from ConfigParser import ConfigParser
 import logging
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import jsonify
 from flask import request
 from hamgr import app
@@ -107,7 +107,7 @@ def update_host_status(host_id):
     return jsonify(dict(success=False)), 403, CONTENT_TYPE_HEADER
 
 
-@app.route('/v1/consul/', methods=['GET'])
+@app.route('/v1/consul', methods=['GET'])
 @error_handler
 def get_all_consul_status():
     ha_provider = provider_factory.ha_provider()
@@ -121,6 +121,7 @@ def get_consul_status(aggregate_id=None):
     db_provider = provider_factory.db_provider()
     records = db_provider.get_latest_consul_status(aggregate_id)
     results = []
+    staled = False
     for record in records:
         if record is None:
             continue
@@ -133,7 +134,7 @@ def get_consul_status(aggregate_id=None):
         #  - 'last update'
 
         # get zone name by cluster id
-        aggregate = ha_provider.get_aggregate_info_for_cluster(record.clusterId)
+        aggregate = ha_provider.get_aggregate_info_for_cluster(int(record.clusterId))
         aggregate_name = aggregate.name
         aggregate_zone = aggregate.availability_zone
         aggregate_host_ids = aggregate.hosts
@@ -174,6 +175,50 @@ def get_consul_status(aggregate_id=None):
                                                 '%Y-%m-%d %H:%M:%S')
             }
             results.append(result)
+            staled = staled | ((datetime.utcnow() - record.lastUpdate) > timedelta(minutes=5))
+    # when no db records or they are old than 5 minutes, then use RPC to get real time status
+    # don't write back to db because it will blow away the db (tons of calls every 6 minutes)
+    # will generate lots of db records
+    if len([x for x in results if x]) <= 0 or staled:
+        LOG.info('no consul status records found in db or they staled, now get real time status by RPC')
+        realtime_status = ha_provider.refresh_consul_status()
+        target_aggregate = None
+        if realtime_status :
+            agg_ids = realtime_status.keys()
+
+            for agg_id in agg_ids:
+                aggregate = ha_provider.get_aggregate_info_for_cluster(str(agg_id))
+
+                if not aggregate:
+                    LOG.info('no host aggregate found with id %s', str(agg_id))
+                    continue
+
+                if aggregate_id and aggregate_id == agg_id:
+                    target_aggregate = aggregate
+                aggregate_name = aggregate.name
+                aggregate_zone = aggregate.availability_zone
+                for member in realtime_status[agg_id]['members']:
+                    host_id = member['Name']
+                    host_status = 'up' if member['Status'] == 1 else 'down'
+                    host_role = 'server' if member['Tags']['role'] == 'consul' else 'agent'
+                    is_leader = False
+                    if host_role == "server":
+                        # only server role will have port 8300 in Tags
+                        is_leader = (realtime_status[agg_id]['leader'] == ('%s:%s' % (member['Addr'], member['Tags']['port'])))
+                    # convert the data to output schema
+                    results.append({'aggregateName': aggregate_name,
+                                    'zoneName': aggregate_zone,
+                                    'hostId': host_id,
+                                    'hostStatus': host_status,
+                                    'consulRole': host_role,
+                                    'isLeader': is_leader,
+                                    'lastUpdate': datetime.strftime(datetime.utcnow(),
+                                                                    '%Y-%m-%d %H:%M:%S')})
+        else:
+            LOG.info('real time consul status not found')
+        if aggregate_id and target_aggregate:
+            results = [x for x in results if x['aggregateName'] == str(target_aggregate.name)]
+
     return jsonify(results)
 
 
@@ -199,6 +244,32 @@ def get_hosts_configs(aggregate_id):
     except Exception as e2:
         return jsonify(dict(success=False, error=e2.message)), 500, CONTENT_TYPE_HEADER
 
+
+@app.route('/v1/cluster', methods=['GET'])
+@error_handler
+def get_vmha_clusters():
+    """
+    get info for all active vmha clusters and their associated hosts from masakari.
+    :return:
+    info about active vmha clusters
+    """
+    ha_provider = provider_factory.ha_provider()
+    results = ha_provider.get_active_clusters(id=None)
+    return jsonify(results)
+
+
+@app.route('/v1/cluster/<int:aggregate_id>', methods=['GET'])
+@error_handler
+def get_vmha_cluster_by_id(aggregate_id):
+    """
+    get vmha cluster info for given name
+    :param aggregate_id: the host aggregate id
+    :return:
+    info about the given active vmha cluster
+    """
+    ha_provider = provider_factory.ha_provider()
+    results = ha_provider.get_active_clusters(id=aggregate_id)
+    return jsonify(results)
 
 def app_factory(global_config, **local_conf):
     return app
