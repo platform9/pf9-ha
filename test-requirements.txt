@@ -40,3 +40,4 @@ cryptography==2.1.4
 oslo.config==3.9.0
 python-consul==1.1.0
 testtools==2.0.0
+tox>=3.13.0
