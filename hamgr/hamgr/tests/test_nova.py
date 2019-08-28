@@ -28,7 +28,8 @@ class FakeNovaClient(object):
             self.hosts = []
             for i in range(4):
                 m = mock.Mock()
-                m.service.host = str(i)
+
+                m.service = dict(host = str(i))
                 m.host_ip = '192.178.1.%d' % i
                 self.hosts.append(m)
 
@@ -43,7 +44,7 @@ class FakeNovaClient(object):
         def get(self, *args, **kwargs):
             return self.aggr
 
-    Aggregate.aggr.hosts = [h.service.host
+    Aggregate.aggr.hosts = [h.service['host']
                             for h in hypervisors.list()]
     aggregates = Aggregate()
 
@@ -96,17 +97,52 @@ class NovaProviderTest(unittest.TestCase):
 
     def _enable_aggregate(self, mock_del, mock_put, mock_get, mock_post,
                           mock_token, aggregate_id):
-        host = {'id': "fake_id",
-                'roles': ['fake_role_1', 'fake_role_2', 'fake_role_2'],
-                'info': {'responding': True},
-                'role_status': 'ok'}
+        host = {
+            'id': "0",
+            'name':'fake-host-name',
+            'uuid': 'fake-host-uuid',
+            'roles': ['fake_role_1', 'fake_role_2', 'pf9-ostackhost-neutron'],
+            'info': {'responding': True},
+            'role_status': 'ok'
+        }
+        role_settings = {
+            'fake_role_1': {},
+            'fake_role_2': {},
+            'pf9-ostackhost-neutron': {"consul_ip": "192.178.1.1", "cluster_ip": "192.178.1.1"}
+        }
+        segments_info = {
+            "segments": [
+                {"id": 0, "name": str(aggregate_id) }
+            ]
+        }
+
+
         mock_resp = mock.Mock()
         mock_resp.status_code = 200
         mock_resp.raise_for_status = lambda *args: None
-        mock_resp.json = lambda *args: [dict(
-            host, segment=dict(name='fake1', uuid='fake'), role_status='ok')]
+
+        import re
+        def _get_side_effect(endpoint, *args, **kwargs):
+            _obj = mock.Mock()
+            _val = _obj.return_value
+            _val.raise_for_status = lambda *args: None
+
+            if re.match('.*/hosts/\\d$', str(endpoint)):
+                _val.status_code = 200
+                _val.json = lambda *args: host
+                return _val
+            elif re.match('.*/hosts/\\d/roles', str(endpoint)) :
+                _val.status_code = 200
+                _val.json = lambda *args: role_settings['pf9-ostackhost-neutron']
+                return _val
+            elif re.match('.*/segments$', str(endpoint)):
+                _val.status_code = 200
+                _val.json = lambda *args: segments_info
+                return _val
+
+        mock_resp.json = lambda *args: host
         mock_post.return_value = mock_resp
-        mock_get.return_value = mock_resp
+        mock_get.side_effect = _get_side_effect
         mock_put.return_value = mock_resp
         mock_del.return_value = mock_resp
         mock_token.return_value = dict(id='1234sbds')
@@ -136,7 +172,6 @@ class NovaProviderTest(unittest.TestCase):
         self.assertIsNotNone(aggregates)
         aggregate = aggregates[0]
         self.assertTrue(aggregate['enabled'] == True)
-
 
     @mock.patch('hamgr.common.utils.get_token')
     @mock.patch('requests.post')
