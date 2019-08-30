@@ -826,6 +826,12 @@ def loop():
                     cluster_setup = False
 
                 if not cluster_setup:
+                    # refresh the config file and restart consul, in case there is no leader or join failed
+                    # this happens when consul settings are updated through resmgr after consul had started
+                    # so need to re-config the settings and re-start consul
+                    generate_consul_conf()
+                    start_consul_service()
+
                     # Running join against oneself generates a warning message in
                     # logs but does not cause consul to crash
                     global_join_ips = get_join_ips()
@@ -848,11 +854,7 @@ def loop():
                                  global_join_ips,
                                  str(retcode),
                                  str(leader))
-                        # refresh the config file and restart consul, in case there is no leader or join failed
-                        # this happens when consul settings are updated through resmgr after consul had started
-                        # so need to re-config the settings and re-start consul
-                        generate_consul_conf()
-                        start_consul_service()
+                        cluster_setup = False
                 else:
                     if REBALANCE_IN_PROGRESS:
                         LOG.info('consul role rebalance is in progress, need to wait for it complete')
