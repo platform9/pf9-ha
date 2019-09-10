@@ -15,4 +15,4 @@ sqlalchemy-migrate==0.9.5
 mysql-python
 enum34
 pika==0.12.0
-cryptography==2.1.4
+cryptography==2.3
