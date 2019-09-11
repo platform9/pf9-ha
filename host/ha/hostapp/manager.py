@@ -216,8 +216,27 @@ def start_consul_service():
                 LOG.warn('Consul service was already running. now stop it before start')
                 retcode = run_cmd('sudo service pf9-consul stop')
                 LOG.info('retcode of command "sudo service pf9-consul stop" : %s', str(retcode))
-            retcode = run_cmd('sudo service pf9-consul start')
-            LOG.info('retcode of command "sudo service pf9-consul start" : %s', str(retcode))
+
+            # force to kill the consul process if it exists
+            # the 'sudo service pf9-consul stop' sometimes did not stop the consul
+            pid = 0
+            try:
+                pidtxt = os.popen("ps -ef | grep consul | grep -v grep | awk \'{ print $2 }\'").read();
+                LOG.info('output of finding consul process id : %s', str(pidtxt))
+                if pidtxt:
+                    pid = int(pidtxt)
+            except Exception as e:
+                LOG.warn('no pid found for consul process. error : %s', str(e))
+
+            if pid:
+                LOG.info('kill consul process %s', str(pid))
+                retcode = run_cmd('kill -9 %s' % str(pid))
+                LOG.info('consul process %s is killed ? %s', str(pid), str(retcode == 0))
+
+            LOG.info('start pf9-consul service using restart command')
+            retcode = run_cmd('sudo service pf9-consul restart')
+            LOG.info('retcode of command "sudo service pf9-consul restart" : %s', str(retcode))
+
             # Sleep 3s to allow consul to fail in case the bootstrap server
             # has not yet started. This also allows us 90s before the cluster
             # creation will fail
@@ -233,13 +252,6 @@ def start_consul_service():
             else:
                 LOG.warn('Consul service could not be started')
 
-            # clean old data if failed to start consul
-            consul_raft_db = os.path.join(PF9_CONSUL_DATA_DIR, "raft/raft.db")
-            consul_raft_snapshots = os.path.join(PF9_CONSUL_DATA_DIR, "raft/snapshots")
-            if os.path.exists(consul_raft_db):
-                os.remove(consul_raft_db)
-            if os.path.exists(consul_raft_snapshots):
-                os.rmdir(consul_raft_snapshots)
             # when failed to start consul, check whether needs to repairs node-id or keyring
             # those are the two files messed up by consul itself
             repair_consul_wiped_files_if_needed()
