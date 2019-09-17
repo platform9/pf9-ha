@@ -1,18 +1,18 @@
 pbr==3.1.1
 oslo.config==3.9.0
-SQLAlchemy==0.9.8
+SQLAlchemy>=1.3.0
 python-novaclient==6.0.0
 python-keystoneclient
 keystoneauth1
 keystonemiddleware==4.3.0
-jinja2==2.8.1
+jinja2>=2.10.1
 # pike release required version 0.12.2
-flask~=0.12.3
+flask>=1.0.0
 Paste==1.7.5.1
 PasteDeploy==1.5.2
 eventlet==0.18.4
-sqlalchemy-migrate==0.9.5
+sqlalchemy-migrate>=0.12.0
 mysql-python
 enum34
 pika==0.12.0
-cryptography==2.1.4
+cryptography>=2.3
