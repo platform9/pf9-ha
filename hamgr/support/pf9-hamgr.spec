@@ -22,6 +22,9 @@ BuildRequires:  mysql-devel
 Requires(pre): /usr/sbin/useradd, /usr/bin/getent
 Requires(postun): /usr/sbin/userdel
 
+# ignore byte compile for python 3.5 based libraries when build with python 2.7
+%global __os_install_post %(echo '%{__os_install_post}' | sed -e 's!/usr/lib[^[:space:]]*/brp-python-bytecompile[[:space:]].*$!!g')
+
 %description
 Distribution of the %{summary} built from %{project}@%{_githash}
 
