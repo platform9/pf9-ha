@@ -22,4 +22,4 @@ pip install -U pip
 echo 'upgrade setuptools ...'
 pip install -U setuptools
 echo 'install dependencies from ' + $@
-pip install $@
+pip install -chttps://raw.githubusercontent.com/openstack/requirements/stable/pike/upper-constraints.txt $@

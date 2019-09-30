@@ -82,7 +82,7 @@ class NotificationManager(object):
             if self._notification_producer is None:
                 LOG.info('create RPC publisher , %s ', msg)
                 self._notification_producer = RpcProducer(host=host,
-                                                          port=port,
+                                                          port=int(port),
                                                           user=username,
                                                           password=password,
                                                           exchange=exchange,

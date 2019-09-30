@@ -43,7 +43,7 @@ class RpcBase(object):
         self._stopping = False
         self._credentials = pika.PlainCredentials(username=self._user, password=self._password)
         self._connection_parameters = pika.ConnectionParameters(host=self._host,
-                                                                port=self._port,
+                                                                port=int(self._port),
                                                                 virtual_host=self._virtual_host,
                                                                 credentials=self._credentials)
         self._closing = False
