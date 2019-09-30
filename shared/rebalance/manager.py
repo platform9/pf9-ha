@@ -83,7 +83,7 @@ class RebalanceManager(object):
         if self.role_rebalance_rpc_producer is None:
             LOG.info('create RPC producer, %s, routing %s', msg, routingkey_for_sending)
             self.role_rebalance_rpc_producer = RpcProducer(host=host,
-                                                           port=port,
+                                                           port=int(port),
                                                            user=username,
                                                            password=password,
                                                            exchange=exchange_name,
@@ -95,7 +95,7 @@ class RebalanceManager(object):
         if self.role_rebalance_rpc_consumer is None:
             LOG.info('create RPC consumer, %s, routing key %s, queue %s', msg, routingkey_for_receiving, queue_for_receiving)
             self.role_rebalance_rpc_consumer = RpcConsumer(host=host,
-                                                           port=port,
+                                                           port=int(port),
                                                            user=username,
                                                            password=password,
                                                            exchange=exchange_name,

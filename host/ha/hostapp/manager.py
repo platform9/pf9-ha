@@ -74,7 +74,8 @@ def setup_conf_options():
         cfg.StrOpt('ca_file_content', default='', help='base64 encoded consul CA cert content'),
         cfg.StrOpt('cert_file_content', default='', help='base64 encoded consul server cert content'),
         cfg.StrOpt('key_file_content', default='', help='base64 encoded consul server key content'),
-        cfg.StrOpt('consul_log_level', default='info', help='log level of consul agent')
+        cfg.StrOpt('consul_log_level', default='info', help='log level of consul agent'),
+        cfg.StrOpt('cluster_details', default='', help='the hosts and their ips in expected consul cluster')
     ]
 
     default_opts = [
@@ -659,7 +660,8 @@ def config_needs_refresh():
         encrypt=CONF.consul.encrypt,
         ca_file_content=CONF.consul.ca_file_content,
         cert_file_content=CONF.consul.cert_file_content,
-        key_file_content=CONF.consul.key_file_content
+        key_file_content=CONF.consul.key_file_content,
+        consul_log_level=CONF.consul.consul_log_level
     )
     LOG.info('found settings for consul from pf9-ha : %s', str(settings_source))
     settings_consul = {}
@@ -725,6 +727,13 @@ def config_needs_refresh():
                      file_content)
             return True
 
+    # consul log level
+    if str(settings_source['consul_log_level']) != str(settings_consul.get('log_level', None)):
+        LOG.info('detected changes in consul_log_level, source : %s , consul cfg : %s',
+                 settings_source['consul_log_level'],
+                 settings_consul.get('log_level', None))
+
+        return True
     LOG.info('configuration for consul has not changed')
     return False
 
@@ -802,7 +811,17 @@ def loop():
     global_join_ips = get_join_ips()
     LOG.debug('consul join addresses from config file :%s', global_join_ips)
 
-    ch = consul_helper.consul_status(global_hostid, global_join_ips.split(' '))
+    LOG.debug('expected consul cluster : %s', CONF.consul.cluster_details)
+    cluster_details = json.loads(CONF.consul.cluster_details)
+    LOG.debug('cluster details : %s', str(cluster_details))
+    # the cluster_details should contains one entry for each ip in the ips_to_join
+    ips_to_join = global_join_ips.strip(' ').split(' ')
+    if not cluster_details or \
+            len(cluster_details) != len(ips_to_join) or \
+            not set(ips_to_join).issubset(set([x['addr'] for x in cluster_details])):
+        raise ha_exceptions.ConfigException('cluster_details is none, or its size is different than join_ips')
+
+    ch = consul_helper.consul_status(global_hostid, ips_to_join, cluster_details)
     reporter = report.HaManagerReporter()
     start_loop = False
     cluster_setup = False
