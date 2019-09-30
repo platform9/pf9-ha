@@ -36,7 +36,8 @@ g_kv_key_format = '%s:%s' % (g_base_ip_format, g_consul_port)
 g_report_interval_seconds = 1
 g_host_id = None
 g_join_ips = ''
-
+g_cluster_details = []
+g_excluded_host_ids = []
 
 def g_init():
     global g_host_ids
@@ -49,11 +50,15 @@ def g_init():
     global g_report_interval_seconds
     global g_host_id
     global g_join_ips
+    global g_cluster_details
+    global g_excluded_host_ids
 
+    g_join_ips = ''
     g_host_ids = []
     g_consul_cache = []
     g_host_status.clear()
     g_host_id_to_ip_map.clear()
+    g_excluded_host_ids = []
 
     for i in range(1, 1 + len(g_consul_member_ids)):
         xid = g_consul_member_ids[i - 1]
@@ -67,7 +72,10 @@ def g_init():
             'Key': kv_key,
             'Value': xid
         })
-        g_join_ips = g_join_ips + ' ' + g_base_ip_format % str(i-1)
+        xip = g_base_ip_format % str(i-1)
+        g_join_ips = g_join_ips + ' ' + xip
+        g_cluster_details.append({'name':str(xid), 'addr': xip})
+    g_join_ips = g_join_ips.strip(' ')
     g_host_id = g_host_ids[0]
 
 
@@ -124,6 +132,8 @@ def g_consul_kv_delete(key, *args, **kwargs):
 def g_consul_agent_members(*args, **kwargs):
     members = []
     for xid in g_host_ids:
+        if g_excluded_host_ids and xid in g_excluded_host_ids:
+            continue
         status = g_host_status[xid]
         addr = g_host_id_to_ip_map[xid]
         members.append({
@@ -155,6 +165,14 @@ def g_consul_status_peers(*args, **kwargs):
         peers.append(g_consul_cache[i - 1]["Key"])
     return peers
 
+
+def g_consul_add_excluded_host(host_id):
+    g_excluded_host_ids.append(host_id)
+
+
+def g_consul_clean_excluded_host(host_id):
+    if host_id in g_excluded_host_ids:
+        g_excluded_host_ids.remove(host_id)
 
 class ConsulStatusTest(unittest.TestCase):
     def __init__(self, *args, **kwargs):
@@ -228,7 +246,7 @@ class ConsulStatusTest(unittest.TestCase):
         import importlib
         my_module = importlib.import_module('ha.utils.consul_helper')
         my_class = getattr(my_module, 'consul_status')
-        self._consul_helper = my_class(g_host_id, g_join_ips)
+        self._consul_helper = my_class(g_host_id, g_join_ips.strip(' ').split(' '), g_cluster_details)
         self._consul_helper.leader = True
 
     def tearDown(self):
@@ -240,6 +258,10 @@ class ConsulStatusTest(unittest.TestCase):
         pass
 
     def _assert_initial_consul_status(self):
+        # restore the 'consul members' to normal
+        agent_members = mock.Mock(side_effect=g_consul_agent_members)
+        self.consul_instance.agent.members = agent_members
+
         # simulate the consul leader role
         self._consul_helper.leader = True
         # clean existing reports by reset host to up
@@ -248,19 +270,34 @@ class ConsulStatusTest(unittest.TestCase):
             self._consul_helper.refresh_cache_from_consul()
             time.sleep(g_report_interval_seconds + 6)
             status = self._consul_helper.get_cluster_status()
-            self.assertIsNone(status)
+            if status:
+                self._consul_helper.update_reported_status(status)
+            # self.assertIsNone(status)
 
     def _assert_host_status_change(self, host_index, host_status):
         xid = g_consul_cache[host_index]["Value"]
         g_host_status[xid] = host_status
         self._consul_helper.refresh_cache_from_consul()
         # check host down event is reported
-        time.sleep(g_report_interval_seconds + 6)
+        time.sleep(g_report_interval_seconds + 60)
+        # self._consul_helper.refresh_cache_from_consul()
+        # time.sleep(g_report_interval_seconds + 60)
+        g_logger('checking report for host %s with status %s', xid, host_status)
         status = self._consul_helper.get_cluster_status()
-        self.assertIsNotNone(status)
+        msg = 'status %s for host %s is reported ? %s' % (str(host_status), str(xid), str(status))
+        g_logger('%s', msg)
+        self.assertIsNotNone(status, msg)
+        msg = 'event in reported status %s, the status was set as %s' % (
+                 str(status.event['eventType']), str(1 if host_status==1 else 2))
+        g_logger(msg)
+        self.assertEqual(status.event['eventType'], 1 if host_status==1 else 2, msg)
+        g_logger('marking status as reported')
         self._consul_helper.update_reported_status(status)
+        g_logger('checking reported status get removed')
         status = self._consul_helper.get_cluster_status()
-        self.assertIsNone(status)
+        msg = 'reported status has not been removed ? : %s' % (str(status))
+        g_logger('%s', msg)
+        self.assertIsNone(status, msg)
 
     def _assert_report_status(self, host_id, report_status):
         report = g_consul_kv_get(host_id)
@@ -276,15 +313,18 @@ class ConsulStatusTest(unittest.TestCase):
     def _assert_host_down_then_up(self, host_index):
         # make host down
         host_id = g_consul_cache[host_index]["Value"]
+        g_logger('make host %s down and verify event is reported', host_id)
         self._assert_host_status_change(host_index, 2)
         self._assert_report_status(host_id, True)
 
         # make host up
         host_id = g_consul_cache[host_index]["Value"]
+        g_logger('make host %s up and check status', str(host_id))
         self._assert_host_status_change(host_index, 1)
 
         # after the host recovered from down status, its down status report
         # should be removed from consul
+        g_logger('verify no kv store for host %s', host_id)
         report = g_consul_kv_get(host_id)
         self.assertIsNone(report[1])
 
@@ -329,6 +369,7 @@ class ConsulStatusTest(unittest.TestCase):
 
         # make second host down then up
         host_index = 1
+        g_logger('verify host down then up for host : %s',g_consul_cache[host_index]["Value"])
         self._assert_host_down_then_up(host_index)
 
     def test_non_leader_host_repeatedly_down_and_up(self):
@@ -338,6 +379,7 @@ class ConsulStatusTest(unittest.TestCase):
         host_index = 1
         while host_index < 4:
             # simulate host down then up, for all hosts, one by one
+            g_logger('verify host %s down then up ', g_consul_cache[host_index]["Value"])
             self._assert_host_down_then_up(host_index)
 
             host_index = host_index + 1
@@ -349,9 +391,41 @@ class ConsulStatusTest(unittest.TestCase):
         # make host down so there will be report in consul
         host_index = 1
         host_id = g_consul_cache[host_index]["Value"]
+        g_logger('set host status to 9 and verify host-down is reported')
         self._assert_host_status_change(host_index, 9)
         # check the reported report will be cleaned out
         time.sleep(g_report_interval_seconds + 60)
+        g_logger('verify old report will be cleaned')
         self._consul_helper.cleanup_consul_kv_store()
         report = g_consul_kv_get(host_id)
         self.assertIsNone(report[1])
+
+    def test_event_still_reported_when_consul_reaped_host(self):
+        # 'consul member' may not return 'left' or 'failed' node
+        # this caused host event not reported, this test will
+        # validate the host-down event still reported in such case
+
+        # first set initial status
+        self._assert_initial_consul_status()
+        # make one host down
+        host_index = 1
+        host_id = g_consul_cache[host_index]["Value"]
+        g_host_status[host_index] = 9
+        # try to remove the host from 'consul members' result
+        g_consul_add_excluded_host(host_id)
+        # update the cache to see whether still report the event
+        self._consul_helper.refresh_cache_from_consul()
+        # wait for event out of threshold window
+        time.sleep(g_report_interval_seconds + 60)
+        # report the event
+        status = self._consul_helper.get_cluster_status()
+        self.assertIsNotNone(status)
+        # check event is in kv store
+        report = g_consul_kv_get(host_id)
+        self.assertIsNotNone(report[1])
+        # now set it as reported
+        self._consul_helper.update_reported_status(status)
+        status = self._consul_helper.get_cluster_status()
+        self.assertIsNone(status)
+        # clean the excluded host
+        g_consul_clean_excluded_host(host_id)

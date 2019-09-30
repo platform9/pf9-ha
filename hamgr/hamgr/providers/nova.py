@@ -821,7 +821,8 @@ class NovaProvider(Provider):
             error = 'host %s does not have pf9-ha-slave role' % target_host_id
             return {'status': constants.RPC_TASK_STATE_ABORTED, 'error': error}
 
-        data = self._customize_pf9_ha_slave_config(cluster_name, join_ips, host_ip, host_ip)
+        _, _, nodes_details = self._get_ips_for_hosts_v3(cluster_name)
+        data = self._customize_pf9_ha_slave_config(cluster_name, join_ips, host_ip, host_ip, nodes_details)
         # step 1 : modify 'bootstrap_expect' base on the new role
         data['bootstrap_expect'] = 3 if target_new_role == constants.CONSUL_ROLE_SERVER else 0
         LOG.info('update resmgr for consul role rebalance for host %s with data %s', target_host_id, str(data))
@@ -865,11 +866,11 @@ class NovaProvider(Provider):
             all_hosts = list(set(host_ids_for_adding).union(set(peer_host_ids)))
             hypervisors = nova_client.hypervisors.list()
             hosts_info = self._resmgr_client.fetch_hosts_details(all_hosts, self._token['id'])
-            ip_lookup, cluster_ip_lookup = self._get_ips_for_hosts_v2(hypervisors,
+            ip_lookup, cluster_ip_lookup, nodes_details = self._get_ips_for_hosts_v2(hypervisors,
                                                                       all_hosts,
                                                                       hosts_info)
 
-            self._auth(cluster_name, ip_lookup, cluster_ip_lookup, self._token, role_missed_host_ids, consul_role)
+            self._auth(cluster_name, ip_lookup, cluster_ip_lookup, nodes_details, self._token, role_missed_host_ids, consul_role)
             self._wait_for_role_to_ok_v2(role_missed_host_ids)
 
     def _remove_ha_slave_if_exist(self, host_ids):
@@ -1011,7 +1012,7 @@ class NovaProvider(Provider):
                              'moment.', host, json_resp['info']['responding'])
                     raise ha_exceptions.HostOffline(host)
 
-    def _customize_pf9_ha_slave_config(self, cluster_name, consul_join_ips, consul_host_ip, consul_cluster_ip):
+    def _customize_pf9_ha_slave_config(self, cluster_name, consul_join_ips, consul_host_ip, consul_cluster_ip, nodes_details):
         # since the pf9-ha-slave role is controlled by hamgr, all the customizable settings for pf9-ha-slave role
         # that need to be synced with hamgr should be list here to be passed down to resmgr for updating
         # the settings for pf9-ha-slave on host.
@@ -1020,7 +1021,8 @@ class NovaProvider(Provider):
         customize_cfg = dict(cluster_name=str(cluster_name),
                              join=consul_join_ips,
                              ip_address=consul_host_ip,
-                             cluster_ip=consul_cluster_ip)
+                             cluster_ip=consul_cluster_ip,
+                             cluster_details=json.dumps(nodes_details))
         # then other settings
         is_enabled = self._config.getboolean("DEFAULT", "enable_consul_role_rebalance") \
             if self._config.has_option("DEFAULT", "enable_consul_role_rebalance") else False
@@ -1055,9 +1057,10 @@ class NovaProvider(Provider):
             customize_cfg['cert_file_content'] = svc_cert_content
             customize_cfg['key_file_content'] = svc_key_content
 
+        LOG.debug('customized role configuration : %s', str(customize_cfg))
         return customize_cfg
 
-    def _auth(self, aggregate_id, ip_lookup, cluster_ip_lookup, token, nodes, role):
+    def _auth(self, aggregate_id, ip_lookup, cluster_ip_lookup, nodes_details, token, nodes, role):
         assert role in ['server', 'agent']
         valid_ips = [x for x in cluster_ip_lookup.values() if x != '']
         ips = ','.join([str(v) for v in valid_ips])
@@ -1066,7 +1069,7 @@ class NovaProvider(Provider):
             start_time = datetime.now()
             LOG.info('Authorizing pf9-ha-slave role on node %s using IP %s',
                      node, ip_lookup[node])
-            data = self._customize_pf9_ha_slave_config(aggregate_id, ips, ip_lookup[node], cluster_ip_lookup[node])
+            data = self._customize_pf9_ha_slave_config(aggregate_id, ips, ip_lookup[node], cluster_ip_lookup[node], nodes_details)
             data['bootstrap_expect'] = 3 if role == 'server' else 0
             resp = self._resmgr_client.update_role(node, 'pf9-ha-slave', data, self._token['id'])
             if resp.status_code == requests.codes.not_found and \
@@ -1102,10 +1105,27 @@ class NovaProvider(Provider):
         LOG.info('consul_ip is not set for host %s, fall back to cluster_ip', str(host_id))
         return self._get_cluster_ip(host_id, json_resp)
 
+    def _get_ips_for_hosts_v3(self, aggregate_id):
+        cluster_name = str(aggregate_id)
+        # get hosts ids from masakari for current cluster
+        hosts = masakari.get_nodes_in_segment(self._token, str(cluster_name))
+        LOG.debug('hosts in aggregate %s : %s', cluster_name, str(hosts))
+        host_ids = [x['name'] for x in hosts]
+        LOG.debug('checking configs for %s hosts in aggregate %s : %s',
+                  str(len(host_ids)), cluster_name, str(host_ids))
+        nova_client = self._get_nova_client()
+        hypervisors = nova_client.hypervisors.list()
+        hosts_info = self._resmgr_client.fetch_hosts_details(host_ids, self._token['id'])
+        ip_lookup, cluster_ip_lookup, nodes_details = self._get_ips_for_hosts_v2(hypervisors,
+                                                                                 host_ids,
+                                                                                 hosts_info)
+        return ip_lookup, cluster_ip_lookup, nodes_details
+
     def _get_ips_for_hosts_v2(self, all_hypervisors, host_ids, hosts_info):
         lookup = set(host_ids)
         ip_lookup = dict()
         cluster_ip_lookup = dict()
+        nodes_details = []
         for hyp in all_hypervisors:
             host_id = hyp.service['host']
             cluster_ip = ''
@@ -1138,6 +1158,8 @@ class NovaProvider(Provider):
                         cluster_ip_lookup[host_id] = consul_ip
                 else:
                     LOG.warn('no role map for hypervisor %s', str(host_id))
+
+            nodes_details.append({'name': host_id, 'addr': cluster_ip})
         # throw exception if num of items in both ip_lookup and cluster_ip_lookup
         # not equals to num of hosts, this will fail the caller earlier
         if len(ip_lookup.keys()) != len(host_ids):
@@ -1150,7 +1172,7 @@ class NovaProvider(Provider):
             LOG.warn('size not match : cluster_ip_lookup : %s, hosts : %s, found no cluster ip for hosts %s',
                      str(cluster_ip_lookup), str(host_ids), str(ids))
             raise ha_exceptions.HostsIpNotFound(list(ids))
-        return ip_lookup, cluster_ip_lookup
+        return ip_lookup, cluster_ip_lookup, nodes_details
 
     def _assign_roles(self, nova_client, aggregate_id, hosts):
         hosts = sorted(hosts)
@@ -1165,7 +1187,7 @@ class NovaProvider(Provider):
         self._token = self._get_v3_token()
         hypervisors = nova_client.hypervisors.list()
         hosts_info = self._resmgr_client.fetch_hosts_details(hosts, self._token['id'])
-        ip_lookup, cluster_ip_lookup = self._get_ips_for_hosts_v2(hypervisors,
+        ip_lookup, cluster_ip_lookup, nodes_details = self._get_ips_for_hosts_v2(hypervisors,
                                                                   hosts,
                                                                   hosts_info)
 
@@ -1177,8 +1199,8 @@ class NovaProvider(Provider):
 
         self._token = self._get_v3_token()
         LOG.info('authorize pf9-ha-slave during assign roles')
-        self._auth(aggregate_id, ip_lookup, cluster_ip_lookup, self._token, [leader] + servers, 'server')
-        self._auth(aggregate_id, ip_lookup, cluster_ip_lookup, self._token, agents, 'agent')
+        self._auth(aggregate_id, ip_lookup, cluster_ip_lookup, nodes_details, self._token, [leader] + servers, 'server')
+        self._auth(aggregate_id, ip_lookup, cluster_ip_lookup, nodes_details, self._token, agents, 'agent')
 
     def __perf_meter(self, method, time_start):
         time_end = datetime.utcnow()
@@ -2153,10 +2175,10 @@ class NovaProvider(Provider):
                           str(len(host_ids)), cluster_name, str(host_ids))
                 hypervisors = nova_client.hypervisors.list()
                 hosts_info = self._resmgr_client.fetch_hosts_details(host_ids, self._token['id'])
-                ip_lookup, cluster_ip_lookup = self._get_ips_for_hosts_v2(hypervisors,
+                ip_lookup, cluster_ip_lookup, nodes_details = self._get_ips_for_hosts_v2(hypervisors,
                                                                           host_ids,
                                                                           hosts_info)
-
+                join_nodes = {}
                 # need to push the settings for each host through resmgr
                 for host in hosts:
                     host_id = str(host['name'])
@@ -2207,12 +2229,13 @@ class NovaProvider(Provider):
                             LOG.info('configs for host %s in aggregate %s will be refreshed', str(host_id), cluster_name)
                             valid_ips = [x for x in cluster_ip_lookup.values() if x != '']
                             join_ips = ','.join([str(v) for v in valid_ips])
+                            join_nodes = {}
                             host_ip = ip_lookup[host_id]
                             # after the pf9-ha-slave role is enabled, the resmgr should have below customized settings:
                             # - cluster_ip, join, ip_address, bootstrap_expect
                             # no matter they are existed or not, always set cluster_ip, join, ip_address.
                             # only the bootstrap_expect can not be determined here
-                            data = self._customize_pf9_ha_slave_config(cluster_name, join_ips, host_ip, host_ip)
+                            data = self._customize_pf9_ha_slave_config(cluster_name, join_ips, host_ip, host_ip, nodes_details)
                             # update resmgr with the new settings
                             LOG.info('update certs settings for cluster %s for host %s with data %s',
                                      str(cluster_name), str(host_ip), str(data))
