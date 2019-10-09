@@ -228,7 +228,7 @@ def update_request_status(cluster_id, status):
     with dbsession() as session:
         db_cluster = _get_cluster(session, cluster_id)
         if not db_cluster:
-            LOG.info('update_request_status: no cluster found with id %s', str(cluster_id))
+            LOG.debug('update_request_status: no cluster found with id %s', str(cluster_id))
             return
         db_cluster.status = status
         db_cluster.updated_at = datetime.datetime.utcnow()
@@ -275,7 +275,7 @@ def update_cluster(cluster_id, enabled):
     with dbsession() as session:
         db_cluster = _get_cluster(session, cluster_id)
         if not db_cluster:
-            LOG.info('update_cluster: no cluster found with id %s for action %s', str(cluster_id), str(enabled))
+            LOG.debug('update_cluster: no cluster found with id %s for action %s', str(cluster_id), str(enabled))
             return
         db_cluster.updated_at = datetime.datetime.utcnow()
         db_cluster.enabled = enabled
@@ -291,7 +291,7 @@ def update_cluster_task_state(cluster_id, state):
     with dbsession() as session:
         db_cluster = _get_cluster(session, cluster_id)
         if not db_cluster:
-            LOG.info('update_cluster_task_state: no cluster found with id %s for new task state %s',
+            LOG.debug('update_cluster_task_state: no cluster found with id %s for new task state %s',
                      str(cluster_id), str(state))
             return
         task_state = db_cluster.task_state
@@ -476,7 +476,7 @@ def update_processing_event_with_notification(event_uuid, notification_uuid,
             query = query.filter_by(event_uuid=event_uuid)
             ep = query.first()
             if not ep:
-                LOG.info('event %s does not exist', event_uuid)
+                LOG.debug('event %s does not exist', event_uuid)
                 return
             LOG.debug('found processing event %s : %s', event_uuid, str(ep))
             ep.notification_uuid = notification_uuid

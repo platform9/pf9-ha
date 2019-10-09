@@ -80,7 +80,7 @@ class NotificationManager(object):
                                                                       str(exchange_type))
             self._initialized = False
             if self._notification_producer is None:
-                LOG.info('create RPC publisher , %s ', msg)
+                LOG.debug('create RPC publisher , %s ', msg)
                 self._notification_producer = RpcProducer(host=host,
                                                           port=int(port),
                                                           user=username,
@@ -90,7 +90,7 @@ class NotificationManager(object):
                                                           routing_key=routing_key,
                                                           virtual_host=virtual_host)
                 assert self._notification_producer is not None
-                LOG.info("start RPC producer, %s", msg)
+                LOG.debug("start RPC producer, %s", msg)
                 self._notification_producer.start()
                 LOG.debug("RPC producer has started, %s", msg)
                 self._initialized = True
@@ -103,7 +103,7 @@ class NotificationManager(object):
 
     def send_notification(self, notification):
         if not self._notification_enabled:
-            LOG.info('ignore notification request as notification function is not enabled')
+            LOG.debug('ignore notification request as notification function is not enabled')
             return
 
         if not notification or not isinstance(notification, Notification):
@@ -126,8 +126,8 @@ class NotificationManager(object):
 def get_notification_manager(config):
     global _notification_manager
     if _notification_manager is None:
-        LOG.info('creating notofication manager')
-        LOG.info(traceback.format_exc())
+        LOG.debug('creating notification manager')
+        LOG.debug(traceback.format_exc())
         _notification_manager = NotificationManager(config)
 
     return _notification_manager
