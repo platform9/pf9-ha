@@ -25,51 +25,48 @@ from oslo_config import cfg
 CONF = cfg.CONF
 log_group = cfg.OptGroup('log', title='Group for all log options')
 log_opts = [
-    cfg.StrOpt('level', default='DEBUG', help='Log level'),
+    cfg.StrOpt('level', default='INFO', help='Log level'),
     cfg.StrOpt('file', default='/var/log/pf9/pf9-ha.log',
-               help='log file location')
+               help='log file location'),
+    cfg.StrOpt('max_bytes', default='10000000', help='max size in bytes of log file when to rotate'),
+    cfg.StrOpt('backup_count', default='5', help='num of log files to rotate')
 ]
 CONF.register_group(log_group)
 CONF.register_opts(log_opts, log_group)
 LOG_FILE = CONF.log.file
+LOG_LEVEL = CONF.log.level
+LOG_MAX_BYTES = int(CONF.log.max_bytes)
+LOG_BACKUP_COUNT = int(CONF.log.backup_count)
 
-
-def setup_log_dir_and_file(filename, mode='a', encoding=None, owner=None):
+def setup_log_dir_and_file():
     try:
-        if not exists(dirname(filename)):
-            makedirs(dirname(filename))
-        if not exists(filename):
-            open(filename, mode).close()
-        return logging.FileHandler(filename, mode=mode)
+        if not exists(dirname(LOG_FILE)):
+            makedirs(dirname(LOG_FILE))
+        if not exists(LOG_FILE):
+            open(LOG_FILE, 'a').close()
     except Exception:
-        return logging.NullHandler()
+        logging.exception('unhandled exception when setup log dir and file')
 
 
 def setup_logger():
-    log_config = {
-        'version': 1.0,
-        'formatters': {
-            'default': {
-                'format': '%(asctime)s %(name)s %(levelname)s %(message)s'
-            },
-        },
-        'handlers': {
-            'file': {
-                '()': setup_log_dir_and_file,
-                'level': CONF.log.level,
-                'formatter': 'default',
-                'filename': LOG_FILE,
-            },
-        },
-        'root': {
-            'handlers': ['file'],
-            'level': CONF.log.level,
-        },
-    }
-    logging.config.dictConfig(log_config)
+    logging.basicConfig(filename=LOG_FILE, level=LOG_LEVEL)
 
 
 def getLogger(logger_name):
-    return logging.getLogger(logger_name)
+    logging.basicConfig(filename=LOG_FILE, level=LOG_LEVEL)
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(LOG_LEVEL)
+    formatter = logging.Formatter('%(asctime)s %(name)s %(levelname)s %(message)s')
+    handler = logging.handlers.RotatingFileHandler(LOG_FILE,
+                                                   mode='a',
+                                                   maxBytes=LOG_MAX_BYTES,
+                                                   backupCount=LOG_BACKUP_COUNT)
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
+    return logger
+
+
+setup_log_dir_and_file()
 setup_logger()

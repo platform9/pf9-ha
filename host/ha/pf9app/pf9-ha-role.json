@@ -78,6 +78,10 @@
     "amqp_routingkey_receiving": {
       "path": "config/ha_slave_conf/consul_role_rebalance",
       "default": "sending"
+    },
+    "level": {
+      "path": "config/ha_slave_conf/log",
+      "default": "INFO"
     }
   },
   "rabbit_permissions": {
@@ -109,6 +113,11 @@
             "report_interval": "180"
           },
           "node": {},
+          "log" : {
+            "file":"/var/log/pf9/pf9-ha.log",
+            "max_bytes": "10000000",
+            "backup_count": "5"
+          },
           "consul_role_rebalance": {
             "amqp_host": "localhost",
             "amqp_port": "5672",
