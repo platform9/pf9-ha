@@ -81,7 +81,7 @@ class RebalanceManager(object):
                                                                   str(exchange_name),
                                                                   str(exchange_type))
         if self.role_rebalance_rpc_producer is None:
-            LOG.info('create RPC producer, %s, routing %s', msg, routingkey_for_sending)
+            LOG.debug('create RPC producer, %s, routing %s', msg, routingkey_for_sending)
             self.role_rebalance_rpc_producer = RpcProducer(host=host,
                                                            port=int(port),
                                                            user=username,
@@ -90,10 +90,10 @@ class RebalanceManager(object):
                                                            exchange_type=exchange_type,
                                                            virtual_host=virtual_host,
                                                            routing_key=routingkey_for_sending)
-            LOG.info('start RPC producer, %s, routing %s', msg, routingkey_for_sending)
+            LOG.debug('start RPC producer, %s, routing %s', msg, routingkey_for_sending)
             self.role_rebalance_rpc_producer.start()
         if self.role_rebalance_rpc_consumer is None:
-            LOG.info('create RPC consumer, %s, routing key %s, queue %s', msg, routingkey_for_receiving, queue_for_receiving)
+            LOG.debug('create RPC consumer, %s, routing key %s, queue %s', msg, routingkey_for_receiving, queue_for_receiving)
             self.role_rebalance_rpc_consumer = RpcConsumer(host=host,
                                                            port=int(port),
                                                            user=username,
@@ -104,9 +104,9 @@ class RebalanceManager(object):
                                                            virtual_host=virtual_host,
                                                            routing_key=routingkey_for_receiving,
                                                            auto_delete_queue=auto_delete_consumer_queue)
-            LOG.info('set rpc consumer message callback')
+            LOG.debug('set rpc consumer message callback')
             self.role_rebalance_rpc_consumer.consume(self._on_consul_role_rebalance_messages)
-            LOG.info('start RPC consumer , %s', msg)
+            LOG.debug('start RPC consumer , %s', msg)
             self.role_rebalance_rpc_consumer.start()
 
 
@@ -170,7 +170,7 @@ class RebalanceManager(object):
             LOG.warn('ignore rebalance request as the RPC producer is not connected to server')
             return
         producer.publish(request)
-        LOG.info('successfully sent request : %s', str(request))
+        LOG.debug('successfully sent request : %s', str(request))
 
     def send_role_rebalance_response(self, response, type=message_types.MSG_ROLE_REBALANCE_RESPONSE):
         if response is None:
@@ -189,7 +189,7 @@ class RebalanceManager(object):
             LOG.warn('ignore sending rebalance response as the producer is not connected to remote server')
             return
         producer.publish(response)
-        LOG.info('successfully sent response : %s', str(response))
+        LOG.debug('successfully sent response : %s', str(response))
 
     def get_role_rebalance_request(self, request_type=message_types.MSG_ROLE_REBALANCE_REQUEST):
         if request_type not in message_schemas.valid_request_types():
@@ -250,5 +250,5 @@ class RebalanceManager(object):
                     LOG.debug('rebalance response not received after %s seconds for request %s', str(timeout_seconds),
                              str(request_id))
                     break
-        LOG.info('no response found for request id %s', str(request_id))
+        LOG.debug('no response found for request id %s', str(request_id))
         return None

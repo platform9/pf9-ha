@@ -62,16 +62,16 @@ class RpcDualClient(RpcBase):
 
 
     def _setup_queue(self, queue_name):
-        LOG.info('declaring queue %s', queue_name)
+        LOG.debug('declaring queue %s', queue_name)
         self._channel.queue_declare(self._on_queue_declare_ok, queue_name)
 
     def _on_queue_declare_ok(self, method_frame):
-        LOG.info('queue declared')
-        LOG.info('binding exchange %s to queue %s with routing %s', self._exchange, self._queue_name, self._routing_key)
+        LOG.debug('queue declared')
+        LOG.debug('binding exchange %s to queue %s with routing %s', self._exchange, self._queue_name, self._routing_key)
         self._channel.queue_bind(self._on_queue_bind_ok, self._queue_name, self._exchange, self._routing_key)
 
     def _on_queue_bind_ok(self, unused_frame):
-        LOG.info('queue bound')
+        LOG.debug('queue bound')
         LOG.debug('consumer connection is ready, register consumer cancellation callback')
         self.get_channel().add_on_cancel_callback(self._on_consumer_cancelled)
         LOG.debug('consumer connection is ready, register consumer callback to receive messages')
@@ -86,7 +86,7 @@ class RpcDualClient(RpcBase):
                   str(properties),
                   str(body))
         tag = basic_deliver.delivery_tag
-        LOG.info('consumer acknowledging received message # %s : %s', tag, body)
+        LOG.debug('consumer acknowledging received message # %s : %s', tag, body)
         self.get_channel().basic_ack(tag)
         for k, v in self._callbacks_list.iteritems():
             try:
@@ -119,7 +119,7 @@ class RpcDualClient(RpcBase):
     def consume(self, messages_callback):
         if not callable(messages_callback):
             raise Exception('messages_callback needs to be a method')
-        LOG.info('attach callback to receive messages')
+        LOG.debug('attach callback to receive messages')
         if not self._callbacks_list.has_key(str(messages_callback)):
             self._callbacks_list[str(messages_callback)] = messages_callback
 

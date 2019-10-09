@@ -465,7 +465,7 @@ class NovaProvider(Provider):
                 hamgr_clusters_for_agg = [x for x in hamgr_all_clusters if x.name == str(nova_agg_id)]
                 LOG.info('found hamgr clusters for nova aggregate %s : %s', str(nova_agg_id), str(hamgr_clusters_for_agg))
                 if len(hamgr_clusters_for_agg) <= 0:
-                    LOG.info('there is no matched vmha cluster with name matches to nova aggregate id %s', str(nova_agg_id))
+                    LOG.warn('there is no matched vmha cluster with name matches to nova aggregate id %s', str(nova_agg_id))
                     continue
                 elif len(hamgr_clusters_for_agg) > 1:
                     LOG.warn('there are more than 1 vmha clusters with name matches to nova aggregate id %s : %s',
@@ -543,7 +543,7 @@ class NovaProvider(Provider):
                                                                     str(cluster_name),
                                                                     masakari_delta_ids)
                         if cluster_enabled:
-                            LOG.info('remove ha salve role from removed hosts : %s', str(masakari_delta_ids))
+                            LOG.info('remove ha slave role from removed hosts : %s', str(masakari_delta_ids))
                             self._remove_ha_slave_if_exist(masakari_delta_ids)
                             LOG.info('try to rebalance consul roles after removed hosts : %s',
                                      str(masakari_delta_ids))
@@ -1242,7 +1242,7 @@ class NovaProvider(Provider):
                         next_state == constants.TASK_MIGRATING:
                     LOG.info('Enabling HA has part of cluster migration')
                 else:
-                    LOG.info('Cluster %s is running task %s, cannot enable',
+                    LOG.warn('Cluster %s is running task %s, cannot enable',
                              str_aggregate_id, cluster.task_state)
                     raise ha_exceptions.ClusterBusy(str_aggregate_id,
                                                     cluster.task_state)
@@ -1475,7 +1475,7 @@ class NovaProvider(Provider):
                     next_state == constants.TASK_MIGRATING:
                 LOG.info('disabling HA as part of cluster migration')
             else:
-                LOG.info('Cluster %s is busy in %s state', cluster.name,
+                LOG.warn('Cluster %s is busy in %s state', cluster.name,
                          cluster.task_state)
                 raise ha_exceptions.ClusterBusy(cluster.name,
                                                 cluster.task_state)
@@ -2111,7 +2111,7 @@ class NovaProvider(Provider):
                 # before the above process happened, so get empty response), let's just create new rebalance
                 # request
                 if status_code == constants.RPC_TASK_STATE_ERROR:
-                    LOG.info('rebalance request %s failed for event %s (%s), re-try rebalance for this event if needed'
+                    LOG.warn('rebalance request %s failed for event %s (%s), re-try rebalance for this event if needed'
                              '. code : %s, message : %s',
                              str(req.uuid), event_uuid, event_type, status_code, status_msg)
                     self._rebalance_consul_roles_if_needed(cluster_name, req.event_name, event_uuid=event_uuid)
