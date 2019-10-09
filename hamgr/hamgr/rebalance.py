@@ -115,7 +115,7 @@ class RebalanceController(object):
             return None
         self.rebalancer_manager.send_role_rebalance_request(request)
         resp = self.rebalancer_manager.get_role_rebalance_response(req_id)
-        LOG.info('response for request %s : %s', req_id, str(resp))
+        LOG.debug('response for request %s : %s', req_id, str(resp))
         return resp
 
     def ask_for_consul_cluster_status(self, request):
@@ -123,19 +123,19 @@ class RebalanceController(object):
         if not self.rebalancer_manager:
             LOG.warn('unable to ask for consul cluster status, as rebalancer manager is null')
             return {}
-        LOG.info('send consul refresh request begin at %s', str(datetime.datetime.utcnow()))
+        LOG.debug('send consul refresh request begin at %s', str(datetime.datetime.utcnow()))
         self.rebalancer_manager.send_role_rebalance_request(request, type=message_types.MSG_CONSUL_REFRESH_REQUEST)
         resp = self.rebalancer_manager.get_role_rebalance_response(request.id(),
                                                                    response_type=message_types.MSG_CONSUL_REFRESH_RESPONSE,
                                                                    timeout_seconds=120)
-        LOG.info('consul refresh response received at %s : %s', str(datetime.datetime.utcnow()), str(resp))
+        LOG.debug('consul refresh response received at %s : %s', str(datetime.datetime.utcnow()), str(resp))
         return resp
 
 
 def get_rebalance_controller(config):
     global _rebalance_controller
     if _rebalance_controller is None:
-        LOG.info('creating rebalance controller')
-        LOG.info(traceback.format_exc())
+        LOG.debug('creating rebalance controller')
+        LOG.debug(traceback.format_exc())
         _rebalance_controller = RebalanceController(config)
     return _rebalance_controller

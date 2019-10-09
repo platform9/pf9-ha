@@ -50,7 +50,7 @@ class RpcBase(object):
         self._connection_ready = False
 
     def _open_connection(self):
-        LOG.info('connecting to amqp://%s:%s@%s:%s/', self._user, self._password, self._host, str(self._port))
+        LOG.debug('connecting to amqp://%s:%s@%s:%s/', self._user, self._password, self._host, str(self._port))
         return pika.SelectConnection(self._connection_parameters,
                                      on_open_callback=self._on_connection_open,
                                      on_open_error_callback=self._on_connection_open_error,
@@ -58,69 +58,69 @@ class RpcBase(object):
                                      stop_ioloop_on_close=False)
 
     def _close_connection(self):
-        LOG.info('closing connection')
+        LOG.debug('closing connection')
         self._closing = True
         if self._connection is not None:
             self._connection.close()
 
     def _on_connection_open_error(self, _unused_connection, err):
         LOG.error('error when open connection, %s', str(err))
-        LOG.info('reconnect when unable to open connection')
+        LOG.debug('reconnect when unable to open connection')
         time.sleep(5)
         self._connection.ioloop.stop()
 
     def _on_connection_closed(self, connection, reply_code, reply_text):
-        LOG.info('connection was closed')
+        LOG.debug('connection was closed')
         self._channel = None
         if self._closing:
-            LOG.info('stop ioloop since connection was closed.')
+            LOG.debug('stop ioloop since connection was closed.')
             self._connection.ioloop.stop()
         else:
-            LOG.info('connection already closed, not stop connection ioloop')
+            LOG.debug('connection already closed, not stop connection ioloop')
             LOG.warning('connection was closed, will reopen. error status : (%s) %s', reply_code, reply_text)
             time.sleep(5)
             self._connection.ioloop.stop()
 
     def _on_connection_open(self, unused_connection):
-        LOG.info('connection opened')
+        LOG.debug('connection opened')
         self._open_channel()
 
     def _open_channel(self):
-        LOG.info('creating a new channel')
+        LOG.debug('creating a new channel')
         self._connection.channel(on_open_callback=self._on_channel_open)
 
     def close_channel(self):
-        LOG.info('closing the channel')
+        LOG.debug('closing the channel')
         if self._channel is not None:
             self._channel.close()
 
     def _add_on_channel_close_callback(self):
-        LOG.info('adding channel close callback')
+        LOG.debug('adding channel close callback')
         self._channel.add_on_close_callback(self._on_channel_closed)
 
     def _on_channel_closed(self, channel, reply_code, reply_text):
         LOG.warning('channel was closed: (%s) %s', reply_code, reply_text)
         if not self._closing:
-            LOG.info('close connection since channel was closed')
+            LOG.debug('close connection since channel was closed')
             self._connection.close()
         else:
-            LOG.info('connection already closed when channel was closed ? %s', str(self._connection.is_closed))
+            LOG.debug('connection already closed when channel was closed ? %s', str(self._connection.is_closed))
 
     def _on_channel_open(self, channel):
-        LOG.info('channel opened')
+        LOG.debug('channel opened')
         self._channel = channel
         self._add_on_channel_close_callback()
         # once channel is created, both producer and consumer need to declare exchange
         self._setup_exchange(self._exchange)
 
     def _setup_exchange(self, exchange_name):
-        LOG.info('declaring exchange %s', exchange_name)
+        LOG.debug('declaring exchange %s', exchange_name)
         self._channel.exchange_declare(self._on_exchange_declare_ok,
                                        exchange_name,
                                        self._exchange_type)
 
     def _on_exchange_declare_ok(self, unused_frame):
-        LOG.info('exchange declared')
+        LOG.debug('exchange declared')
         # up to exchange declared, for producer , no need to declare and bind queue, but consumer need to
         self.on_connection_ready()
         self._connection_ready = True
@@ -134,10 +134,10 @@ class RpcBase(object):
             except Exception as e:
                 LOG.exception('unhandled exception for ioloop : %s', str(e))
                 time.sleep(5)
-        LOG.info('IOLoop stopped')
+        LOG.debug('IOLoop stopped')
 
     def start(self):
-        LOG.info('start client')
+        LOG.debug('start client')
         self._ioloop_thread = threading.Thread(target=self._run)
         self._ioloop_thread.start()
 
@@ -151,12 +151,12 @@ class RpcBase(object):
                 ready = False
                 break
         if ready:
-            LOG.info('client started')
+            LOG.debug('client started')
         else:
             LOG.warning('connection is not established in 180 seconds')
 
     def stop(self):
-        LOG.info('stopping client')
+        LOG.debug('stopping client')
         self._stopping = True
         self._closing = True
 
@@ -167,7 +167,7 @@ class RpcBase(object):
         self.close_channel()
         self._close_connection()
         self._connection_ready = False
-        LOG.info('client stopped')
+        LOG.debug('client stopped')
 
     def is_connected(self):
         #return self._connection_ready

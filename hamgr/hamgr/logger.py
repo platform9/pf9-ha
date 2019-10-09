@@ -32,12 +32,25 @@ def getLogger(name, conf=None):
     log_file = conf.get("log", "location") if conf.has_option("log", "location") else hamgr.DEFAULT_LOG_FILE
     log_level = conf.get("log", "level") if conf.has_option("log", "level") else hamgr.DEFAULT_LOG_LEVEL
     log_mode = 'a'
+    log_rotate_count = conf.get("log", "rotate_count") if conf.has_option("log", "rotate_count") else hamgr.DEFAULT_ROTATE_COUNT
+    log_rotate_size = conf.get("log", "rotate_size") if conf.has_option("log", "rotate_size") else hamgr.DEFAULT_ROTATE_SIZE
 
     # the basic config for logging
     log_format = '%(asctime)s %(name)-12s %(levelname)-8s %(message)s'
     logging.basicConfig(filename=log_file, level=log_level, format=log_format)
     logger = logging.getLogger(name)
     logger.setLevel(log_level)
+
+    # to mitigate the drawback of linux built-in log rotation which runs just once a day
+    # let the RotatingFileHandler to rotate the log , the built-in log rotation will do
+    # daily clean up and archives
+    handler = logging.handlers.RotatingFileHandler(log_file,
+                                                   mode=log_mode,
+                                                   maxBytes=int(log_rotate_size),
+                                                   backupCount=int(log_rotate_count))
+    handler.setLevel(log_level)
+    handler.setFormatter(log_format)
+    logger.addHandler(handler)
 
     try:
         if dirname(log_file) != '' and not exists(dirname(log_file)):
