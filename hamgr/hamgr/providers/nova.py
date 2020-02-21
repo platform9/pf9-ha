@@ -1156,10 +1156,11 @@ class NovaProvider(Provider):
                         ip_lookup[host_id] = cluster_ip
                     if not cluster_ip and consul_ip:
                         cluster_ip_lookup[host_id] = consul_ip
+                    # only need host which has ostackhost role
+                    nodes_details.append({'name': host_id, 'addr': cluster_ip})
                 else:
                     LOG.warn('no role map for hypervisor %s', str(host_id))
 
-            nodes_details.append({'name': host_id, 'addr': cluster_ip})
         # throw exception if num of items in both ip_lookup and cluster_ip_lookup
         # not equals to num of hosts, this will fail the caller earlier
         if len(ip_lookup.keys()) != len(host_ids):
