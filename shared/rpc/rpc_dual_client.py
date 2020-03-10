@@ -16,8 +16,9 @@ import json
 import logging
 
 from shared.rpc.rpc_base import RpcBase
+from shared.constants import LOGGER_PREFIX
 
-LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 
 class RpcDualClient(RpcBase):
@@ -125,7 +126,7 @@ class RpcDualClient(RpcBase):
 
     def publish(self, message, routing=None):
         if self.is_stopping():
-            LOG.warn('producer is stopping, so ignore to publish message')
+            LOG.warning('producer is stopping, so ignore to publish message')
             return
 
         if not self.is_connected():

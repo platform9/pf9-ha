@@ -33,8 +33,9 @@ from shared.messages.rebalance_response import ConsulRoleRebalanceResponse
 from shared.messages.consul_response import ConsulRefreshResponse
 from shared.messages import message_types
 from shared.exceptions import ha_exceptions
+from shared.constants import LOGGER_PREFIX
 
-LOG = logging.getLogger('ha-manager')
+LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 
 def _show_conf(conf):
@@ -194,7 +195,7 @@ def generate_consul_conf():
         LOG.debug('consul config file is now generated')
         return True
     except Exception as ex:
-        LOG.warn('unhandled exception when generate consul config : %s', str(ex))
+        LOG.warning('unhandled exception when generate consul config : %s', str(ex))
     LOG.debug('consul config file fail to be generated')
     return False
 
@@ -202,7 +203,7 @@ def generate_consul_conf():
 def run_cmd(cmd):
     retcode = call(cmd, shell=True)
     if retcode != 0:
-        LOG.warn('{cmd} returned non-zero code'.format(cmd=cmd))
+        LOG.warning('{cmd} returned non-zero code'.format(cmd=cmd))
     return retcode
 
 
@@ -214,7 +215,7 @@ def start_consul_service():
             retcode = run_cmd('sudo service pf9-consul status')
             LOG.debug('retcode of command "sudo service pf9-consul status" : %s', str(retcode))
             if retcode == 0:
-                LOG.warn('Consul service was already running. now stop it before start')
+                LOG.warning('Consul service was already running. now stop it before start')
                 retcode = run_cmd('sudo service pf9-consul stop')
                 LOG.debug('retcode of command "sudo service pf9-consul stop" : %s', str(retcode))
 
@@ -227,7 +228,7 @@ def start_consul_service():
                 if pidtxt:
                     pid = int(pidtxt)
             except Exception as e:
-                LOG.warn('no pid found for consul process. error : %s', str(e))
+                LOG.warning('no pid found for consul process. error : %s', str(e))
 
             if pid:
                 LOG.debug('kill consul process %s', str(pid))
@@ -249,9 +250,9 @@ def start_consul_service():
                     retval = True
                     break
                 else:
-                    LOG.warn('Consul service stopped. Retrying...')
+                    LOG.warning('Consul service stopped. Retrying...')
             else:
-                LOG.warn('Consul service could not be started')
+                LOG.warning('Consul service could not be started')
 
             # when failed to start consul, check whether needs to repairs node-id or keyring
             # those are the two files messed up by consul itself
@@ -259,7 +260,7 @@ def start_consul_service():
             service_start_retry = service_start_retry - 1
             sleep(3)
     except Exception as ex:
-        LOG.warn('unhandled exception when start consul service : %s', str(ex))
+        LOG.warning('unhandled exception when start consul service : %s', str(ex))
     return retval
 
 
@@ -361,11 +362,11 @@ def switch_to_new_consul_role(rebalance_mgr, request, cluster, current_host_id, 
             cfg_obj['server'] = True
             cfg_obj['encrypt'] = CONF.consul.encrypt
         else:
-            LOG.warn('unknown expected consul role %s', target_role)
+            LOG.warning('unknown expected consul role %s', target_role)
             cfg_obj = None
 
     if not cfg_obj:
-        LOG.warn('unable to switch consul role, as failed to modify consul config file %s', target_file)
+        LOG.warning('unable to switch consul role, as failed to modify consul config file %s', target_file)
         resp = ConsulRoleRebalanceResponse(cluster=cluster,
                                            request_id=req_id,
                                            host_id=current_host_id,
@@ -403,7 +404,7 @@ def switch_to_new_consul_role(rebalance_mgr, request, cluster, current_host_id, 
         if result != 0:
             has_error = True
             error = 'failed to leave the cluster'
-            LOG.warn(error)
+            LOG.warning(error)
         else:
             LOG.debug('left the cluster successfully, now try to restart consul service')
 
@@ -555,18 +556,18 @@ def on_consul_role_rebalance_request(role_rebalance_request):
     cluster = CONF.consul.cluster_name
     LOG.debug('found consul role rebalance request : %s', str(role_rebalance_request))
     if not role_rebalance_request:
-        LOG.warn('ignore empty consul role rebalance request')
+        LOG.warning('ignore empty consul role rebalance request')
         return
     msg_type = role_rebalance_request['type']
     if msg_type != message_types.MSG_ROLE_REBALANCE_REQUEST:
-        LOG.warn('ignore non consul role rebalance request : %s', str(role_rebalance_request))
+        LOG.warning('ignore non consul role rebalance request : %s', str(role_rebalance_request))
         return
     if str(role_rebalance_request['cluster']) != str(cluster):
-        LOG.warn('ignore consul role rebalance request not for cluster %s but for %s: %s', str(cluster),
+        LOG.warning('ignore consul role rebalance request not for cluster %s but for %s: %s', str(cluster),
                  str(role_rebalance_request['cluster']), str(role_rebalance_request))
         return
     if role_rebalance_request['host_id'] != global_hostid:
-        LOG.warn('ignore consul role rebalance request not for me %s but for %s: %s', str(global_hostid),
+        LOG.warning('ignore consul role rebalance request not for me %s but for %s: %s', str(global_hostid),
                  role_rebalance_request['host_id'], str(role_rebalance_request))
         return
     try:
@@ -588,14 +589,14 @@ def on_consul_status_request(status_request):
     cluster = CONF.consul.cluster_name
 
     if not status_request:
-        LOG.warn('ignore null or empty consul status request')
+        LOG.warning('ignore null or empty consul status request')
         return
     msg_type = status_request['type']
     if msg_type != message_types.MSG_CONSUL_REFRESH_REQUEST:
-        LOG.warn('ignore non consul refresh request : %s', str(status_request))
+        LOG.warning('ignore non consul refresh request : %s', str(status_request))
         return
     if str(status_request['cluster']) != str(cluster):
-        LOG.warn('ignore consul refresh request which is not for cluster %s but for %s: %s', str(cluster),
+        LOG.warning('ignore consul refresh request which is not for cluster %s but for %s: %s', str(cluster),
                  str(status_request['cluster']), str(status_request))
         return
 

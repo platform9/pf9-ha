@@ -1,7 +1,8 @@
 import requests
 import logging
+from shared.constants import LOGGER_PREFIX
 
-LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 
 class ResmgrClient:
@@ -17,7 +18,7 @@ class ResmgrClient:
         req_url = '{0}/{1}'.format(self._base_url, route)
         resp = requests.get(req_url, headers=headers)
         if resp.status_code != requests.codes.ok:
-            LOG.warn('request "%s" not succeeded, returns : %s', str(req_url), str(resp))
+            LOG.warning('request "%s" not succeeded, returns : %s', str(req_url), str(resp))
         return resp
 
     def put(self, token, route, json_data):
@@ -25,7 +26,7 @@ class ResmgrClient:
         req_url = '{0}/{1}'.format(self._base_url, route)
         resp = requests.put(req_url, headers=headers, json=json_data)
         if resp.status_code != requests.codes.ok:
-            LOG.warn('request "%s" not succeeded, returns : %s', str(req_url), str(resp))
+            LOG.warning('request "%s" not succeeded, returns : %s', str(req_url), str(resp))
         return resp
 
     def post(self, token, route, json_data):
@@ -33,7 +34,7 @@ class ResmgrClient:
         req_url = '{0}/{1}'.format(self._base_url, route)
         resp = requests.post(req_url, headers=headers, json=json_data)
         if resp.status_code != requests.codes.ok:
-            LOG.warn('request "%s" not succeeded, returns : %s', str(req_url), str(resp))
+            LOG.warning('request "%s" not succeeded, returns : %s', str(req_url), str(resp))
         return resp
 
     def delete(self, token, route):
@@ -41,7 +42,7 @@ class ResmgrClient:
         req_url = '{0}/{1}'.format(self._base_url, route)
         resp = requests.delete(req_url, headers=headers)
         if resp.status_code != requests.codes.ok:
-            LOG.warn('request "%s" not succeeded, returns : %s', str(req_url), str(resp))
+            LOG.warning('request "%s" not succeeded, returns : %s', str(req_url), str(resp))
         return resp
 
     def get_hosts_info(self, token):

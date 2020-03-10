@@ -15,12 +15,8 @@
 import logging
 import logging.config
 import logging.handlers
-
-from os import makedirs
-from os.path import dirname
-from os.path import exists
-
 from oslo_config import cfg
+from shared.constants import ROOT_LOGGER
 
 CONF = cfg.CONF
 log_group = cfg.OptGroup('log', title='Group for all log options')
@@ -38,23 +34,9 @@ LOG_LEVEL = CONF.log.level
 LOG_MAX_BYTES = int(CONF.log.max_bytes)
 LOG_BACKUP_COUNT = int(CONF.log.backup_count)
 
-def setup_log_dir_and_file():
-    try:
-        if not exists(dirname(LOG_FILE)):
-            makedirs(dirname(LOG_FILE))
-        if not exists(LOG_FILE):
-            open(LOG_FILE, 'a').close()
-    except Exception:
-        logging.exception('unhandled exception when setup log dir and file')
 
-
-def setup_logger():
-    logging.basicConfig(filename=LOG_FILE, level=LOG_LEVEL)
-
-
-def getLogger(logger_name):
-    logging.basicConfig(filename=LOG_FILE, level=LOG_LEVEL)
-    logger = logging.getLogger(logger_name)
+def setup_root_logger():
+    logger = logging.getLogger(ROOT_LOGGER)
     logger.setLevel(LOG_LEVEL)
     formatter = logging.Formatter('%(asctime)s %(name)s %(levelname)s %(message)s')
     handler = logging.handlers.RotatingFileHandler(LOG_FILE,
@@ -63,10 +45,8 @@ def getLogger(logger_name):
                                                    backupCount=LOG_BACKUP_COUNT)
     handler.setLevel(logging.DEBUG)
     handler.setFormatter(formatter)
+    for hdl in logger.handlers:
+        logger.removeHandler(hdl)
     logger.addHandler(handler)
-
+    logger.info('root logger created : name - %s , level - %s', ROOT_LOGGER, LOG_LEVEL)
     return logger
-
-
-setup_log_dir_and_file()
-setup_logger()
