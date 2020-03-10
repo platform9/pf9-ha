@@ -25,8 +25,9 @@ from shared.messages import message_schemas
 from shared.messages.rebalance_request import ConsulRoleRebalanceRequest
 from shared.messages.rebalance_response import ConsulRoleRebalanceResponse
 from shared.messages.consul_request import ConsulRefreshRequest
+from shared.constants import LOGGER_PREFIX
 
-LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 
 class RebalanceManager(object):
@@ -134,7 +135,7 @@ class RebalanceManager(object):
                 # use thread to unblock message processing
                 threading.Thread(target=self._call_subscribers, args=(type, payload,)).start()
             else:
-                LOG.warn('unknown message type received %s : %s', type, str(message))
+                LOG.warning('unknown message type received %s : %s', type, str(message))
 
     def _call_subscribers(self, msg_type, msg_payload):
         for msg_callback in self.message_callbacks[msg_type]:
@@ -145,48 +146,48 @@ class RebalanceManager(object):
             LOG.error('not suported message type %s with callback %s', str(msg_type), str(msg_callback))
             return
         if not msg_callback:
-            LOG.warn('callback for message type %s is null or empty', str(msg_type))
+            LOG.warning('callback for message type %s is null or empty', str(msg_type))
             return
         if str(msg_callback) in self.message_callbacks[msg_type]:
-            LOG.warn('callback %s has already subscribed to message type %s', str(msg_callback), str(msg_type))
+            LOG.warning('callback %s has already subscribed to message type %s', str(msg_callback), str(msg_type))
             return
 
         self.message_callbacks[msg_type].append(msg_callback)
 
     def send_role_rebalance_request(self, request, type=message_types.MSG_ROLE_REBALANCE_REQUEST):
         if request is None:
-            LOG.warn('ignore rebalance request as it is null or empty')
+            LOG.warning('ignore rebalance request as it is null or empty')
             return
 
         if not message_schemas.is_validate_request(request, type):
-            LOG.warn('ignore rebalance request as it is not valid as it is declared')
+            LOG.warning('ignore rebalance request as it is not valid as it is declared')
             return
 
         producer = self.role_rebalance_rpc_producer
         if producer is None:
-            LOG.warn('ignore rebalance request as the RPC producer is null')
+            LOG.warning('ignore rebalance request as the RPC producer is null')
             return
         if not producer.is_connected():
-            LOG.warn('ignore rebalance request as the RPC producer is not connected to server')
+            LOG.warning('ignore rebalance request as the RPC producer is not connected to server')
             return
         producer.publish(request)
         LOG.debug('successfully sent request : %s', str(request))
 
     def send_role_rebalance_response(self, response, type=message_types.MSG_ROLE_REBALANCE_RESPONSE):
         if response is None:
-            LOG.warn('ignore sending rebalance response as the response is null or empty')
+            LOG.warning('ignore sending rebalance response as the response is null or empty')
             return
 
         if not message_schemas.is_validate_response(response, type):
-            LOG.warn('ignore sending rebalance response as it is not valid as it is declared')
+            LOG.warning('ignore sending rebalance response as it is not valid as it is declared')
             return
 
         producer = self.role_rebalance_rpc_producer
         if producer is None:
-            LOG.warn('ignore sending rebalance response as the producer is null or empty')
+            LOG.warning('ignore sending rebalance response as the producer is null or empty')
             return
         if not producer.is_connected():
-            LOG.warn('ignore sending rebalance response as the producer is not connected to remote server')
+            LOG.warning('ignore sending rebalance response as the producer is not connected to remote server')
             return
         producer.publish(response)
         LOG.debug('successfully sent response : %s', str(response))

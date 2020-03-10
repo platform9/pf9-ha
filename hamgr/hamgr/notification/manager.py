@@ -18,8 +18,9 @@ import traceback
 from shared.exceptions.ha_exceptions import ConfigException
 from shared.rpc.rpc_producer import RpcProducer
 from hamgr.notification.model import Notification
+from shared.constants import LOGGER_PREFIX
 
-LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 _notification_manager = None
 
@@ -111,11 +112,11 @@ class NotificationManager(object):
             return
 
         if self._notification_producer is None:
-            LOG.warn('ignore notification request as ha notification publisher is not initialized')
+            LOG.warning('ignore notification request as ha notification publisher is not initialized')
             return
 
         if not self._notification_producer.is_connected():
-            LOG.warn('ignore notification request as ha notification publisher has not started')
+            LOG.warning('ignore notification request as ha notification publisher has not started')
             return
 
         LOG.debug('publishing notification : %s', str(notification))

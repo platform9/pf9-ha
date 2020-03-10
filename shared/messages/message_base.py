@@ -15,8 +15,9 @@
 from datetime import datetime
 import uuid
 import logging
+from shared.constants import LOGGER_PREFIX
 
-LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 class MessageBase(dict):
     def __init__(self, type, *args, **kwargs):

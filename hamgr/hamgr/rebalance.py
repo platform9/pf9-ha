@@ -19,8 +19,9 @@ import traceback
 from shared.exceptions import ha_exceptions
 from shared.rebalance.manager import RebalanceManager
 from shared.messages import message_types
+from shared.constants import LOGGER_PREFIX
 
-LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 _rebalance_controller = None
 
@@ -88,7 +89,7 @@ class RebalanceController(object):
             # and receive responses from reponse queue (hosts send responses to routing key for responses)
             # need to make sure exchange type to be 'direct'
             if exchange_type != 'direct':
-                LOG.warn('configured exchange type is %s, now force it to direct', exchange_type)
+                LOG.warning('configured exchange type is %s, now force it to direct', exchange_type)
                 exchange_type = 'direct'
 
             if self.rebalancer_manager is None:
@@ -111,7 +112,7 @@ class RebalanceController(object):
         LOG.info('sending rebalance request %s', str(request))
         req_id = request['id']
         if not self.rebalancer_manager:
-            LOG.warn('unable to get result as the rebalancer manager is None')
+            LOG.warning('unable to get result as the rebalancer manager is None')
             return None
         self.rebalancer_manager.send_role_rebalance_request(request)
         resp = self.rebalancer_manager.get_role_rebalance_response(req_id)
@@ -121,7 +122,7 @@ class RebalanceController(object):
     def ask_for_consul_cluster_status(self, request):
         # send a consul cluster status update request and wait for response
         if not self.rebalancer_manager:
-            LOG.warn('unable to ask for consul cluster status, as rebalancer manager is null')
+            LOG.warning('unable to ask for consul cluster status, as rebalancer manager is null')
             return {}
         LOG.debug('send consul refresh request begin at %s', str(datetime.datetime.utcnow()))
         self.rebalancer_manager.send_role_rebalance_request(request, type=message_types.MSG_CONSUL_REFRESH_REQUEST)

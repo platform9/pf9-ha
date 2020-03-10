@@ -16,8 +16,9 @@ import logging
 from ConfigParser import ConfigParser
 from hamgr import app
 from flask import g
+from shared.constants import LOGGER_PREFIX
 
-LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 
 def ha_provider():
