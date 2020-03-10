@@ -15,16 +15,16 @@
 import json
 import time
 
-from ha.utils import log as logging
+import logging
 from oslo_config import cfg
 from keystoneclient.v3 import client as v3client
 from keystoneclient.v3.tokens import TokenManager
 from keystoneauth1.identity import v3
 from keystoneauth1 import session
-
 import requests
+from shared.constants import LOGGER_PREFIX
 
-LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 CONF = cfg.CONF
 
 DU_URL = "http://localhost:8158"
@@ -80,12 +80,12 @@ class Reporter(object):
             token['id'] = id
             return token
         except Exception as e:
-            LOG.warn('failed to request token, error : %s', str(e))
+            LOG.warning('failed to request token, error : %s', str(e))
 
     def _need_refresh(self):
         """Return True if token should be refreshed."""
         if self.token is None or self.token.get('expires_at', None) is None:
-            LOG.warn('token is null, need to refresh token : %s', str(self.token))
+            LOG.warning('token is null, need to refresh token : %s', str(self.token))
             return True
 
         str_exp_time = self.token['expires_at']

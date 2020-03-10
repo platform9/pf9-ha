@@ -20,8 +20,9 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from subprocess import Popen, PIPE
 from ConfigParser import ConfigParser
+from shared.constants import LOGGER_PREFIX
 
-LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 # /etc/pf9
 global_config_base = '/etc/pf9'
@@ -326,7 +327,7 @@ def is_cert_expired(cert_file, expire_threshold_days=1):
         LOG.debug('cert %s not valid after %s, is it expire ? : %s',
                  str(cert_file), str(expire_at), str(is_expired))
     except Exception as ex:
-        LOG.warn('unhandled exception when detect expiration of cert %s : %s',
+        LOG.warning('unhandled exception when detect expiration of cert %s : %s',
                  cert_file, str(ex))
     return is_expired
 
@@ -369,13 +370,13 @@ def read_key_cert_pair(key_file, cert_file, base64_encode=True):
         with open(key_file) as fp:
             content_key = fp.read()
     else:
-        LOG.warn('key file %s requested does not exist', key_file)
+        LOG.warning('key file %s requested does not exist', key_file)
     LOG.debug('cert file to read %s', cert_file)
     if os.path.exists(cert_file):
         with open(cert_file) as fp:
             content_cert = fp.read()
     else:
-        LOG.warn('cert file %s requested does not exist', cert_file)
+        LOG.warning('cert file %s requested does not exist', cert_file)
     if base64_encode:
         content_key = base64.b64encode(content_key)
         content_cert = base64.b64encode(content_cert)
@@ -427,7 +428,7 @@ def create_consul_ca_key_cert_pairs():
     if ret == 0:
         LOG.debug('consul encryption CA key and cert are created')
         return True
-    LOG.warn('consul encryption CA key and cert are not created')
+    LOG.warning('consul encryption CA key and cert are not created')
     return False
 
 
@@ -441,7 +442,7 @@ def create_consul_svc_key_cert_pairs(cluster_name=""):
     folder_certs = os.path.join(hamgr_config_base, 'certs')
 
     if not are_consul_ca_key_cert_pair_exist() or is_consul_ca_cert_expired():
-        LOG.warn('can not create svc key or cert for cluster %s, ' \
+        LOG.warning('can not create svc key or cert for cluster %s, ' \
                  'because CA key or cert creation failed', cluster_name)
         return False
 
@@ -462,7 +463,7 @@ def create_consul_svc_key_cert_pairs(cluster_name=""):
                                 in_directory=folder_certs,
                                 env_variables=envs)
     if ret != 0:
-        LOG.warn('consul encryption service key is not created')
+        LOG.warning('consul encryption service key is not created')
         return False
     else:
         LOG.debug('consul encryption service key is created')
@@ -476,7 +477,7 @@ def create_consul_svc_key_cert_pairs(cluster_name=""):
                                 in_directory=folder_certs,
                                 env_variables=envs)
     if ret != 0:
-        LOG.warn('consul encryption service cert is not created')
+        LOG.warning('consul encryption service cert is not created')
         return False
     else:
         LOG.debug('consul encryption service cert is created')
@@ -490,7 +491,7 @@ def create_consul_svc_key_cert_pairs(cluster_name=""):
                                 in_directory=folder_certs,
                                 env_variables=envs)
     if ret != 0:
-        LOG.warn('consul encryption service cert signing failed')
+        LOG.warning('consul encryption service cert signing failed')
         return False
     else:
         LOG.debug('consul encryption service cert is signed with CA')

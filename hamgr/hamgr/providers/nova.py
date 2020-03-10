@@ -39,8 +39,9 @@ from shared.messages.rebalance_request import ConsulRoleRebalanceRequest
 from shared.messages.consul_request import ConsulRefreshRequest
 from hamgr.common import key_helper as keyhelper
 from hamgr.resmgr_client import ResmgrClient
+from shared.constants import LOGGER_PREFIX
 
-LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 
 class NovaProvider(Provider):
@@ -67,7 +68,7 @@ class NovaProvider(Provider):
         try:
             self._max_auth_wait_seconds = config.getint('DEFAULT', 'max_role_auth_wait_seconds')
         except:
-            LOG.warn("'max_role_auth_wait_seconds' not exist in config file " \
+            LOG.warning("'max_role_auth_wait_seconds' not exist in config file " \
                      "or its value not integer, use default 300")
         if self._max_auth_wait_seconds <= 0:
             self._max_auth_wait_seconds = 300
@@ -75,7 +76,7 @@ class NovaProvider(Provider):
         try:
             self._max_role_converged_wait_seconds = config.getint('DEFAULT', 'max_role_converged_wait_seconds')
         except:
-            LOG.warn("'max_role_converged_wait_seconds' not exist in config file " \
+            LOG.warning("'max_role_converged_wait_seconds' not exist in config file " \
                      "or its value not integer, use default 900")
         if self._max_role_converged_wait_seconds <= 0:
             self._max_role_converged_wait_seconds = 900
@@ -266,7 +267,7 @@ class NovaProvider(Provider):
                             constants.STATE_DUPLICATED,
                             msg
                     )
-                    LOG.warn('event %s is aborted, as %s', str(event_uuid), str(msg))
+                    LOG.warning('event %s is aborted, as %s', str(event_uuid), str(msg))
                     continue
                 # if the event happened long time ago, just abort
                 if datetime.utcnow() - event_time > time_out:
@@ -279,7 +280,7 @@ class NovaProvider(Provider):
                         constants.STATE_ABORTED,
                         'event happened long time ago : %s' % str(event_time)
                     )
-                    LOG.warn('event %s is aborted from state %s , as it is too stale',
+                    LOG.warning('event %s is aborted from state %s , as it is too stale',
                              str(event_uuid), str(event.notification_status))
                     continue
 
@@ -293,7 +294,7 @@ class NovaProvider(Provider):
                 if event_type == constants.EVENT_HOST_DOWN:
                     if not event.notification_uuid:
                         if is_active:
-                            LOG.warn('still report host_down event to masakari, even the host %s is alive in nova',
+                            LOG.warning('still report host_down event to masakari, even the host %s is alive in nova',
                                      event_uuid)
                         #
                         # when masakari received host-down notification, the host in masakari will be set on maintenance
@@ -311,7 +312,7 @@ class NovaProvider(Provider):
                             masakari_host_on_maintenance = masakari.is_host_on_maintenance(self._token, host_name,
                                                                                            cluster.name)
                             if masakari_host_on_maintenance:
-                                LOG.warn('%s event %s for host %s, which in masakari segment %s '
+                                LOG.warning('%s event %s for host %s, which in masakari segment %s '
                                          'is on maintenance', event_type, str(event_uuid),
                                          host_name, cluster.name)
                         LOG.debug('try to report event %s id %s for host %s to masakari',
@@ -325,7 +326,7 @@ class NovaProvider(Provider):
                             LOG.info('event %s for host %s is updated with notification state %s', event_uuid,
                                      host_name, state)
                         else:
-                            LOG.warn('failed to report event %s for host %s to masakari : %s',
+                            LOG.warning('failed to report event %s for host %s to masakari : %s',
                                      str(event_type), str(host_name), str(event))
                     else:
                         state = self._tracking_masakari_notification(event)
@@ -353,7 +354,7 @@ class NovaProvider(Provider):
                         # pf9-slave has a grace period of time to report events
                         # so here just wait the new host-down event, or just
                         # wait until this event become stale
-                        LOG.warn('event %s is host-up event at %s but host '
+                        LOG.warning('event %s is host-up event at %s but host '
                                  'is not active in nova now %s', event_uuid,
                                  event_time, datetime.utcnow())
                 LOG.debug('end of handling event %s', str(event))
@@ -387,7 +388,7 @@ class NovaProvider(Provider):
                 return notification_obj
         except Exception:
             LOG.error('failed to create masakari notification, error', exc_info=True)
-        LOG.warn('no valid masakari notification was created for event %s %s for host %s: %s', str(event.event_type),
+        LOG.warning('no valid masakari notification was created for event %s %s for host %s: %s', str(event.event_type),
                  str(event.event_uuid), str(event.host_name), str(notification_obj))
         return None
 
@@ -450,7 +451,7 @@ class NovaProvider(Provider):
             LOG.debug('active nova aggregates : %s',str([x.id for x in nova_active_aggres]))
             hamgr_all_clusters = db_api.get_all_clusters()
             LOG.debug('all vmha clusters : %s', str(hamgr_all_clusters))
-            # because hosts in nova aggregate reflect the real word settings for HA, so need to reconcile hosts in
+            # because hosts in nova aggregate reflect the real world settings for HA, so need to reconcile hosts in
             # each aggregate from nova to hamgr and masakari
             # for each active nova aggregate
             #  if there is corresponding ha cluster, then update hosts in masakari with hosts from this nova aggregate
@@ -465,10 +466,10 @@ class NovaProvider(Provider):
                 hamgr_clusters_for_agg = [x for x in hamgr_all_clusters if x.name == str(nova_agg_id)]
                 LOG.info('found hamgr clusters for nova aggregate %s : %s', str(nova_agg_id), str(hamgr_clusters_for_agg))
                 if len(hamgr_clusters_for_agg) <= 0:
-                    LOG.warn('there is no matched vmha cluster with name matches to nova aggregate id %s', str(nova_agg_id))
+                    LOG.warning('there is no matched vmha cluster with name matches to nova aggregate id %s', str(nova_agg_id))
                     continue
                 elif len(hamgr_clusters_for_agg) > 1:
-                    LOG.warn('there are more than 1 vmha clusters with name matches to nova aggregate id %s : %s',
+                    LOG.warning('there are more than 1 vmha clusters with name matches to nova aggregate id %s : %s',
                              str(nova_agg_id), str(hamgr_clusters_for_agg))
 
                 # we only support one-to-one mapping between vmha cluster to nova aggregate
@@ -569,7 +570,7 @@ class NovaProvider(Provider):
                                  str(cluster_name), str(cluster_status), str(cluaster_task_state))
                         self._deauth(nova_agg_hosts)
                     except Exception:
-                        LOG.warn('remove pf9-ha-slave on hosts %s failed, will retry later', str(nova_agg_hosts))
+                        LOG.warning('remove pf9-ha-slave on hosts %s failed, will retry later', str(nova_agg_hosts))
 
                     continue
 
@@ -700,16 +701,16 @@ class NovaProvider(Provider):
                         self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_REMOVED)
 
                     if len(existing_inactive_host_ids) > 0:
-                        LOG.warn('existing inactive hosts in segment %s : %s , wait for hosts to become active',
+                        LOG.warning('existing inactive hosts in segment %s : %s , wait for hosts to become active',
                                  segment_name, str(existing_inactive_host_ids))
 
                 except ha_exceptions.ClusterBusy:
                     pass
                 except ha_exceptions.InsufficientHosts:
-                    LOG.warn('Detected number of aggregate %s hosts is '
+                    LOG.warning('Detected number of aggregate %s hosts is '
                              'insufficient', aggregate_id)
                 except ha_exceptions.SegmentNotFound:
-                    LOG.warn('Masakari segment for cluster: %s was not found',
+                    LOG.warning('Masakari segment for cluster: %s was not found',
                              current_cluster.name)
                 except ha_exceptions.HostPartOfCluster:
                     LOG.error("Not enabling cluster as cluster hosts are part of"
@@ -727,7 +728,7 @@ class NovaProvider(Provider):
 
     def _rebalance_consul_roles_if_needed(self, cluster_name, event_type, event_uuid=None):
         if event_type not in constants.HOST_EVENTS:
-            LOG.warn('ignore invalided rebalance consul role for requested event type %s', event_type)
+            LOG.warning('ignore invalided rebalance consul role for requested event type %s', event_type)
             return
         controller = get_rebalance_controller(self._config)
         request = ConsulRefreshRequest(cluster=cluster_name, cmd='refresh')
@@ -755,7 +756,7 @@ class NovaProvider(Provider):
                 LOG.debug('refreshed consul status : reportedBy %s , leader %s, peers %s, members %s, kv %s, joins %s',
                           str(reportedBy),str(leader), str(peers), str(members), str(kv), str(joins))
                 if not reportedBy:
-                    LOG.warn('consul refresh report has no info for reportedBy')
+                    LOG.warning('consul refresh report has no info for reportedBy')
                     return
 
                 nova_client = self._get_nova_client()
@@ -785,9 +786,9 @@ class NovaProvider(Provider):
                                          str(joins),
                                          event_uuid)
             except Exception as ex:
-                LOG.warn('unhandled exception when try to add new consul status : %s', str(ex))
+                LOG.warning('unhandled exception when try to add new consul status : %s', str(ex))
         else:
-            LOG.warn('null consul cluster report or the request has not been processed by host : %s', str(status))
+            LOG.warning('null consul cluster report or the request has not been processed by host : %s', str(status))
 
     def _execute_consul_role_rebalance(self, rebalance_request, cluster_name, host_ip, join_ips):
         target_host_id = rebalance_request['host_id']
@@ -816,7 +817,7 @@ class NovaProvider(Provider):
         data = result.json()
 
         if result.status_code != requests.codes.ok:
-            LOG.warn('get info for host %s was unsuccessful, result : %s', target_host_id, str(result))
+            LOG.warning('get info for host %s was unsuccessful, result : %s', target_host_id, str(result))
         if 'pf9-ha-slave' not in data['roles']:
             error = 'host %s does not have pf9-ha-slave role' % target_host_id
             return {'status': constants.RPC_TASK_STATE_ABORTED, 'error': error}
@@ -832,7 +833,7 @@ class NovaProvider(Provider):
         succeeced = (result.status_code == requests.codes.ok)
         resp = None
         if not succeeced:
-            LOG.warn('failed to update resmgr for consul role rebalance host %s with data %s, resp %s',
+            LOG.warning('failed to update resmgr for consul role rebalance host %s with data %s, resp %s',
                      target_host_id,
                      str(data),
                      str(result))
@@ -1004,11 +1005,11 @@ class NovaProvider(Provider):
             if json_resp:
                 LOG.debug('role status for host %s : %s', host, str(json_resp))
                 if json_resp.get('role_status', '') != 'ok':
-                    LOG.warn('Role status of host %s is not ok : %s, not enabling HA '
+                    LOG.warning('Role status of host %s is not ok : %s, not enabling HA '
                              'at the moment.', host, json_resp.get('role_status', ''))
                     raise ha_exceptions.InvalidHostRoleStatus(host)
                 if json_resp['info']['responding'] is False:
-                    LOG.warn('Host %s is not responding : %s, not enabling HA at the '
+                    LOG.warning('Host %s is not responding : %s, not enabling HA at the '
                              'moment.', host, json_resp['info']['responding'])
                     raise ha_exceptions.HostOffline(host)
 
@@ -1084,12 +1085,12 @@ class NovaProvider(Provider):
                 if datetime.now() - start_time > timedelta(seconds=self._max_auth_wait_seconds):
                     break
             if resp.status_code != requests.codes.ok:
-                LOG.warn('authorize pf9-ha-slave on host %s failed, data %s, resp %s', node, str(data), str(resp))
+                LOG.warning('authorize pf9-ha-slave on host %s failed, data %s, resp %s', node, str(data), str(resp))
             resp.raise_for_status()
 
     def _get_cluster_ip(self, host_id, json_resp):
         if not json_resp:
-            LOG.warn('_get_cluster_ip : response object is none, can not parse cluster ip')
+            LOG.warning('_get_cluster_ip : response object is none, can not parse cluster ip')
             return None
         LOG.info('try to get cluster_ip for host %s from resp %s', str(host_id), str(json_resp))
         if 'cluster_ip' not in json_resp:
@@ -1159,18 +1160,18 @@ class NovaProvider(Provider):
                     # only need host which has ostackhost role
                     nodes_details.append({'name': host_id, 'addr': cluster_ip})
                 else:
-                    LOG.warn('no role map for hypervisor %s', str(host_id))
+                    LOG.warning('no role map for hypervisor %s', str(host_id))
 
         # throw exception if num of items in both ip_lookup and cluster_ip_lookup
         # not equals to num of hosts, this will fail the caller earlier
         if len(ip_lookup.keys()) != len(host_ids):
             ids = set(host_ids).difference(set(ip_lookup.keys()))
-            LOG.warn('size not match : ip_lookup : %s, hosts : %s,  found no consul ip for hosts %s',
+            LOG.warning('size not match : ip_lookup : %s, hosts : %s,  found no consul ip for hosts %s',
                      str(ip_lookup), str(host_ids), str(ids))
             raise ha_exceptions.HostsIpNotFound(list(ids))
         if len(cluster_ip_lookup.keys()) != len(host_ids):
             ids = set(host_ids).difference(set(cluster_ip_lookup.keys()))
-            LOG.warn('size not match : cluster_ip_lookup : %s, hosts : %s, found no cluster ip for hosts %s',
+            LOG.warning('size not match : cluster_ip_lookup : %s, hosts : %s, found no cluster ip for hosts %s',
                      str(cluster_ip_lookup), str(host_ids), str(ids))
             raise ha_exceptions.HostsIpNotFound(list(ids))
         return ip_lookup, cluster_ip_lookup, nodes_details
@@ -1243,7 +1244,7 @@ class NovaProvider(Provider):
                         next_state == constants.TASK_MIGRATING:
                     LOG.info('Enabling HA has part of cluster migration')
                 else:
-                    LOG.warn('Cluster %s is running task %s, cannot enable',
+                    LOG.warning('Cluster %s is running task %s, cannot enable',
                              str_aggregate_id, cluster.task_state)
                     raise ha_exceptions.ClusterBusy(str_aggregate_id,
                                                     cluster.task_state)
@@ -1298,12 +1299,12 @@ class NovaProvider(Provider):
         except ha_exceptions.HostPartOfCluster:
             # if because host in two clusters, just report the request in error status
             db_api.update_request_status(cluster_id, constants.HA_STATE_ERROR)
-            LOG.warn('found hosts exist in other clusters')
+            LOG.warning('found hosts exist in other clusters')
             raise
         except (ha_exceptions.HostOffline,
                 ha_exceptions.InvalidHostRoleStatus,
                 ha_exceptions.InvalidHypervisorRoleStatus) as ex:
-            LOG.warn('exception when handle enable request : %s, will retry the request', str(ex))
+            LOG.warning('exception when handle enable request : %s, will retry the request', str(ex))
             return
         except Exception:
             LOG.exception('unhandled exception in validate hosts when handle enable request')
@@ -1467,7 +1468,7 @@ class NovaProvider(Provider):
         str_aggregate_id = str(aggregate_id)
         cluster = db_api.get_cluster(str_aggregate_id)
         if not cluster:
-            LOG.warn('no cluster with id for disable %s', str_aggregate_id)
+            LOG.warning('no cluster with id for disable %s', str_aggregate_id)
             return
 
         if cluster.task_state not in [constants.TASK_COMPLETED,
@@ -1476,7 +1477,7 @@ class NovaProvider(Provider):
                     next_state == constants.TASK_MIGRATING:
                 LOG.info('disabling HA as part of cluster migration')
             else:
-                LOG.warn('Cluster %s is busy in %s state', cluster.name,
+                LOG.warning('Cluster %s is busy in %s state', cluster.name,
                          cluster.task_state)
                 raise ha_exceptions.ClusterBusy(cluster.name,
                                                 cluster.task_state)
@@ -1534,7 +1535,7 @@ class NovaProvider(Provider):
                     aggregate = self._get_aggregate(nova_client, aggregate_name)
                     hosts = set(aggregate.hosts)
             except ha_exceptions.SegmentNotFound:
-                LOG.warn('Masakari segment for cluster: %s was not found, '
+                LOG.warning('Masakari segment for cluster: %s was not found, '
                          'skipping deauth', aggregate_name)
 
             # need to check whether masakari is working on this failover
@@ -1722,7 +1723,7 @@ class NovaProvider(Provider):
                         LOG.info('change event record is created for host %s in cluster '
                                  '%s', host_name, target_cluster_id)
                     else:
-                        LOG.warn('ignore reporting event %s for host %s, as it is already reported within %s seconds',
+                        LOG.warning('ignore reporting event %s for host %s, as it is already reported within %s seconds',
                                  event_type, host_name, self._event_report_threshold_seconds)
 
                     # similarly, suppress events that has been recorded within given
@@ -1768,13 +1769,13 @@ class NovaProvider(Provider):
                                  event_type, host_name)
                         self._report_consul_rebalance(event_type, event_uuid, event_details['consul'])
                     else:
-                        LOG.warn('ignore reporting event %s for host %s, as it is already reported within %s seconds',
+                        LOG.warning('ignore reporting event %s for host %s, as it is already reported within %s seconds',
                                  event_type, host_name, self._event_report_threshold_seconds)
                 else:
-                    LOG.warn('ignore reporting event %s for host %s , as it is not found in any active nova aggregates',
+                    LOG.warning('ignore reporting event %s for host %s , as it is not found in any active nova aggregates',
                              event_type, host_name)
             else:
-                LOG.warn('ignore reporting event, no active clusters found for event %s for host %s',
+                LOG.warning('ignore reporting event, no active clusters found for event %s for host %s',
                          event_type, host_name)
 
             # return True will stop the ha slave to re-send report, when return False, the ha slave will keep
@@ -1880,7 +1881,7 @@ class NovaProvider(Provider):
                                                             error)
                 # check nova again to make sure the candidate host is still active
                 if not self._is_nova_service_active(host_id, self._get_nova_client()):
-                    LOG.warn('host %s is not active in nova, ignore it for consul role rebalance request', host_id)
+                    LOG.warning('host %s is not active in nova, ignore it for consul role rebalance request', host_id)
                 else:
                     LOG.info('create consul role rebalance request for host %s : %s', host_id, str(rebalance_action))
                     db_api.add_consul_role_rebalance_record(event_type,
@@ -1950,7 +1951,7 @@ class NovaProvider(Provider):
                 # first check by time, abort request if timestamp shows the request older than 15 minutes
                 if (datetime.utcnow() - req.last_updated) > timedelta(minutes=15):
                     error = 'request created at %s is staled' % req.last_updated
-                    LOG.warn('ignore consul role rebalance request %s, as %s', str(req_id), error)
+                    LOG.warning('ignore consul role rebalance request %s, as %s', str(req_id), error)
                     db_api.update_consul_role_rebalance(req.uuid,
                                                         None,
                                                         None,
@@ -1960,7 +1961,7 @@ class NovaProvider(Provider):
                 # then check by status, query the same request again to get most recent status (in case it is canceled )
                 req = db_api.get_consul_role_balance_record_by_uuid(req.uuid)
                 if req is None or req.action_status == constants.RPC_TASK_STATE_ABORTED:
-                    LOG.warn('ignore consul role rebalance request %s, as it was already in state %s',
+                    LOG.warning('ignore consul role rebalance request %s, as it was already in state %s',
                              req.uuid,
                              req.action_status)
                     continue
@@ -1975,7 +1976,7 @@ class NovaProvider(Provider):
 
                 if event_type not in constants.HOST_EVENTS:
                     error = 'invalid event type %s' % event_type
-                    LOG.warn('ignore consul role rebalance request %s, as %s', event_uuid, error)
+                    LOG.warning('ignore consul role rebalance request %s, as %s', event_uuid, error)
                     db_api.update_consul_role_rebalance(req.uuid,
                                                         None,
                                                         None,
@@ -1988,7 +1989,7 @@ class NovaProvider(Provider):
                 if event_type in [constants.EVENT_HOST_UP, constants.EVENT_HOST_DOWN]:
                     if not event_uuid:
                         error = 'no valid event uuid for this event type : %s' % event_type
-                        LOG.warn('ignore consul role rebalance request %s, as %s', event_uuid, error)
+                        LOG.warning('ignore consul role rebalance request %s, as %s', event_uuid, error)
                         db_api.update_consul_role_rebalance(req.uuid,
                                                             None,
                                                             None,
@@ -2000,7 +2001,7 @@ class NovaProvider(Provider):
                     if not host_event:
                         # no such event, so abort this request
                         error = 'no matched host event %s (%s)' % (event_uuid, event_type)
-                        LOG.warn('ignore consul role rebalance request %s, as %s', event_uuid, error)
+                        LOG.warning('ignore consul role rebalance request %s, as %s', event_uuid, error)
                         db_api.update_consul_role_rebalance(req.uuid,
                                                             None,
                                                             None,
@@ -2036,7 +2037,7 @@ class NovaProvider(Provider):
 
                     if event_status != constants.STATE_FINISHED:
                         error = "unexpected status for host event %s : %s" % (event_uuid, event_status)
-                        LOG.warn('ignore consul role rebase request %s (%s), as %s',
+                        LOG.warning('ignore consul role rebase request %s (%s), as %s',
                                  host_event.event_uuid,
                                  host_event.event_type,
                                  error)
@@ -2051,7 +2052,7 @@ class NovaProvider(Provider):
                     # is the target host still alive since the original request was created ?
                     if not self._is_nova_service_active(target_host_id):
                         error = 'host %s is inactive ' % target_host_id
-                        LOG.warn('ignore consul role rebalance request %s, as %s',
+                        LOG.warning('ignore consul role rebalance request %s, as %s',
                                  req.uuid,
                                  error)
                         db_api.update_consul_role_rebalance(req.uuid,
@@ -2078,7 +2079,7 @@ class NovaProvider(Provider):
                 target_consuls = [x for x in consul_status_before['members'] if x['Name'] == target_host_id]
                 if len(target_consuls) != 1:
                     error = 'no consul status for target host %s' % target_host_id
-                    LOG.warn('ignore consul role rebalance request %s, as %s', req.uuid, error)
+                    LOG.warning('ignore consul role rebalance request %s, as %s', req.uuid, error)
                     db_api.update_consul_role_rebalance(req.uuid,
                                                         None,
                                                         None,
@@ -2112,7 +2113,7 @@ class NovaProvider(Provider):
                 # before the above process happened, so get empty response), let's just create new rebalance
                 # request
                 if status_code == constants.RPC_TASK_STATE_ERROR:
-                    LOG.warn('rebalance request %s failed for event %s (%s), re-try rebalance for this event if needed'
+                    LOG.warning('rebalance request %s failed for event %s (%s), re-try rebalance for this event if needed'
                              '. code : %s, message : %s',
                              str(req.uuid), event_uuid, event_type, status_code, status_msg)
                     self._rebalance_consul_roles_if_needed(cluster_name, req.event_name, event_uuid=event_uuid)
@@ -2188,12 +2189,12 @@ class NovaProvider(Provider):
                         # get the target host info to make sure the role status is ok
                         resp_host = hosts_info.get('roles', {})
                         if not resp_host or 'pf9-ha-slave' not in resp_host['roles']:
-                            LOG.warn('host %s does not have pf9-ha-slave role', host_id)
+                            LOG.warning('host %s does not have pf9-ha-slave role', host_id)
                             continue
 
                         resp_role = hosts_info.get(host_id, {}).get('role_settings', {}).get("pf9-ha-slave", {})
                         if not resp_role:
-                            LOG.warn('empty settings for role pf9-ha-slave for host %s : %s', str(host_id), str(resp_role))
+                            LOG.warning('empty settings for role pf9-ha-slave for host %s : %s', str(host_id), str(resp_role))
                             continue
                         LOG.debug('pf9-ha-slave role settings for host %s : %s', host_id, str(resp_role))
 
@@ -2243,7 +2244,7 @@ class NovaProvider(Provider):
                             result = self._resmgr_client.update_role(host_id, "pf9-ha-slave", data, self._token['id'])
                             LOG.debug('update host %s for role pf9-ha-slave returns : %s', str(host_id), str(result))
                             if not result or result.status_code != requests.codes.ok:
-                                LOG.warn('failed to update settings for host %s : %s', host_id, str(data))
+                                LOG.warning('failed to update settings for host %s : %s', host_id, str(data))
 
                         else:
                             LOG.debug('key or cert config refresh is not needed for host %s in aggregate %s',

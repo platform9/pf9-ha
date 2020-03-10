@@ -32,8 +32,9 @@ from sqlalchemy import Text
 from sqlalchemy import LargeBinary
 from sqlalchemy import or_
 from uuid import uuid4
+from shared.constants import LOGGER_PREFIX
 
-LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 Base = declarative_base()
 
@@ -303,7 +304,7 @@ def update_cluster_task_state(cluster_id, state):
             else:
                 # TODO: Check if the task state transition is valid. Till then
                 #       log a warning.
-                LOG.warn('Task state being updated from %s to %s', task_state,
+                LOG.warning('Task state being updated from %s to %s', task_state,
                          state)
         if state not in constants.VALID_TASK_STATES:
             raise exceptions.InvalidTaskState(state)

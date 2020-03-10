@@ -20,25 +20,32 @@ import hamgr
 from os.path import exists
 from os.path import dirname
 from os import makedirs
+from shared.constants import ROOT_LOGGER
 
-
-def getLogger(name, conf=None):
+def setup_root_logger(conf=None):
     if conf is None:
         conf = ConfigParser.ConfigParser()
         if exists(hamgr.DEFAULT_CONF_FILE):
             with open(hamgr.DEFAULT_CONF_FILE) as fp:
                 conf.readfp(fp)
 
-    log_file = conf.get("log", "location") if conf.has_option("log", "location") else hamgr.DEFAULT_LOG_FILE
-    log_level = conf.get("log", "level") if conf.has_option("log", "level") else hamgr.DEFAULT_LOG_LEVEL
-    log_mode = 'a'
-    log_rotate_count = conf.get("log", "rotate_count") if conf.has_option("log", "rotate_count") else hamgr.DEFAULT_ROTATE_COUNT
-    log_rotate_size = conf.get("log", "rotate_size") if conf.has_option("log", "rotate_size") else hamgr.DEFAULT_ROTATE_SIZE
+    log_file = hamgr.DEFAULT_LOG_FILE
+    if conf.has_option("log", "location"):
+        log_file = conf.get("log", "location")
 
-    # the basic config for logging
-    log_format = '%(asctime)s %(name)-12s %(levelname)-8s %(message)s'
-    logging.basicConfig(filename=log_file, level=log_level, format=log_format)
-    logger = logging.getLogger(name)
+    log_level = hamgr.DEFAULT_LOG_LEVEL
+    if conf.has_option("log", "level"):
+        log_level = conf.get("log", "level")
+    log_mode = 'a'
+    log_rotate_count = hamgr.DEFAULT_ROTATE_COUNT
+    if conf.has_option("log", "rotate_count"):
+        log_rotate_count = conf.get("log", "rotate_count")
+    log_rotate_size = hamgr.DEFAULT_ROTATE_SIZE
+    if conf.has_option("log", "rotate_size"):
+        log_rotate_size = conf.get("log", "rotate_size")
+    log_format = logging.Formatter('%(asctime)s %(name)s %(levelname)s %(message)s')
+
+    logger = logging.getLogger(ROOT_LOGGER)
     logger.setLevel(log_level)
 
     # to mitigate the drawback of linux built-in log rotation which runs just once a day
@@ -50,6 +57,8 @@ def getLogger(name, conf=None):
                                                    backupCount=int(log_rotate_count))
     handler.setLevel(log_level)
     handler.setFormatter(log_format)
+    for hdl in logger.handlers:
+        logger.removeHandler(hdl)
     logger.addHandler(handler)
 
     try:
@@ -58,4 +67,7 @@ def getLogger(name, conf=None):
     except Exception as e:
         logger.exception(e)
         raise
+    logger.info('root logger created : name - %s, level - %s, file - %s, '
+                 'size - %s, backups - %s', ROOT_LOGGER, str(log_level),
+                 log_file, str(log_rotate_size), str(log_rotate_count))
     return logger

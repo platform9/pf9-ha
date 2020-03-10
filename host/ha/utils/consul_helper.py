@@ -13,24 +13,22 @@
 # limitations under the License.
 
 import json
-import re
+import logging
 import os
+import re
 from datetime import datetime
 from datetime import timedelta
-from os import makedirs
-from os.path import dirname
-from os.path import exists
 from uuid import uuid4
 
-from ha.utils import log as logging
+import consul
 from netifaces import AF_INET
 from netifaces import gateways
 from netifaces import ifaddresses
 from oslo_config import cfg
 
-import consul
+from shared.constants import LOGGER_PREFIX
 
-LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 CONF = cfg.CONF
 consul_grp = cfg.OptGroup('consul', title='Group for consul binary '
                                           'related options')
@@ -205,10 +203,10 @@ class consul_status(object):
                             key=key, id=self.host_id))
                         self.kv_update(key, self.host_id)
             else:
-                LOG.warn('Not adding {id} to KV since cluster is '
+                LOG.warning('Not adding {id} to KV since cluster is '
                          'unavailable'.format(id=self.host_id))
         except Exception as e:
-            LOG.warn('failed to publish host id %s, error : %s', key, str(e))
+            LOG.warning('failed to publish host id %s, error : %s', key, str(e))
 
     def get_consul_status_report(self):
         _, kv_list = self.kv_fetch('', recurse=True)
@@ -244,10 +242,10 @@ class consul_status(object):
                 # Cannot get the host id, which means that ha-slave is not
                 # running. We cannot be sure of the cluster state and reporting
                 # without the host id does not work hence skip this host.
-                # LOG.warn('host %s is not registered in kv store', key)
+                # LOG.warning('host %s is not registered in kv store', key)
                 msg = 'ignore host %s with ip %s, which is not expected to be in consul cluster %s' % \
                       (str(member.get('Name')), str(member.get('Addr')), str(member.get('Tags')))
-                LOG.warn(msg)
+                LOG.warning(msg)
                 continue
 
             hostname = member.get('Name')
@@ -277,7 +275,7 @@ class consul_status(object):
             cluster_report[member['Addr']] = report
         LOG.debug('latest cluster info : %s', str(members_info))
         if len(self.hosts_ips) != len(members_info):
-            LOG.warn('num of consul members is not equal to num of expected hosts : %s', str(self.hosts_ips))
+            LOG.warning('num of consul members is not equal to num of expected hosts : %s', str(self.hosts_ips))
         LOG.debug('latest cluster status report from consul members : %s', str(cluster_report))
         return cluster_report
 
@@ -298,7 +296,7 @@ class consul_status(object):
                 if (addr not in current_addrs) or \
                         (addr in current_addrs and current_state[addr].event['eventType'] == change.event['eventType']):
                     if addr not in current_state:
-                        LOG.warn('host %s was not returned from consul cluster, still try to report event : %s',
+                        LOG.warning('host %s was not returned from consul cluster, still try to report event : %s',
                                  hostname, str(current_state))
                     if change.event['reported']:
                         staled = False
@@ -487,9 +485,9 @@ class consul_status(object):
         unexpected_adds = list(set(all_adds).difference(set(common_adds)))
 
         if len(unexpected_adds):
-            LOG.warn('hosts are unexpected but joined current cluster : %s', str(unexpected_adds))
+            LOG.warning('hosts are unexpected but joined current cluster : %s', str(unexpected_adds))
         if len(missing_adds):
-            LOG.warn('hosts are expected but miss fromm current cluster : %s', str(missing_adds))
+            LOG.warning('hosts are expected but miss fromm current cluster : %s', str(missing_adds))
 
         LOG.debug("cache is refreshed by using reports from kv store : %s ",
                   str(self.changed_clusters))
@@ -529,10 +527,10 @@ class consul_status(object):
             # will use the settings in cluster_details to get the host id with
             # the host ip used in the cluster
             if not data:
-                LOG.warn('host %s could not be found from consul cluster', str(addr))
+                LOG.warning('host %s could not be found from consul cluster', str(addr))
                 matched = [x['name'] for x in self.cluster_details if x['addr'] == addr]
                 if len(matched) == 0:
-                    LOG.warn('host %s is not in cluster, or its ip has changed',
+                    LOG.warning('host %s is not in cluster, or its ip has changed',
                              str(addr))
                     continue
 
@@ -716,28 +714,28 @@ class consul_status(object):
             k, v = self.cc.kv.get(key, recurse=recurse)
             return k, v
         except Exception as e:
-            LOG.warn('error when fetch value for key %s : %s', key, e)
+            LOG.warning('error when fetch value for key %s : %s', key, e)
         return None, None
 
     def kv_update(self, key, value):
         try:
             self.cc.kv.put(key, value)
         except Exception as e:
-            LOG.warn('error when update key %s with value %s : %s', str(key), str(value), str(e))
+            LOG.warning('error when update key %s with value %s : %s', str(key), str(value), str(e))
 
     def kv_delete(self, key):
         try:
             LOG.debug('remove from kv store for key : %s', key)
             self.cc.kv.delete(key)
         except Exception as e:
-            LOG.warn('error when {id} tried to delete {key}. {error}'.format(
+            LOG.warning('error when {id} tried to delete {key}. {error}'.format(
                 id=self.host_id, key=key, error=str(e)))
 
     def get_report_status(self, hostid):
         ignore, data = self.kv_fetch(hostid)
         if data:
             return json.loads(data['Value'])
-        LOG.warn('{id} tried to access report status for {host} which '
+        LOG.warning('{id} tried to access report status for {host} which '
                  'did not exist'.format(id=self.host_id, host=hostid))
         return None
 
@@ -751,7 +749,7 @@ class consul_status(object):
             self.changed_clusters.pop(temp_cls.event['hostName'])
         old_status = self.get_report_status(cluster_status.event['hostName'])
         if not old_status:
-            LOG.warn('status report for host %s does not exist in kv store',
+            LOG.warning('status report for host %s does not exist in kv store',
                      str(cluster_status.event['hostName']))
             return
 

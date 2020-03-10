@@ -22,8 +22,9 @@ from hamgr import app
 from hamgr.context import error_handler
 from shared.exceptions import ha_exceptions as exceptions
 from hamgr import provider_factory
+from shared.constants import LOGGER_PREFIX
 
-LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 CONTENT_TYPE_HEADER = {'Content-Type': 'application/json'}
 
@@ -98,7 +99,7 @@ def update_host_status(host_id):
     elif event and event == 'host-up':
         masakari_notified = provider.host_up(event_details)
     else:
-        LOG.warn('Invalid request')
+        LOG.warning('Invalid request')
         return jsonify(dict(success=False)), 422, CONTENT_TYPE_HEADER
     LOG.info('received %s event for host %s has been processed, result : %s',
              event, str(host_id), str(masakari_notified))
@@ -148,7 +149,7 @@ def get_consul_status(aggregate_id=None):
                 continue
             member = matches[0]
             if not member:
-                LOG.warn('host %s exists in aggregate %s but does not '
+                LOG.warning('host %s exists in aggregate %s but does not '
                          'in consul members report : %s',
                          str(host_id),
                          str(aggregate_id),

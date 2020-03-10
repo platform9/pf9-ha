@@ -18,8 +18,9 @@ import logging
 import requests
 
 import shared.exceptions.ha_exceptions as exceptions
+from shared.constants import LOGGER_PREFIX
 
-LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 _URL = 'http://localhost:8080/masakari/v1'
 
 
@@ -48,7 +49,7 @@ def get_all_failover_segments(token):
     resp = requests.get(url, headers=headers)
     LOG.debug('resp when get all segments : %s', str(resp.__dict__))
     resp.raise_for_status()
-    return resp.json()
+    return resp.json()['segments']
 
 def is_failover_segment_exist(token, segment_name):
     try:
@@ -122,7 +123,7 @@ def delete_failover_segment(token, name):
         nodes = get_nodes_in_segment(token, name)
         for node in nodes:
             if node.get('on_maintenance', None):
-                LOG.warn('host %s in segment %s is on maintenance',
+                LOG.warning('host %s in segment %s is on maintenance',
                          str(node['name']), str(name))
             url = '/'.join([_URL, 'segments', node['failover_segment_id'],
                             'hosts', node['uuid']])
@@ -135,7 +136,7 @@ def delete_failover_segment(token, name):
                           str(resp), str(node))
                 resp.raise_for_status()
     except Exception:
-        LOG.warn('error when delete host from segment %s', str(name),
+        LOG.warning('error when delete host from segment %s', str(name),
                  exc_info=True)
         raise
 
@@ -164,7 +165,7 @@ def create_failover_segment(token, name, hosts):
     url = '/'.join([_URL, 'segments'])
     data = dict(name=name, service_type='COMPUTE', recovery_method='auto', description='Created by HA Manager')
     if existing_segment:
-        LOG.warn('Segment %s already exists, now try to update it if needed : %s', name, str(existing_segment))
+        LOG.warning('Segment %s already exists, now try to update it if needed : %s', name, str(existing_segment))
         # update it rather than delete then re-create
         if existing_segment['service_type'] != data['service_type'] or \
                 existing_segment['recovery_method'] != data['recovery_method'] or \
@@ -212,7 +213,7 @@ def create_notification(token, ntype, hostname, time, payload):
     elif resp.status_code == requests.codes.conflict and \
             resp.content.find('ignored as the host is already under '
                               'maintenance'):
-        LOG.warn('Masakari ignored the notification since host %s is already '
+        LOG.warning('Masakari ignored the notification since host %s is already '
                  'under maintenance', hostname)
     else:
         LOG.error('Masakari rejected notification with error %s: %s',
@@ -317,11 +318,11 @@ def add_hosts_to_failover_segment(token, segment_name, host_ids):
         segment = get_failover_segment(token, str(segment_name))
         existing_hosts = get_nodes_in_segment(token, str(segment_name))
     except exceptions.SegmentNotFound:
-        LOG.warn('masakari segment %s does not exist for adding hosts %s', segment_name, str(host_ids))
+        LOG.warning('masakari segment %s does not exist for adding hosts %s', segment_name, str(host_ids))
         return
 
     if segment is None:
-        LOG.warn('masakari segment %s does not exist', segment_name)
+        LOG.warning('masakari segment %s does not exist', segment_name)
         return
 
     url = '/'.join([_URL, 'segments', segment['uuid'], 'hosts'])
@@ -346,11 +347,11 @@ def delete_hosts_from_failover_segment(token, segment_name, host_ids):
     try:
         segment = get_failover_segment(token, str(segment_name))
     except exceptions.SegmentNotFound:
-        LOG.warn('masakari segment %s does not exist for deleting hosts %s', segment_name, str(host_ids))
+        LOG.warning('masakari segment %s does not exist for deleting hosts %s', segment_name, str(host_ids))
         return
 
     if segment is None:
-        LOG.warn('masakari segment %s does not exist', segment_name)
+        LOG.warning('masakari segment %s does not exist', segment_name)
         return
 
     # when delete a host, requires host uuid, not host name (id)
