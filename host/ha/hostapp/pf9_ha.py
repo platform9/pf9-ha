@@ -18,6 +18,8 @@ from glob import glob
 from ha.hostapp import manager
 from oslo_config import cfg
 
+from ha.utils.log import setup_root_logger
+
 CONF_DIR = '/etc/vm-ha-helper'
 CONF = cfg.CONF
 
@@ -38,4 +40,7 @@ def main():
     # CONF should be setup before any processing starts
     conf_files = glob(opts.config_dir + '/*.conf')
     CONF(default_config_files=conf_files)
+    # root logger setup should be done in main entry point
+    # before using any logging method
+    setup_root_logger()
     manager.loop()

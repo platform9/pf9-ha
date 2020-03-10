@@ -19,9 +19,10 @@ from datetime import timedelta
 
 import threading
 import time
+from shared.constants import LOGGER_PREFIX
 
 PERIODIC_TASK = None
-LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 
 class Task(object):

@@ -21,8 +21,9 @@ from keystoneclient.v3 import  client as v3client
 from keystoneclient.v3.tokens import TokenManager
 from keystoneauth1.identity import v3
 from keystoneauth1 import session
+from shared.constants import LOGGER_PREFIX
 
-LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 
 def _get_auth_token(auth_url, tenant, user, password):

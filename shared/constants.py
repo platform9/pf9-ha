@@ -12,6 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# according to https://docs.python.org/2/library/logging.html#module-logging
+# the sub modules will inherit settings from root logger if the name
+# is in the format 'parent.child', so here we set the 'parent' as 'vmha'
+ROOT_LOGGER = 'vmha'
+LOGGER_PREFIX = ROOT_LOGGER + '.'
+
 # the host events
 EVENT_HOST_UP = 'host-up'
 EVENT_HOST_DOWN = 'host-down'

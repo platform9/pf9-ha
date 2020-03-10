@@ -17,8 +17,9 @@ import logging
 import json
 from datetime import datetime
 from shared.rpc.rpc_base import RpcBase
+from shared.constants import LOGGER_PREFIX
 
-LOG = logging.getLogger(__name__)
+LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 
 # ==============================================================================
