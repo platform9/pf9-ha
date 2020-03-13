@@ -15,7 +15,7 @@
 import json
 import os
 import io
-import threading
+import logging
 from ConfigParser import ConfigParser
 from datetime import datetime
 from datetime import timedelta
@@ -24,7 +24,6 @@ from time import sleep
 from base64 import b64decode
 
 from ha.utils import consul_helper
-from ha.utils import log as logging
 from ha.utils import report
 from oslo_config import cfg
 from shared import constants
