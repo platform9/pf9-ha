@@ -185,7 +185,7 @@ def _get_cluster(session, cluster_name_or_id, read_deleted=False):
     if read_deleted:
         query = query.filter(Cluster.deleted != 0)
 
-    if isinstance(cluster_name_or_id, basestring):
+    if isinstance(cluster_name_or_id, str):
         query = query.filter_by(name=cluster_name_or_id)
     else:
         query = query.filter_by(id=cluster_name_or_id)

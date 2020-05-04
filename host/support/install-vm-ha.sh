@@ -58,9 +58,10 @@ ${buildroot}/opt/pf9/pf9-ha/bin/python \
     ${srcroot}/setup.py install
 
 PBR_VERSION=3.1.1 \
-PIP_CACHE_DIR=~/.cache/pip-py27-netsvc ${buildroot}/opt/pf9/pf9-ha/bin/python \
+PIP_CACHE_DIR=~/.cache/pip-py36-netsvc ${buildroot}/opt/pf9/pf9-ha/bin/python \
     ${buildroot}/opt/pf9/pf9-ha/bin/pip install . -chttps://raw.githubusercontent.com/openstack/requirements/stable/pike/upper-constraints.txt
-
+PIP_CACHE_DIR=~/.cache/pip-py36-netsvc ${buildroot}/opt/pf9/pf9-ha/bin/python \
+    ${buildroot}/opt/pf9/pf9-ha/bin/pip install eventlet==0.24.1
 popd
 
 # patch the #!python with the venv's python

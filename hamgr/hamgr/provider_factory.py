@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import logging
-from ConfigParser import ConfigParser
+from configparser import ConfigParser
 from hamgr import app
 from flask import g
 from shared.constants import LOGGER_PREFIX

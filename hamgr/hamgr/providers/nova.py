@@ -652,7 +652,7 @@ class NovaProvider(Provider):
                                  str(nova_active_host_ids))
                         # make sure ha-slave is enabled on existing active hosts
                         hosts_info = self._resmgr_client.fetch_hosts_details(nova_active_host_ids, self._token['id'])
-                        current_roles= dict(zip(hosts_info.keys(), [hosts_info.get(x,{}).get('roles', []) for x in hosts_info.keys()]))
+                        current_roles= dict(list(zip(list(hosts_info.keys()), [hosts_info.get(x,{}).get('roles', []) for x in list(hosts_info.keys())])))
 
                         LOG.debug("found roles : %s", str(current_roles))
                         role_missed_host_ids = set()
@@ -855,7 +855,7 @@ class NovaProvider(Provider):
         nova_client = self._get_nova_client()
         self._token = self._get_v3_token()
         hosts_info = self._resmgr_client.fetch_hosts_details(host_ids_for_adding, self._token['id'])
-        current_roles = dict(zip(hosts_info.keys(), [hosts_info.get(x, {}).get('roles', []) for x in hosts_info.keys()]))
+        current_roles = dict(list(zip(list(hosts_info.keys()), [hosts_info.get(x, {}).get('roles', []) for x in list(hosts_info.keys())])))
 
         role_missed_host_ids = []
         for hid in host_ids_for_adding:
@@ -876,7 +876,7 @@ class NovaProvider(Provider):
 
     def _remove_ha_slave_if_exist(self, host_ids):
         hosts_info = self._resmgr_client.fetch_hosts_details(host_ids, self._token['id'])
-        current_roles = dict(zip(hosts_info.keys(), [hosts_info.get(x, {}).get('roles', []) for x in hosts_info.keys()]))
+        current_roles = dict(list(zip(list(hosts_info.keys()), [hosts_info.get(x, {}).get('roles', []) for x in list(hosts_info.keys())])))
         role_assigned_host_ids = []
         for hid in host_ids:
             h_roles = current_roles[hid]
@@ -1063,7 +1063,7 @@ class NovaProvider(Provider):
 
     def _auth(self, aggregate_id, ip_lookup, cluster_ip_lookup, nodes_details, token, nodes, role):
         assert role in ['server', 'agent']
-        valid_ips = [x for x in cluster_ip_lookup.values() if x != '']
+        valid_ips = [x for x in list(cluster_ip_lookup.values()) if x != '']
         ips = ','.join([str(v) for v in valid_ips])
         LOG.info('ips for consul members to join : %s', ips)
         for node in nodes:
@@ -1164,12 +1164,12 @@ class NovaProvider(Provider):
 
         # throw exception if num of items in both ip_lookup and cluster_ip_lookup
         # not equals to num of hosts, this will fail the caller earlier
-        if len(ip_lookup.keys()) != len(host_ids):
+        if len(list(ip_lookup.keys())) != len(host_ids):
             ids = set(host_ids).difference(set(ip_lookup.keys()))
             LOG.warning('size not match : ip_lookup : %s, hosts : %s,  found no consul ip for hosts %s',
                      str(ip_lookup), str(host_ids), str(ids))
             raise ha_exceptions.HostsIpNotFound(list(ids))
-        if len(cluster_ip_lookup.keys()) != len(host_ids):
+        if len(list(cluster_ip_lookup.keys())) != len(host_ids):
             ids = set(host_ids).difference(set(cluster_ip_lookup.keys()))
             LOG.warning('size not match : cluster_ip_lookup : %s, hosts : %s, found no cluster ip for hosts %s',
                      str(cluster_ip_lookup), str(host_ids), str(ids))
@@ -1268,7 +1268,7 @@ class NovaProvider(Provider):
             # publish status
             self._notify_status(constants.HA_STATE_REQUEST_ENABLE, "cluster", cluster.id)
         except Exception as e:
-            print str(e)
+            print(str(e))
             if cluster_id:
                 db_api.update_cluster_task_state(cluster_id, next_state)
             LOG.error('unhandled exception : %s', str(e))
@@ -1625,8 +1625,8 @@ class NovaProvider(Provider):
                         self.hosts_down_per_cluster.pop(current_host)
 
             self.hosts_down_per_cluster[cluster.id][host] = True
-            if all([v for k, v in self.hosts_down_per_cluster[
-                cluster.id].items()]):
+            if all([v for k, v in list(self.hosts_down_per_cluster[
+                    cluster.id].items())]):
                 host_list = current_host_ids - \
                             set(self.hosts_down_per_cluster[cluster.id].keys())
                 # Task state will be managed by this function
@@ -1898,7 +1898,7 @@ class NovaProvider(Provider):
 
     def get_aggregate_info_for_cluster(self, cluster_id_or_name):
         try:
-            if not isinstance(cluster_id_or_name, basestring) and \
+            if not isinstance(cluster_id_or_name, str) and \
                     not isinstance(cluster_id_or_name, int):
                 LOG.info('cluster_id_or_name %s can only be string or int', str(cluster_id_or_name))
                 return None
@@ -1906,7 +1906,7 @@ class NovaProvider(Provider):
             nova_client = self._get_nova_client()
             clusters = db_api.get_all_active_clusters()
             targets = []
-            if isinstance(cluster_id_or_name, basestring):
+            if isinstance(cluster_id_or_name, str):
                 targets = [cluster for cluster in clusters if cluster.name == cluster_id_or_name]
             elif isinstance(cluster_id_or_name, int):
                 targets = [cluster for cluster in clusters if cluster.id == cluster_id_or_name]
@@ -2229,7 +2229,7 @@ class NovaProvider(Provider):
 
                         if need_refresh:
                             LOG.info('configs for host %s in aggregate %s will be refreshed', str(host_id), cluster_name)
-                            valid_ips = [x for x in cluster_ip_lookup.values() if x != '']
+                            valid_ips = [x for x in list(cluster_ip_lookup.values()) if x != '']
                             join_ips = ','.join([str(v) for v in valid_ips])
                             join_nodes = {}
                             host_ip = ip_lookup[host_id]

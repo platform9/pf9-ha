@@ -68,7 +68,7 @@ class RpcConsumer(RpcBase):
         tag = basic_deliver.delivery_tag
         LOG.debug('consumer acknowledging received message # %s : %s', tag, body)
         self.get_channel().basic_ack(tag)
-        for k, v in self._callbacks_list.iteritems():
+        for k, v in self._callbacks_list.items():
             try:
                 v({'tag': tag, 'body': json.loads(body)})
             except Exception as e:
@@ -117,5 +117,5 @@ class RpcConsumer(RpcBase):
         if not callable(messages_callback):
             raise Exception('messages_callback needs to be a method')
         LOG.debug('attach callback to receive messages')
-        if not self._callbacks_list.has_key(str(messages_callback)):
+        if str(messages_callback) not in self._callbacks_list:
             self._callbacks_list[str(messages_callback)] = messages_callback

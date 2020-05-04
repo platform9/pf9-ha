@@ -12,7 +12,7 @@ Paste
 PasteDeploy
 eventlet
 sqlalchemy-migrate
-mysql-python
+mysqlclient
 enum34
 pika
 cryptography

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import logging
-import Queue
+import queue
 import time
 import datetime
 import threading
@@ -22,9 +22,6 @@ from shared.rpc.rpc_producer import RpcProducer
 from shared.rpc.rpc_consumer import RpcConsumer
 from shared.messages import message_types
 from shared.messages import message_schemas
-from shared.messages.rebalance_request import ConsulRoleRebalanceRequest
-from shared.messages.rebalance_response import ConsulRoleRebalanceResponse
-from shared.messages.consul_request import ConsulRefreshRequest
 from shared.constants import LOGGER_PREFIX
 
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
@@ -52,7 +49,7 @@ class RebalanceManager(object):
         self.message_buffers = dict()
         self.message_callbacks = dict()
         for msg_type in message_schemas.valid_message_types():
-            self.message_buffers[msg_type] = Queue.Queue()
+            self.message_buffers[msg_type] = queue.Queue()
             self.message_callbacks[msg_type] = []
 
         error = "empty value for %s"

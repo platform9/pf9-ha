@@ -12,14 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
 import base64
-import os
+import configparser
 import datetime
+import logging
+import os
+
+from subprocess import Popen, PIPE
+
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
-from subprocess import Popen, PIPE
-from ConfigParser import ConfigParser
 from shared.constants import LOGGER_PREFIX
 
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
@@ -37,7 +39,7 @@ hamgr_config = os.path.join(hamgr_config_base, 'hamgr.conf')
 def execute_shell_command(command, in_directory=None, env_variables=dict()):
     envs = os.environ.copy()
     if env_variables:
-        for x, y in env_variables.iteritems():
+        for x, y in env_variables.items():
             envs[x] = y
     LOG.debug('command "%s"', str(command))
     if in_directory:
@@ -95,7 +97,7 @@ def get_consul_gossip_encryption_key(cluster_name="", seed=""):
         key = key[0:16]
     LOG.debug('consul gossip encryption key clear text : %s', key)
     # key needs to be 64 base encoded
-    return base64.b64encode(key)
+    return base64.b64encode(key.encode())
 
 
 def get_general_configs():
@@ -106,7 +108,7 @@ def get_general_configs():
                    customer_shortname=None,
                    customer_fullname=None,
                    region_name=None)
-    parser = ConfigParser()
+    parser = configparser.ConfigParser()
     section = 'DEFAULT'
     if not os.path.exists(hamgr_config):
         return configs
@@ -119,12 +121,12 @@ def get_general_configs():
             parser.has_option(section, 'customer_fullname') and \
             parser.has_option(section, 'region_name'):
         LOG.debug('read du general settings from %s', hamgr_config)
-        configs['du_fqdn'] = parser.get(section, 'du_fqdn', None)
+        configs['du_fqdn'] = parser.get(section, 'du_fqdn')
         configs['customer_shortname'] = parser.get(section,
-                                                   'customer_shortname', None)
+                                                   'customer_shortname')
         configs['customer_fullname'] = parser.get(section,
-                                                  'customer_fullname', None)
-        configs['region_name'] = parser.get(section, 'region_name', None)
+                                                  'customer_fullname')
+        configs['region_name'] = parser.get(section, 'region_name')
 
     # if no required settings from hamgr config, throw exception
     if not configs['du_fqdn'] or \
@@ -132,8 +134,8 @@ def get_general_configs():
             not configs['customer_fullname'] or \
             not configs['region_name']:
         raise Exception('missing configuration values in file %s for '
-                        'du_fqdn , customer_shortname , customer_fullname, region_name', hamgr_config)
-
+                        'du_fqdn , customer_shortname , customer_fullname, '
+                        'region_name', hamgr_config)
     return configs
 
 
@@ -325,10 +327,10 @@ def is_cert_expired(cert_file, expire_threshold_days=1):
             if time_delta < datetime.timedelta(days=expire_threshold_days) \
             else False
         LOG.debug('cert %s not valid after %s, is it expire ? : %s',
-                 str(cert_file), str(expire_at), str(is_expired))
+                  str(cert_file), str(expire_at), str(is_expired))
     except Exception as ex:
-        LOG.warning('unhandled exception when detect expiration of cert %s : %s',
-                 cert_file, str(ex))
+        LOG.warning('unhandled exception when detect expiration of cert '
+                    '%s : %s', cert_file, str(ex))
     return is_expired
 
 
@@ -378,8 +380,8 @@ def read_key_cert_pair(key_file, cert_file, base64_encode=True):
     else:
         LOG.warning('cert file %s requested does not exist', cert_file)
     if base64_encode:
-        content_key = base64.b64encode(content_key)
-        content_cert = base64.b64encode(content_cert)
+        content_key = base64.b64encode(content_key.encode())
+        content_cert = base64.b64encode(content_cert.encode())
     return content_key, content_cert
 
 
@@ -442,8 +444,8 @@ def create_consul_svc_key_cert_pairs(cluster_name=""):
     folder_certs = os.path.join(hamgr_config_base, 'certs')
 
     if not are_consul_ca_key_cert_pair_exist() or is_consul_ca_cert_expired():
-        LOG.warning('can not create svc key or cert for cluster %s, ' \
-                 'because CA key or cert creation failed', cluster_name)
+        LOG.warning('can not create svc key or cert for cluster %s, '
+                    'because CA key or cert creation failed', cluster_name)
         return False
 
     cfg_general = get_general_configs()

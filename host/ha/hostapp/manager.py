@@ -16,7 +16,7 @@ import json
 import os
 import io
 import logging
-from ConfigParser import ConfigParser
+from configparser import ConfigParser
 from datetime import datetime
 from datetime import timedelta
 from subprocess import call
@@ -40,12 +40,12 @@ LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 def _show_conf(conf):
     LOG.info('CONF :')
     LOG.info('-----------------------------------')
-    for key, val in conf.iteritems():
+    for key, val in conf.items():
         if isinstance(val, cfg.ConfigOpts.GroupAttr):
-            for g_key, g_val in val.iteritems():
-                LOG.info("{:<20}{:<40}{:<15}".format(key, g_key, g_val))
+            for g_key, g_val in val.items():
+                LOG.info("{}{}{}".format(key, g_key, g_val))
         else:
-            LOG.info("{:<20}{:<40}".format(key, val))
+            LOG.info("{}{}".format(key, val))
     LOG.info('-----------------------------------')
 
 
@@ -127,19 +127,19 @@ def add_consul_secure_settings(conf):
         content = b64decode(CONF.consul.ca_file_content)
         file = os.path.join(PF9_CONSUL_CONF_DIR, 'consul_ca.pem')
         with open(file, 'w') as cafp:
-            cafp.write(content)
+            cafp.write(content.decode())
         conf['ca_file'] = file
     if CONF.consul.cert_file_content:
         content = b64decode(CONF.consul.cert_file_content)
         file = os.path.join(PF9_CONSUL_CONF_DIR, 'consul_cert.pem')
         with open(file, 'w') as certfp:
-            certfp.write(content)
+            certfp.write(content.decode())
         conf['cert_file'] = file
     if CONF.consul.key_file_content:
         content = b64decode(CONF.consul.key_file_content)
         file = os.path.join(PF9_CONSUL_CONF_DIR, 'consul_key.pem')
         with open(file, 'w') as keyfp:
-            keyfp.write(content)
+            keyfp.write(content.decode())
         conf['key_file'] = file
     LOG.debug('consul secure settings : %s', str(conf))
     return conf
@@ -819,7 +819,9 @@ def loop():
     if not cluster_details or \
             len(cluster_details) != len(ips_to_join) or \
             not set(ips_to_join).issubset(set([x['addr'] for x in cluster_details])):
-        raise ha_exceptions.ConfigException('cluster_details is none, or its size is different than join_ips')
+        raise ha_exceptions.ConfigException(
+            'cluster_details is none, or its size is different than join_ips',
+            None)
 
     ch = consul_helper.consul_status(global_hostid, ips_to_join, cluster_details)
     reporter = report.HaManagerReporter()
@@ -839,7 +841,9 @@ def loop():
     LOG.debug('is consul running ? %s', str(start_loop))
 
     if not consul_configured or not start_loop:
-        raise ha_exceptions.ConfigException('failed to generate consul configuration file or consul cluster fail to run')
+        raise ha_exceptions.ConfigException(
+            'failed to generate consul configuration file or consul cluster '
+            'fail to run', None)
 
     rebalance_thread = None
     global_rebalance_mgr = None

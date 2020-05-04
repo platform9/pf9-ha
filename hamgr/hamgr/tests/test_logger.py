@@ -12,10 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import unittest
+import configparser
 import glob
 import os
-import ConfigParser
+import unittest
+
 from hamgr import logger
 
 LOG = None
@@ -31,7 +32,7 @@ class LogConfigTest(unittest.TestCase):
 
     def setUp(self):
         self._clean()
-        conf = ConfigParser.ConfigParser()
+        conf = configparser.ConfigParser()
         conf.add_section("log")
         conf.set("log", "location", FILE)
         conf.set("log", "rotate_counts", '5')
@@ -58,6 +59,6 @@ class LogConfigTest(unittest.TestCase):
         self.assertIsNotNone(logs)
         self.assertTrue(len(logs) >= 1)
         for log in logs:
-            size=os.path.getsize(log)
+            size = os.path.getsize(log)
             LOG.debug('size of file %s : %s', log, str(size))
             self.assertTrue(size <= 1024)

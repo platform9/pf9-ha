@@ -12,13 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from ConfigParser import ConfigParser
+from configparser import ConfigParser
 import unittest
 
 from hamgr.db import api as db_api
 from shared import constants
-
-import mock
 
 
 class DbAPITest(unittest.TestCase):
@@ -27,24 +25,20 @@ class DbAPITest(unittest.TestCase):
         config = ConfigParser()
         config.add_section('database')
         config.set('database', 'sqlconnectURI', 'sqlite://')
-        config.set('database', 'sqlite_synchronous', False)
-
+        config.set('database', 'sqlite_synchronous', 'False')
         db_api.init(config)
-
         db_api.Base.metadata.create_all(db_api._engine)
-
 
     def tearDown(self):
         db_api.Base.metadata.drop_all(db_api._engine)
 
-
     def test_create_then_query_cluster_with_name(self):
-        name='23'
-        task_state=constants.TASK_CREATING
+        name = '23'
+        task_state = constants.TASK_CREATING
         cluster = db_api.create_cluster_if_needed(name, task_state)
         self.assertIsNotNone(cluster)
-        self.assertTrue(name==cluster.name)
-        self.assertTrue((task_state==cluster.task_state))
+        self.assertTrue(name == cluster.name)
+        self.assertTrue((task_state == cluster.task_state))
         record = db_api.get_cluster(name)
         self.assertIsNotNone(record)
 

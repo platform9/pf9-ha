@@ -20,9 +20,9 @@
 # point of application to avoid thread deadlock problem.
 
 import argparse
+import configparser
 import logging
 
-import ConfigParser
 from eventlet import listen
 from eventlet import wsgi
 from hamgr.logger import setup_root_logger
@@ -33,6 +33,7 @@ from hamgr import provider_factory
 from shared.constants import LOGGER_PREFIX
 
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
+
 
 def _get_arg_parser():
     parser = argparse.ArgumentParser(
@@ -75,9 +76,10 @@ def start_server(conf, paste_ini):
         # so we can clean up here
         LOG.exception('unhandled exception from server')
 
+
 if __name__ == '__main__':
     parser = _get_arg_parser()
-    conf = ConfigParser.ConfigParser()
+    conf = configparser.ConfigParser()
     with open(parser.config_file) as f:
         conf.readfp(f)
     # setup root logger in main entry before any logging methods is used

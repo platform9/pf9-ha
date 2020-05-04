@@ -15,7 +15,7 @@ AutoReqProv:    no
 Provides:       %{_package}
 BuildArch:      %{_arch}
 
-BuildRequires:  python-devel
+BuildRequires:  python3-devel
 BuildRequires:  libffi-devel
 BuildRequires:  mysql-devel
 
@@ -37,7 +37,7 @@ tar xf %{_sourcedir}/source.tar
 %install
 
 # virtualenv and setup
-virtualenv %{buildroot}/opt/pf9/%{project}
+virtualenv -p python3 %{buildroot}/opt/pf9/%{project}
 
 %{buildroot}/opt/pf9/%{project}/bin/python %{buildroot}/opt/pf9/%{project}/bin/pip install -U pip
 %{buildroot}/opt/pf9/%{project}/bin/python %{buildroot}/opt/pf9/%{project}/bin/pip install -U setuptools
@@ -48,12 +48,14 @@ virtualenv %{buildroot}/opt/pf9/%{project}
     %{buildroot}/opt/pf9/%{project}/bin/pip \
     install -chttps://raw.githubusercontent.com/openstack/requirements/stable/pike/upper-constraints.txt .
 
+%{buildroot}/opt/pf9/%{project}/bin/python %{buildroot}/opt/pf9/%{project}/bin/pip install eventlet==0.24.1
+
 # tests
-rm -rf %{buildroot}/opt/pf9/%{project}/lib/python2.?/site-packages/%{project}/tests
-rm -rf %{buildroot}/opt/pf9/%{project}/lib/python2.?/site-packages/shared/tests
+rm -rf %{buildroot}/opt/pf9/%{project}/lib/python?.?/site-packages/%{project}/tests
+rm -rf %{buildroot}/opt/pf9/%{project}/lib/python?.?/site-packages/shared/tests
 
 # Migrate repo config
-install -p -t  %{buildroot}/opt/pf9/%{project}/lib/python2.?/site-packages/%{project}/db/ %{_builddir}/%{project}/db/migrate.cfg
+install -p -t  %{buildroot}/opt/pf9/%{project}/lib/python?.?/site-packages/%{project}/db/ %{_builddir}/%{project}/db/migrate.cfg
 
 # init scripts
 for daemon in %{daemons}

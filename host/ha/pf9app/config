@@ -71,7 +71,7 @@ def set_config(option, opt_str, value_str, parser):
         if section != 'DEFAULT' and not cfgparser.has_section(section):
             cfgparser.add_section(section)
         for opt, opt_val in section_config.items():
-            cfgparser.set(section, opt, opt_val)
+            cfgparser.set(section, opt, str(opt_val))
     with open(HA_CONF_FILE, 'w') as fptr:
         cfgparser.write(fptr)
 

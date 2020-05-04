@@ -82,7 +82,7 @@ def g_init():
 def g_logger(*args, **kwargs):
     if len(args) > 0:
         msg = args[0] % (args[1:])
-        print msg
+        print(msg)
 
 
 def g_consul_kv_get(key, *args, **kwargs):
@@ -265,7 +265,7 @@ class ConsulStatusTest(unittest.TestCase):
         # simulate the consul leader role
         self._consul_helper.leader = True
         # clean existing reports by reset host to up
-        for k in g_host_status.keys():
+        for k in list(g_host_status.keys()):
             g_host_status[k] = 1
             self._consul_helper.refresh_cache_from_consul()
             time.sleep(g_report_interval_seconds + 6)

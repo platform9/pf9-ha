@@ -97,7 +97,7 @@ def get_ip_address():
     # No IP address has been configured try to get it directly
     try:
         # Get the interface where the default gateway is configured
-        default_interface = gateways()['default'].values()[0][1]
+        default_interface = list(gateways()['default'].values())[0][1]
         # Get the IP address configured on that interface
         default_ip = ifaddresses(default_interface)[AF_INET][0]['addr']
         return default_ip
@@ -285,12 +285,12 @@ class consul_status(object):
         reported_cls = None
         LOG.debug('now checking cached changes against latest status. '
                  'cached changes : %s', str(self.changed_clusters))
-        for _, change in self.changed_clusters.items():
+        for _, change in list(self.changed_clusters.items()):
             detectedAt = datetime.strptime(change.event['detectedAt'], "%Y-%m-%d %H:%M:%S")
             hostname = change.event['hostName']
             if datetime.now() - detectedAt > report_interval:
                 current_state = self.get_cluster_report()
-                current_addrs = current_state.keys()
+                current_addrs = list(current_state.keys())
                 addr = change.event['hostAddr']
                 LOG.debug('checking detected change : %s', str(change))
                 if (addr not in current_addrs) or \
@@ -570,7 +570,7 @@ class consul_status(object):
             LOG.debug('checking event for host %s against cache : %s',
                      str(data.event['hostName']), str(data.event['eventType']))
             # first check if new node is added
-            if addr not in self.last_status.keys():
+            if addr not in list(self.last_status.keys()):
                 self.last_status[addr] = data
                 LOG.debug('cache node found from consul members in last_status : %s', str(data))
 

@@ -12,15 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from ConfigParser import ConfigParser
+import re
 import unittest
 
+from configparser import ConfigParser
+
 from hamgr.db import api as db_api
-from shared.exceptions import ha_exceptions as exceptions
 from hamgr.providers.nova import get_provider
 from shared import constants
+from shared.exceptions import ha_exceptions as exceptions
 
 import mock
+
 
 class FakeNovaClient(object):
     class Hypervisors(object):
@@ -29,7 +32,7 @@ class FakeNovaClient(object):
             for i in range(4):
                 m = mock.Mock()
 
-                m.service = dict(host = str(i))
+                m.service = dict(host=str(i))
                 m.host_ip = '192.178.1.%d' % i
                 self.hosts.append(m)
 
@@ -55,26 +58,21 @@ class NovaProviderTest(unittest.TestCase):
         config = ConfigParser()
         config.add_section('database')
         config.set('database', 'sqlconnectURI', 'sqlite://')
-        config.set('database', 'sqlite_synchronous', False)
-
+        config.set('database', 'sqlite_synchronous', 'False')
         config.add_section('keystone_middleware')
         config.set('keystone_middleware', 'admin_user', 'fake')
         config.set('keystone_middleware', 'admin_password', 'fake')
         config.set('keystone_middleware', 'auth_uri', 'fake')
         config.set('keystone_middleware', 'admin_tenant_name', 'fake')
-
         config.add_section('nova')
         config.set('nova', 'region', 'fake')
-
         config.set('DEFAULT', 'event_report_threshold_seconds', '30')
-        config.set('DEFAULT', 'resmgr_endpoint','http://localhost:8080/resmgr')
+        config.set('DEFAULT', 'resmgr_endpoint', 'http://localhost:8080/resmgr')
         config.set('DEFAULT', 'du_fqdn', '')
         config.set('DEFAULT', 'customer_shortname', '')
         config.set('DEFAULT', 'customer_fullname', '')
         config.set('DEFAULT', 'region_name', '')
-
         self._provider = get_provider(config)
-
         db_api.Base.metadata.create_all(db_api._engine)
 
         def get_client():
@@ -99,7 +97,7 @@ class NovaProviderTest(unittest.TestCase):
                           mock_token, aggregate_id):
         host = {
             'id': "0",
-            'name':'fake-host-name',
+            'name': 'fake-host-name',
             'uuid': 'fake-host-uuid',
             'roles': ['fake_role_1', 'fake_role_2', 'pf9-ostackhost-neutron'],
             'info': {'responding': True},
@@ -108,20 +106,19 @@ class NovaProviderTest(unittest.TestCase):
         role_settings = {
             'fake_role_1': {},
             'fake_role_2': {},
-            'pf9-ostackhost-neutron': {"consul_ip": "192.178.1.1", "cluster_ip": "192.178.1.1"}
+            'pf9-ostackhost-neutron': {"consul_ip": "192.178.1.1",
+                                       "cluster_ip": "192.178.1.1"}
         }
         segments_info = {
             "segments": [
-                {"id": 0, "name": str(aggregate_id) }
+                {"id": 0, "name": str(aggregate_id)}
             ]
         }
-
 
         mock_resp = mock.Mock()
         mock_resp.status_code = 200
         mock_resp.raise_for_status = lambda *args: None
 
-        import re
         def _get_side_effect(endpoint, *args, **kwargs):
             _obj = mock.Mock()
             _val = _obj.return_value
@@ -131,9 +128,10 @@ class NovaProviderTest(unittest.TestCase):
                 _val.status_code = 200
                 _val.json = lambda *args: host
                 return _val
-            elif re.match('.*/hosts/\\d/roles', str(endpoint)) :
+            elif re.match('.*/hosts/\\d/roles', str(endpoint)):
                 _val.status_code = 200
-                _val.json = lambda *args: role_settings['pf9-ostackhost-neutron']
+                _val.json = lambda *args: role_settings[
+                    'pf9-ostackhost-neutron']
                 return _val
             elif re.match('.*/segments$', str(endpoint)):
                 _val.status_code = 200
@@ -150,7 +148,7 @@ class NovaProviderTest(unittest.TestCase):
 
     def _repeat_it(self):
         self._provider.put("fake1", "enable")
-        self._provider.process_ha_enable_disable_requests();
+        self._provider.process_ha_enable_disable_requests()
 
     @mock.patch('hamgr.common.utils.get_token')
     @mock.patch('requests.post')
@@ -165,13 +163,13 @@ class NovaProviderTest(unittest.TestCase):
         self.assertIsNotNone(aggregates, 'no aggregates found')
         self.assertTrue(len(aggregates) == 1, 'at least there is one aggregate')
         aggregate = aggregates[0]
-        self.assertTrue(aggregate['enabled']== False)
+        self.assertTrue(aggregate['enabled'] is False)
         # after request is processed
         self._provider.process_ha_enable_disable_requests()
         aggregates = self._provider.get('fake')
         self.assertIsNotNone(aggregates)
         aggregate = aggregates[0]
-        self.assertTrue(aggregate['enabled'] == True)
+        self.assertTrue(aggregate['enabled'] is True)
 
     @mock.patch('hamgr.common.utils.get_token')
     @mock.patch('requests.post')
@@ -186,7 +184,7 @@ class NovaProviderTest(unittest.TestCase):
         mock_resp.json = lambda *args: dict(role_status='ok')
         self._enable_aggregate(mock_del, mock_put, mock_get, mock_post,
                                mock_token, aggregate_id="fake")
-        self._provider.process_ha_enable_disable_requests();
+        self._provider.process_ha_enable_disable_requests()
         # Create 2nd aggregate with hosts from first cluster
         self.assertRaises(exceptions.HostPartOfCluster, self._repeat_it)
 

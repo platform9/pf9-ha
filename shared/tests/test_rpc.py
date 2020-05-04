@@ -12,11 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from ConfigParser import ConfigParser
-import sys
 import unittest
 import logging
-
+import time
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("pika")
 for hdr in logger.handlers:
@@ -24,10 +22,9 @@ for hdr in logger.handlers:
 logger.setLevel(logging.DEBUG)
 handler = logging.StreamHandler()
 handler.setLevel(logging.DEBUG)
-handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+handler.setFormatter(logging.Formatter(
+    "%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
 logger.addHandler(handler)
-
-import time
 
 
 @unittest.skip('tests requires rabbitmq server runs locally')
