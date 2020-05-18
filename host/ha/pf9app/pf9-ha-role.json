@@ -9,7 +9,7 @@
     },
     "bootstrap_expect": {
       "path": "config/ha_slave_conf/consul",
-      "default": 0
+      "default": "0"
     },
     "cluster_name" :{
       "path": "config/ha_slave_conf/consul",

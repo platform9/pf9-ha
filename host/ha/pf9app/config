@@ -13,19 +13,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from ConfigParser import ConfigParser
-from os.path import dirname
-from os.path import exists
-from os import makedirs
-
 import json
 import optparse
 import sys
 import subprocess
 
+from six.moves.configparser import ConfigParser
+
 HA_CONF_FILE = '/opt/pf9/etc/pf9-ha/conf.d/pf9-ha.conf'
 SERVICES = ['pf9-ha-slave']
 INT_OPTS = ['bootstrap_expect']
+
 
 def get_config(option, opt_str, value, parser):
     cfg = {}
@@ -47,22 +45,22 @@ def get_config(option, opt_str, value, parser):
     sys.stdout.write(json.dumps({"ha_slave_conf": cfg}))
     sys.exit(0)
 
+
 def _run_command(cmd, env=None, exit=True):
-    proc = subprocess.Popen(cmd, shell=True,
-                            stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
+    proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             env=env)
     out, err = proc.communicate()
     code = proc.returncode
-    sys.stdout.write("Run command : %s , code : %s , error : %s" % (cmd, out, err))
+    sys.stdout.write("Run command : %s , code : %s , error : %s" % (cmd, out,
+                                                                    err))
     if code and exit:
         # Consider any non zero code as error
         sys.stdout.write(out)
         sys.stderr.write("Command: %s failed. {%d}:%s" % (cmd, code, err))
         sys.exit(1)
-
     return code
+
 
 def set_config(option, opt_str, value_str, parser):
     cfgparser = ConfigParser()
@@ -82,7 +80,6 @@ def set_config(option, opt_str, value_str, parser):
     # otherwise pf9-ha-slave will not get updated configs for pf9-consul
     cmd = "sudo service pf9-ha-slave restart"
     _run_command(cmd)
-
     sys.exit(0)
 
 
