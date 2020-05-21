@@ -1,5 +1,5 @@
 {
-    "bootstrap_expect": 3,
+    "bootstrap_expect": "3",
     "server": true,
     "datacenter": "pf9-dc1",
     "data_dir": "/opt/pf9/consul-data-dir/"

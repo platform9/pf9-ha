@@ -14,11 +14,12 @@
 # limitations under the License.
 
 import argparse
-import ConfigParser
 
 from migrate.exceptions import DatabaseAlreadyControlledError
 from migrate.versioning.api import upgrade
 from migrate.versioning.api import version_control
+
+from six.moves.configparser import ConfigParser
 
 
 def _get_arg_parser():
@@ -38,9 +39,10 @@ def _version_control(conf):
         # Ignore the already controlled error
         pass
 
+
 if __name__ == '__main__':
     parser = _get_arg_parser()
-    conf = ConfigParser.ConfigParser()
+    conf = ConfigParser()
     conf.readfp(open(parser.config_file))
     if parser.command == 'db_sync':
         _version_control(conf)
