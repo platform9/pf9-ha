@@ -53,29 +53,6 @@ class RpcTest(unittest.TestCase):
         print('receiving - ' + str(msg))
         self.result = msg
 
-    def test_single_channel(self):
-        from shared.rpc.rpc_dual_client import RpcDualClient
-        client = RpcDualClient(self._host,
-                               self._port,
-                               self._user,
-                               self._password,
-                               self._exchange,
-                               self._exchange_type,
-                               self._queue_name,
-                               self._routingkey)
-        client.consume(self.callback)
-        client.start()
-        i = 0
-        while not self.result:
-            message = {'key_%s' % str(i): 'value_%s' % str(i)}
-            client.publish(message, routing=self._routingkey)
-            print('publishing : ' + str(message))
-            logger.debug('published : %s', str(message))
-            time.sleep(0.500)
-            i = i + 1
-        logger.debug('consumed : %s', str(self.result))
-        client.stop()
-
     def test_two_channels(self):
         from shared.rpc.rpc_producer import RpcProducer
         from shared.rpc.rpc_consumer import RpcConsumer

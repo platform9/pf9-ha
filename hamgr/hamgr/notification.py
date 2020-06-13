@@ -16,8 +16,9 @@ import logging
 import traceback
 
 from shared.exceptions.ha_exceptions import ConfigException
-from shared.rpc.rpc_producer import RpcProducer
-from hamgr.notification.model import Notification
+from shared.rpc.rpc_manager import RpcManager
+from shared.messages.cluster_event import ClusterEvent
+from shared.messages import message_types as message_types
 from shared.constants import LOGGER_PREFIX
 
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
@@ -26,7 +27,7 @@ _notification_manager = None
 
 
 class NotificationManager(object):
-    _notification_producer = None
+    _rpc_manager = None
     _notification_enabled = False
 
     def __new__(cls, *args, **kwargs):
@@ -40,14 +41,17 @@ class NotificationManager(object):
             raise ConfigException('null conf object')
 
         # by default assume the notification is not enabled
-        self._notification_enabled = conf.getboolean("DEFAULT", "notification_enabled") \
+        self._notification_enabled = conf.getboolean("DEFAULT",
+                                                     "notification_enabled") \
             if conf.has_option("DEFAULT", "notification_enabled") else False
         if self._notification_enabled:
             if not conf and not conf.has_section('amqp'):
-                raise ConfigException('invalid config or does not contain section amqp')
+                raise ConfigException(
+                    'invalid config or does not contain section amqp')
 
             if not conf and not conf.has_section('notification'):
-                raise ConfigException('invalid config or does not contain section notification')
+                raise ConfigException(
+                    'invalid config or does not contain section notification')
 
             host = conf.get('amqp', 'host')
             port = conf.get('amqp', 'port')
@@ -75,60 +79,61 @@ class NotificationManager(object):
                 raise ConfigException(error % 'exchange_name')
             if not exchange_type:
                 raise ConfigException(error % 'exchange_type')
-            msg = 'host:%s, port:%s, exchange:%s, exchange key:%s' % (str(host),
-                                                                      str(port),
-                                                                      str(exchange),
-                                                                      str(exchange_type))
+            msg = 'host:%s, ' \
+                  'port:%s, ' \
+                  'exchange:%s, ' \
+                  'exchange key:%s' % (str(host),
+                                       str(port),
+                                       str(exchange),
+                                       str(exchange_type))
             self._initialized = False
-            if self._notification_producer is None:
-                LOG.debug('create RPC publisher , %s ', msg)
-                self._notification_producer = RpcProducer(host=host,
-                                                          port=int(port),
-                                                          user=username,
-                                                          password=password,
-                                                          exchange=exchange,
-                                                          exchange_type=exchange_type,
-                                                          routing_key=routing_key,
-                                                          virtual_host=virtual_host)
-                assert self._notification_producer is not None
-                LOG.debug("start RPC producer, %s", msg)
-                self._notification_producer.start()
-                LOG.debug("RPC producer has started, %s", msg)
+            if self._rpc_manager is None:
+                LOG.debug('create notification producer , %s ', msg)
+                self._rpc_manager = RpcManager(host=host,
+                                               port=int(port),
+                                               username=username,
+                                               password=password,
+                                               virtual_host=virtual_host,
+                                               exchange_name=exchange,
+                                               exchange_type=exchange_type,
+                                               routingkey_for_sending=routing_key,
+                                               queue_for_receiving='',
+                                               routingkey_for_receiving='',
+                                               application='NotificationManager')
+                assert self._rpc_manager is not None
                 self._initialized = True
 
     def __del__(self):
         if self._notification_enabled:
-            LOG.debug("stop notification publisher")
-            if self._notification_producer is not None:
-                self._notification_producer.stop()
+            LOG.debug("stop notification producer")
+            if self._rpc_manager is not None:
+                self._rpc_manager = None
 
     def send_notification(self, notification):
         if not self._notification_enabled:
-            LOG.debug('ignore notification request as notification function is not enabled')
+            LOG.debug("ignore notification request as notification function "
+                      "is not enabled")
             return
 
-        if not notification or not isinstance(notification, Notification):
-            LOG.debug('ignore notification request as the request is invalid notification')
+        if not notification or not isinstance(notification, ClusterEvent):
+            LOG.debug('ignore notification request as the request is invalid '
+                      'notification')
             return
 
-        if self._notification_producer is None:
-            LOG.warning('ignore notification request as ha notification publisher is not initialized')
-            return
-
-        if not self._notification_producer.is_connected():
-            LOG.warning('ignore notification request as ha notification publisher has not started')
+        if self._rpc_manager is None:
+            LOG.warning('ignore notification request as ha notification '
+                        'publisher is not initialized')
             return
 
         LOG.debug('publishing notification : %s', str(notification))
-        self._notification_producer.publish(notification)
-        LOG.debug("published notification %s" % str(notification))
+        self._rpc_manager.send_rpc_message(notification, message_type=message_types.MSG_CLUSTER_EVENT)
 
 
 def get_notification_manager(config):
     global _notification_manager
+    LOG.debug('get notification manager ')
     if _notification_manager is None:
         LOG.debug('creating notification manager')
         LOG.debug(traceback.format_exc())
         _notification_manager = NotificationManager(config)
-
     return _notification_manager

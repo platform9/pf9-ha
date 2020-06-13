@@ -24,8 +24,8 @@ handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s -
 logger.addHandler(handler)
 
 from ConfigParser import ConfigParser
-from hamgr.notification.manager import NotificationManager
-from hamgr.notification.model import Notification
+from hamgr.notification import NotificationManager
+from shared.messages.cluster_event import ClusterEvent
 
 
 @unittest.skip('tests requires rabbitmq server runs locally')
@@ -52,5 +52,5 @@ class NotificationPublishTest(unittest.TestCase):
         del self.manager
 
     def test_publish(self):
-        self.manager.send_notification(Notification('add', 'cluster', '123'))
+        self.manager.send_notification(ClusterEvent('add', 'cluster', '123'))
         logger.debug("test is done")

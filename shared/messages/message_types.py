@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+MSG_CLUSTER_EVENT = 'vmha-cluster-event'
 MSG_ROLE_REBALANCE_REQUEST = 'role-rebalance-request'
 MSG_ROLE_REBALANCE_RESPONSE = 'role-rebalance-response'
 MSG_CONSUL_REFRESH_REQUEST = 'consul-refresh-request'
