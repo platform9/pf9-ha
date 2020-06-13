@@ -271,7 +271,7 @@ class NovaProvider(Provider):
                         constants.STATE_ABORTED,
                         'event happened long time ago : %s' % str(event_time)
                     )
-                    LOG.warning('event %s is aborted from state %s , as it is too stale',
+                    LOG.warning('event %s is aborted from state %s, as it is too stale',
                              str(event_uuid), str(event.notification_status))
                     continue
 
@@ -963,7 +963,7 @@ class NovaProvider(Provider):
         target_host_id = rebalance_request['host_id']
         target_old_role = rebalance_request['old_role']
         target_new_role = rebalance_request['new_role']
-        LOG.debug('execute consul role rebalance request %s for host %s from old role %s to new role %s',
+        LOG.info('execute consul role rebalance request %s for host %s from old role %s to new role %s',
                   req_id, target_host_id, target_old_role, target_new_role)
         # because the resmgr keeps the customerized settings for consul role, for pf9-ha-slave role
         # the difference between consul server and client is the 'bootstrap_expect' settings
@@ -994,7 +994,7 @@ class NovaProvider(Provider):
             LOG.warning('get info for host %s was unsuccessful, result : %s', target_host_id, str(result))
         if 'pf9-ha-slave' not in data['roles']:
             error = 'host %s does not have pf9-ha-slave role' % target_host_id
-            LOG.debug('abort consul role rebalance request, as %s', error)
+            LOG.warning('abort consul role rebalance request, as %s', error)
             conclusion.update({'status': constants.RPC_TASK_STATE_ABORTED, 'message': error})
             return conclusion
 
@@ -1027,7 +1027,7 @@ class NovaProvider(Provider):
             resp = get_rebalance_controller(self._config).rebalance_and_wait_for_result(rebalance_request)
 
         if resp:
-            LOG.debug('response of consul role rebalance request : %s', str(resp))
+            LOG.info('response of consul role rebalance request : %s', str(resp))
             consul_status = resp.get('consul_status', {})
             resp_msg = resp.get('message', {})
             conclusion.update({'status': resp['status'], 'message': resp_msg, 'consul_status': consul_status})
@@ -1292,22 +1292,13 @@ class NovaProvider(Provider):
             resp.raise_for_status()
 
     def _get_cluster_ip(self, host_id, json_resp):
+        LOG.debug('try to get cluster_ip for host %s from resp %s', str(host_id), str(json_resp))
         if not json_resp:
-            LOG.warning('_get_cluster_ip : response object is none, can not parse cluster ip')
+            LOG.warning('_get_cluster_ip : response object is none, cannot parse cluster ip')
             return None
-        LOG.info('try to get cluster_ip for host %s from resp %s', str(host_id), str(json_resp))
         if 'cluster_ip' not in json_resp:
             raise ha_exceptions.ClusterIpNotFound(host_id)
         return str(json_resp['cluster_ip'])
-
-    def _get_consul_ip(self, host_id, json_resp):
-        if not json_resp:
-            return None
-        LOG.info('try to get consul_ip for host %s from resp %s', str(host_id), str(json_resp))
-        if 'consul_ip' in json_resp and json_resp['consul_ip']:
-            return str(json_resp['consul_ip'])
-        LOG.info('consul_ip is not set for host %s, fall back to cluster_ip', str(host_id))
-        return self._get_cluster_ip(host_id, json_resp)
 
     def _get_ips_for_hosts_v3(self, aggregate_id):
         cluster_name = str(aggregate_id)
@@ -1333,32 +1324,19 @@ class NovaProvider(Provider):
             host_id = hyp.service['host']
             cluster_ip = ''
             if host_id in lookup:
-                ip_lookup[host_id] = hyp.host_ip
-                # Overwrite host_ip value with consul_ip or cluster_ip
-                # from ostackhost role
+                # each lookup table has ip for each host
+                ip_lookup[host_id] = cluster_ip_lookup[host_id] = hyp.host_ip
+                # Overwrite host_ip value with cluster_ip from ostackhost role
                 roles_for_host = hosts_info.get(host_id, {}).get('roles', {})
                 if roles_for_host:
                     json_resp = hosts_info.get(host_id, {}).get("role_settings", {}).get("pf9-ostackhost-neutron", {})
                     LOG.debug('role details for host %s : %s', host_id, str(json_resp))
-                    consul_ip = self._get_consul_ip(host_id, json_resp)
-                    if consul_ip:
-                        LOG.info('Using consul ip %s from ostackhost role',
-                                 consul_ip)
-                        ip_lookup[host_id] = consul_ip
                     cluster_ip = self._get_cluster_ip(host_id, json_resp)
                     if cluster_ip:
-                        LOG.info('Using cluster ip %s from ostackhost role',
-                                 cluster_ip)
+                        LOG.info('Using cluster ip %s from ostackhost role for host %s', cluster_ip, host_id)
                         cluster_ip_lookup[host_id] = cluster_ip
-
-                    # if one exist but the other does not, just set to the existing one
-                    # so at least each look up table has ip for each host
-                    LOG.debug('ips of host %s : consul ip -> %s , cluster ip -> %s, details -> %s',
-                              host_id, consul_ip, cluster_ip, str(json_resp))
-                    if not consul_ip and cluster_ip:
                         ip_lookup[host_id] = cluster_ip
-                    if not cluster_ip and consul_ip:
-                        cluster_ip_lookup[host_id] = consul_ip
+
                     # only need host which has ostackhost role
                     nodes_details.append({'name': host_id, 'addr': cluster_ip})
                 else:
@@ -1400,11 +1378,12 @@ class NovaProvider(Provider):
 
     def _assign_roles(self, nova_client, aggregate_id, hosts):
         hosts = sorted(hosts)
-        leader = hosts[0]
-        servers = hosts[1:4]
-
+        # First 4 hosts act as servers at minimum; 5 is maximum
+        servers = hosts[0:4]
         agents = []
-        if len(hosts) >= 5:
+        if len(hosts) == 5:
+            agents = hosts[4:]
+        elif len(hosts) > 5: 
             servers += hosts[4:5]
             agents = hosts[5:]
 
@@ -1412,18 +1391,10 @@ class NovaProvider(Provider):
         hypervisors = nova_client.hypervisors.list()
         hosts_info = self._resmgr_client.fetch_hosts_details(hosts, self._token['id'])
         ip_lookup, cluster_ip_lookup, nodes_details = self._get_ips_for_hosts_v2(hypervisors,
-                                                                  hosts,
-                                                                  hosts_info)
-
-        if leader not in ip_lookup:
-            LOG.error('Leader %s not found in nova', leader)
-            raise ha_exceptions.HostNotFound(leader)
-
-        leader_ip = ip_lookup[leader]
-
-        self._token = self._get_v3_token()
+                                                                                 hosts,
+                                                                                 hosts_info)
         LOG.info('authorize pf9-ha-slave during assign roles')
-        self._auth(aggregate_id, ip_lookup, cluster_ip_lookup, nodes_details, self._token, [leader] + servers, 'server')
+        self._auth(aggregate_id, ip_lookup, cluster_ip_lookup, nodes_details, self._token, servers, 'server')
         self._auth(aggregate_id, ip_lookup, cluster_ip_lookup, nodes_details, self._token, agents, 'agent')
 
     def __perf_meter(self, method, time_start):
@@ -1495,7 +1466,7 @@ class NovaProvider(Provider):
             LOG.error('unhandled exception : %s', str(e))
 
     def _handle_enable_request(self, request, hosts=None, next_state=constants.TASK_COMPLETED):
-        LOG.debug('handling enable request')
+        LOG.info('Handling enable request : %s', str(request))
         if not request:
             return
         nova_client = self._get_nova_client()
@@ -1628,9 +1599,8 @@ class NovaProvider(Provider):
 
         while True:
             if datetime.now() - start_time > timedelta(seconds=timeout):
-                LOG.info(
-                    "not all hosts are converged, starting from %s to %s ",
-                    str(node), str(start_time), str(datetime.now()))
+                LOG.info("not all hosts are converged, starting from %s to %s ",
+                         str(node), str(start_time), str(datetime.now()))
                 break
 
             hosts_info = self._resmgr_client.fetch_hosts_details(nodes, self._token['id'])
@@ -1674,7 +1644,7 @@ class NovaProvider(Provider):
 
     def _disable(self, aggregate_id, synchronize=False,
                  next_state=constants.TASK_COMPLETED):
-        """Disale HA
+        """Disable HA
 
         :params aggregate_id: Host aggregate ID on which HA is being disabled
         :params synchronize: when set to True, function blocks till ha-slave
@@ -1735,14 +1705,14 @@ class NovaProvider(Provider):
         finally:
             with self.ha_status_processing_lock:
                 self.ha_status_processing_running = False
-        LOG.debug('ha status processing task has finished at %s', str(datetime.utcnow()))
+        LOG.debug('HA status processing task has finished at %s', str(datetime.utcnow()))
 
     def _handle_disable_request(self, request, next_state=constants.TASK_COMPLETED):
-        LOG.info('handling disable request : %s', str(request))
+        LOG.info('Handling disable request : %s', str(request))
         cluster = request
         # the name used to query db needs to be string, not int
-        #  name in failover segment matchs the name used in vmha cluster
-        aggregate_name = str(cluster.name)
+        # name in failover segment matches the name used in vmha cluster
+        cluster_name = str(cluster.name)
         try:
             self._token = self._get_v3_token()
             hosts = None
@@ -1751,17 +1721,17 @@ class NovaProvider(Provider):
                     # If aggregate has changed, we need to remove role from
                     # previous segment's nodes
                     nodes = masakari.get_nodes_in_segment(self._token,
-                                                          aggregate_name)
+                                                          cluster_name)
                     hosts = [n['name'] for n in nodes]
                 else:
                     # If cluster was not even created, but we are disabling HA
                     # to rollback enablement
                     nova_client = self._get_nova_client()
-                    aggregate = self._get_aggregate(nova_client, aggregate_name)
+                    aggregate = self._get_aggregate(nova_client, cluster_name)
                     hosts = set(aggregate.hosts)
             except ha_exceptions.SegmentNotFound:
                 LOG.warning('Masakari segment for cluster: %s was not found, '
-                         'skipping deauth', aggregate_name)
+                         'skipping deauth', cluster_name)
 
             # need to check whether masakari is working on this failover
             # segment for any notifications. if there is such notification
@@ -1770,14 +1740,14 @@ class NovaProvider(Provider):
             # delete the failover segment, otherwise there will be
             # 409 conflict error
             need_to_wait = masakari.is_failover_segment_under_recovery(
-                self._token, aggregate_name)
+                self._token, cluster_name)
             if need_to_wait:
-                LOG.info('not disable cluster %s for now, as masakari segment %s is under recovery, '
-                         'will retry disabling request later', aggregate_name, aggregate_name)
+                LOG.info('Not disabling cluster %s for now, as masakari segment is under recovery, '
+                         'will retry disabling request later', cluster_name)
                 return
 
             # since the failover segment is not under recovery , so force to reset host maintenance status
-            self._toggle_masakari_hosts_maintenance_status(segment_name=aggregate_name, ignore_status_in_nova=True)
+            self._toggle_masakari_hosts_maintenance_status(segment_name=cluster_name, ignore_status_in_nova=True)
 
             # change status from 'request-disable' to 'disabling'
             LOG.info('set cluster id %s task state to %s', str(cluster.id), str(constants.HA_STATE_DISABLING))
@@ -1785,21 +1755,21 @@ class NovaProvider(Provider):
                                          , constants.HA_STATE_DISABLING)
             self._notify_status(constants.HA_STATE_DISABLING, "cluster", cluster.id)
             if hosts:
-                LOG.debug('de-authorize roles from hosts and wait for complation')
+                LOG.debug('De-authorize roles from hosts and wait for complation')
                 self._deauth(hosts)
                 self._wait_for_role_to_ok_v2(hosts)
             else:
-                LOG.info('no hosts found in segment %s', str(aggregate_name))
-            LOG.debug('delete masakari segment from masakari')
-            masakari.delete_failover_segment(self._token, str(aggregate_name))
+                LOG.info('no hosts found in segment %s', cluster_name)
+            LOG.info('Deleting failover segment %s from masakari', cluster_name)
+            masakari.delete_failover_segment(self._token, cluster_name)
             # in case hosts are not completely removed, try to remove them again
-            LOG.debug('clean up hosts for masakari segment')
-            masakari.delete_hosts_from_failover_segment(self._token, str(aggregate_name), hosts)
+            LOG.info('Removing hosts from masakari segment %s', cluster_name)
+            masakari.delete_hosts_from_failover_segment(self._token, cluster_name, hosts)
             # change status from 'disabling' to 'disabled'
             db_api.update_request_status(cluster.id
                                          , constants.HA_STATE_DISABLED)
             self._notify_status(constants.HA_STATE_DISABLED, "cluster", cluster.id)
-            LOG.debug('successfully processed disable request')
+            LOG.info('successfully processed disable request')
         except Exception:
             if cluster:
                 # mark the status as 'error'
@@ -2452,7 +2422,7 @@ class NovaProvider(Provider):
                           str(len(host_ids)), cluster_name, str(host_ids))
                 hypervisors = nova_client.hypervisors.list()
                 hosts_info = self._resmgr_client.fetch_hosts_details(host_ids, self._token['id'])
-                LOG.debug('host details for %s : %s', str(host_ids), str(hosts_info))
+                LOG.debug('Details for hosts %s : %s', str(host_ids), str(hosts_info))
                 ip_lookup, cluster_ip_lookup, nodes_details = self._get_ips_for_hosts_v2(hypervisors,
                                                                           host_ids,
                                                                           hosts_info)
@@ -2463,11 +2433,6 @@ class NovaProvider(Provider):
                     try:
                         self._token = self._get_v3_token()
                         # get the target host info to make sure the role status is ok
-                        resp_host = hosts_info.get('roles', {})
-                        if not resp_host or 'pf9-ha-slave' not in resp_host['roles']:
-                            LOG.warning('host %s does not have pf9-ha-slave role', host_id)
-                            continue
-
                         resp_role = hosts_info.get(host_id, {}).get('role_settings', {}).get("pf9-ha-slave", {})
                         if not resp_role:
                             LOG.warning('empty settings for role pf9-ha-slave for host %s : %s', str(host_id), str(resp_role))

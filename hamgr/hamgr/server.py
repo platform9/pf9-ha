@@ -76,7 +76,6 @@ def start_server(conf, paste_ini):
         LOG.exception('unhandled exception from server')
 
 if __name__ == '__main__':
-
     parser = _get_arg_parser()
     conf = ConfigParser.ConfigParser()
     with open(parser.config_file) as f:
