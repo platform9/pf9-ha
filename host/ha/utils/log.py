@@ -21,7 +21,7 @@ from shared.constants import ROOT_LOGGER
 CONF = cfg.CONF
 log_group = cfg.OptGroup('log', title='Group for all log options')
 log_opts = [
-    cfg.StrOpt('level', default='INFO', help='Log level'),
+    cfg.StrOpt('level', default='DEBUG', help='Log level'),
     cfg.StrOpt('file', default='/var/log/pf9/pf9-ha.log',
                help='log file location'),
     cfg.StrOpt('max_bytes', default='10485760', help='max size in bytes of log file when to rotate'),

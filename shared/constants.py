@@ -23,8 +23,12 @@ EVENT_HOST_UP = 'host-up'
 EVENT_HOST_DOWN = 'host-down'
 EVENT_HOST_ADDED = 'host-added'
 EVENT_HOST_REMOVED = 'host-removed'
+EVENT_CONSUL_INSPECT = 'consul-role-inspect'
+EVENT_CONSUL_CHANGE = 'consul-role-change'
 
-HOST_EVENTS = [EVENT_HOST_UP , EVENT_HOST_DOWN, EVENT_HOST_ADDED, EVENT_HOST_REMOVED]
+HOST_EVENTS = [EVENT_HOST_UP , EVENT_HOST_DOWN,
+               EVENT_HOST_ADDED, EVENT_HOST_REMOVED,
+               EVENT_CONSUL_INSPECT, EVENT_CONSUL_CHANGE]
 
 # the status of processing events
 STATE_ABORTED = 'aborted'

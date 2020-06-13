@@ -49,7 +49,8 @@ class PeriodicTask(object):
                         datetime.now() - task.last_called >= task.interval:
                     LOG.debug('Running task: %(task)s',
                               {'task': task.func.__name__})
-                    task_thread = threading.Thread(target=task.func)
+                    task_thread = threading.Thread(name=str(task.func.__name__),
+                                                   target=task.func)
                     task_thread.start()
                     task.last_called = datetime.now()
             time.sleep(10)
@@ -70,11 +71,11 @@ def add_task(function, interval, run_now=False, run_once=False):
         if not run_once:
             ptask.task_list.append(task)
         if run_now:
-            task_thread = threading.Thread(target=function)
+            task_thread = threading.Thread(name=str(function.__name__), target=function)
             task_thread.start()
             task.last_called = datetime.now()
 
 
 def start():
     ptask = _get_object()
-    threading.Thread(target=ptask.run).start()
+    threading.Thread(name=str(ptask.run.__name__), target=ptask.run).start()

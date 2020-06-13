@@ -16,7 +16,7 @@
 import logging
 import json
 from datetime import datetime
-from shared.rpc.rpc_base import RpcBase
+from shared.rpc.rpc_channel import RpcChannel
 from shared.constants import LOGGER_PREFIX
 
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
@@ -29,7 +29,7 @@ LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 # https://pika.readthedocs.io/en/latest/examples/asynchronous_consumer_example.html
 # ==============================================================================
 
-class RpcConsumer(RpcBase):
+class RpcConsumer(object):
     def __init__(self,
                  host,
                  port,
@@ -40,7 +40,8 @@ class RpcConsumer(RpcBase):
                  queue_name,
                  routing_key='',
                  virtual_host="/",
-                 auto_delete_queue=True):
+                 application='',
+                 auto_delete_queue=False):
         self._host = host
         self._port = port
         self._user = user
@@ -49,73 +50,105 @@ class RpcConsumer(RpcBase):
         self._exchange_type = exchange_type
         self._queue_name = queue_name
         self._virtual_host = virtual_host
+        self._application = application
         self._routing_key = routing_key
         self._auto_delete_queue = auto_delete_queue
 
-        super(RpcConsumer, self).__init__(host,
-                                          port,
-                                          user,
-                                          password,
-                                          exchange,
-                                          exchange_type,
-                                          virtual_host)
+        self._rpc_channel = RpcChannel(host,
+                                       port,
+                                       user,
+                                       password,
+                                       exchange,
+                                       exchange_type,
+                                       virtual_host,
+                                       application=application)
         self._consumer_tag = None
         self._callbacks_list = dict()
-        self._is_setup_ready = False
 
-    def _on_message_received(self, unused_channel, basic_deliver, properties, body):
-        LOG.debug('consumer received message from server at %s: %s', str(datetime.utcnow()), str(body))
+    def start(self):
+        # register callbacks
+        # - connection_ready
+        # - connection_close
+        self._rpc_channel.add_connection_ready_callback(
+            self.on_connection_ready)
+        self._rpc_channel.add_connection_close_callback(
+            self.on_connection_close)
+        self._rpc_channel.start()
+
+    def stop(self):
+        if self._rpc_channel:
+            self._rpc_channel.stop()
+            self._rpc_channel = None
+
+    def _on_message_received(self, unused_channel, basic_deliver, properties,
+                             body):
+        LOG.debug('consumer received message from server at %s: %s',
+                  str(datetime.utcnow()), str(body))
         tag = basic_deliver.delivery_tag
-        LOG.debug('consumer acknowledging received message # %s : %s', tag, body)
-        self.get_channel().basic_ack(tag)
+        LOG.debug('consumer acknowledging received message # %s : %s', tag,
+                  body)
+        channel = self._rpc_channel.get_channel()
+        channel.basic_ack(tag)
         for k, v in self._callbacks_list.iteritems():
             try:
                 v({'tag': tag, 'body': json.loads(body)})
             except Exception as e:
-                LOG.warning('message is not processed by method %s : %s', str(k), str(e))
+                LOG.warning('message is not processed by method %s : %s',
+                            str(k), str(e))
 
     def _on_consumer_cancelled(self, method_frame):
-        LOG.debug('consumer was cancelled remotely, shutting down: %r', method_frame)
-        if self.get_channel():
-            self.get_channel().close()
+        LOG.debug('consumer was cancelled remotely, shutting down: %r',
+                  method_frame)
+        channel = self._rpc_channel.get_channel()
+        if channel:
+            channel.close()
 
     def _on_cancel_ok(self, unused_frame):
-        LOG.debug('server acknowledged the cancellation of the consumer, now close connection')
+        LOG.debug("server acknowledged the cancellation of the consumer, "
+                  "now close connection")
         self.close_channel()
 
-    def on_stopping(self):
-        if self.get_channel():
-            LOG.debug('consumer is stopping, notifying server for consumer cancellation')
-            self.get_channel().basic_cancel(self._on_cancel_ok, self._consumer_tag)
+    def on_connection_close(self):
+        channel = self._rpc_channel.get_channel()
+        if channel:
+            LOG.debug('RPC consumer is stopping, notifying server for '
+                      'consumer cancellation')
+            channel.basic_cancel(self._on_cancel_ok, self._consumer_tag)
         self._messages_callback = None
 
     def _setup_queue(self, queue_name):
-        LOG.debug('declaring queue %s', queue_name)
-        self._channel.queue_declare(self._on_queue_declare_ok, queue_name, auto_delete=self._auto_delete_queue)
+        LOG.debug('RPC consumer declaring queue %s', queue_name)
+        try:
+            channel = self._rpc_channel.get_channel()
+            channel.queue_declare(self._on_queue_declare_ok, queue_name,
+                                        auto_delete=self._auto_delete_queue)
+        except Exception:
+            LOG.excception('unhandled RPC consumer queue %s declaration',
+                      queue_name)
 
     def _on_queue_declare_ok(self, method_frame):
-        LOG.debug('queue declared')
-        LOG.debug('binding exchange %s to queue %s with routing %s', self._exchange, self._queue_name, self._routing_key)
-        self._channel.queue_bind(self._on_queue_bind_ok, self._queue_name, self._exchange, self._routing_key)
+        LOG.debug(
+            'RPC consumer binding exchange %s to queue %s with routing %s',
+            self._exchange, self._queue_name, self._routing_key)
+        channel = self._rpc_channel.get_channel()
+        channel.queue_bind(self._on_queue_bind_ok, self._queue_name,
+                           self._exchange, self._routing_key)
 
     def _on_queue_bind_ok(self, unused_frame):
-        LOG.debug('queue bound')
-        LOG.debug('consumer queue is ready, register consumer cancellation callback')
-        self.get_channel().add_on_cancel_callback(self._on_consumer_cancelled)
-        LOG.debug('consumer queue is ready, register consumer callback to receive messages')
-        self._consumer_tag = self.get_channel().basic_consume(self._on_message_received, self._queue_name)
-        self._is_setup_ready = True
-
-    def is_setup_ready(self):
-        return self._is_setup_ready
+        LOG.debug('RPC consumer queue is ready')
+        channel = self._rpc_channel.get_channel()
+        channel.add_on_cancel_callback(self._on_consumer_cancelled)
+        LOG.debug('register RPC consumer callback to receive messages')
+        self._consumer_tag = channel.basic_consume(
+            self._on_message_received, self._queue_name)
 
     def on_connection_ready(self):
-        LOG.debug('consumer connection is ready, now setup queue')
+        LOG.debug('RPC consumer connection is ready, now setup queue')
         self._setup_queue(self._queue_name)
 
     def consume(self, messages_callback):
         if not callable(messages_callback):
             raise Exception('messages_callback needs to be a method')
-        LOG.debug('attach callback to receive messages')
+        LOG.debug('attach callback to receive RPC messages')
         if not self._callbacks_list.has_key(str(messages_callback)):
             self._callbacks_list[str(messages_callback)] = messages_callback

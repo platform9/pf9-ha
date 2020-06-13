@@ -21,7 +21,14 @@ LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 class MessageBase(dict):
     def __init__(self, type, *args, **kwargs):
-        id = str(uuid.uuid4())
+        # we can pass in 'id' from kwargs so we
+        # can customize the message identifier
+        if 'id' in kwargs.keys():
+            id = kwargs['id']
+            # remove 'id' field to avoid duplication
+            kwargs.pop('id')
+        else:
+            id = str(uuid.uuid4())
         timestamp = datetime.utcnow()
         self._type = type
         self._id = id
