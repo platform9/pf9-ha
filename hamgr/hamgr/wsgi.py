@@ -93,8 +93,8 @@ def update_host_status(host_uuid):
     event_details = json_obj.get('event_details', {})
     event_details['host_id'] = host_id
     postby = event_details['event'].get('reportedBy', '')
-    LOG.info('received event %s for host %s from host %s : %s', str(event), host_id, str(postby),
-             str(event_details))
+    LOG.info('received event %s for host %s from host %s : %s',
+             str(event), host_id, str(postby), str(event_details))
     provider = get_provider()
     if event and event == 'host-down':
         masakari_notified = provider.host_down(event_details)
