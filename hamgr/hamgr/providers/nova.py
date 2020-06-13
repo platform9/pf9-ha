@@ -1735,14 +1735,14 @@ class NovaProvider(Provider):
         finally:
             with self.ha_status_processing_lock:
                 self.ha_status_processing_running = False
-        LOG.debug('ha status processing task has finished at %s', str(datetime.utcnow()))
+        LOG.debug('HA status processing task has finished at %s', str(datetime.utcnow()))
 
     def _handle_disable_request(self, request, next_state=constants.TASK_COMPLETED):
-        LOG.info('handling disable request : %s', str(request))
+        LOG.info('Handling disable request : %s', str(request))
         cluster = request
         # the name used to query db needs to be string, not int
-        #  name in failover segment matchs the name used in vmha cluster
-        aggregate_name = str(cluster.name)
+        # name in failover segment matches the name used in vmha cluster
+        cluster_name = str(cluster.name)
         try:
             self._token = self._get_v3_token()
             hosts = None
@@ -1751,17 +1751,17 @@ class NovaProvider(Provider):
                     # If aggregate has changed, we need to remove role from
                     # previous segment's nodes
                     nodes = masakari.get_nodes_in_segment(self._token,
-                                                          aggregate_name)
+                                                          cluster_name)
                     hosts = [n['name'] for n in nodes]
                 else:
                     # If cluster was not even created, but we are disabling HA
                     # to rollback enablement
                     nova_client = self._get_nova_client()
-                    aggregate = self._get_aggregate(nova_client, aggregate_name)
+                    aggregate = self._get_aggregate(nova_client, cluster_name)
                     hosts = set(aggregate.hosts)
             except ha_exceptions.SegmentNotFound:
                 LOG.warning('Masakari segment for cluster: %s was not found, '
-                         'skipping deauth', aggregate_name)
+                         'skipping deauth', cluster_name)
 
             # need to check whether masakari is working on this failover
             # segment for any notifications. if there is such notification
@@ -1770,14 +1770,14 @@ class NovaProvider(Provider):
             # delete the failover segment, otherwise there will be
             # 409 conflict error
             need_to_wait = masakari.is_failover_segment_under_recovery(
-                self._token, aggregate_name)
+                self._token, cluster_name)
             if need_to_wait:
-                LOG.info('not disable cluster %s for now, as masakari segment %s is under recovery, '
-                         'will retry disabling request later', aggregate_name, aggregate_name)
+                LOG.info('Not disabling cluster %s for now, as masakari segment is under recovery, '
+                         'will retry disabling request later', cluster_name)
                 return
 
             # since the failover segment is not under recovery , so force to reset host maintenance status
-            self._toggle_masakari_hosts_maintenance_status(segment_name=aggregate_name, ignore_status_in_nova=True)
+            self._toggle_masakari_hosts_maintenance_status(segment_name=cluster_name, ignore_status_in_nova=True)
 
             # change status from 'request-disable' to 'disabling'
             LOG.info('set cluster id %s task state to %s', str(cluster.id), str(constants.HA_STATE_DISABLING))
@@ -1785,16 +1785,16 @@ class NovaProvider(Provider):
                                          , constants.HA_STATE_DISABLING)
             self._notify_status(constants.HA_STATE_DISABLING, "cluster", cluster.id)
             if hosts:
-                LOG.debug('de-authorize roles from hosts and wait for complation')
+                LOG.debug('De-authorize roles from hosts and wait for complation')
                 self._deauth(hosts)
                 self._wait_for_role_to_ok_v2(hosts)
             else:
-                LOG.info('no hosts found in segment %s', str(aggregate_name))
-            LOG.debug('delete masakari segment from masakari')
-            masakari.delete_failover_segment(self._token, str(aggregate_name))
+                LOG.info('no hosts found in segment %s', cluster_name)
+            LOG.debug('Deleting failover segment %s from masakari', cluster_name)
+            masakari.delete_failover_segment(self._token, cluster_name)
             # in case hosts are not completely removed, try to remove them again
-            LOG.debug('clean up hosts for masakari segment')
-            masakari.delete_hosts_from_failover_segment(self._token, str(aggregate_name), hosts)
+            LOG.debug('Removing hosts from masakari segment %s', cluster_name)
+            masakari.delete_hosts_from_failover_segment(self._token, cluster_name, hosts)
             # change status from 'disabling' to 'disabled'
             db_api.update_request_status(cluster.id
                                          , constants.HA_STATE_DISABLED)
