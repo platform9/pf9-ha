@@ -40,12 +40,23 @@ class FakeNovaClient(object):
 
     class Aggregate(object):
         aggr = mock.Mock()
+        aggr.id = 'fake'
+
+        def _getitem(*args, **kwargs):
+            if 'id' in args:
+                return 'fake'
+            return ''
+
+        aggr.__getitem__= mock.Mock(side_effect = _getitem)
 
         def get(self, *args, **kwargs):
             return self.aggr
 
-    Aggregate.aggr.hosts = [h.service['host']
-                            for h in hypervisors.list()]
+        def list(self):
+            return [self.aggr]
+
+    Aggregate.aggr.hosts = [h.service['host'] for h in hypervisors.list()]
+
     aggregates = Aggregate()
 
 
@@ -72,7 +83,8 @@ class NovaProviderTest(unittest.TestCase):
         config.set('DEFAULT', 'customer_shortname', '')
         config.set('DEFAULT', 'customer_fullname', '')
         config.set('DEFAULT', 'region_name', '')
-
+        # ignore sending notifications because it requires rabbitmq
+        config.set('DEFAULT', 'notification_enabled', 'False')
         self._provider = get_provider(config)
 
         db_api.Base.metadata.create_all(db_api._engine)
