@@ -460,7 +460,9 @@ def handle_consul_refresh_request(rebalance_mgr, hostid, cluster, request):
         return
     try:
         key_prefix = 'request-'
-        ch = consul_helper.consul_status(hostid, global_join_ips.split(' '))
+        cluster_details = json.loads(CONF.consul.cluster_details)
+        ch = consul_helper.consul_status(hostid, global_join_ips.split(' '),
+                                         cluster_details)
         # all hosts will receive this broadcast request, so there are two scenarios:
         # - receiver is consul leader:
         #     when it is alive : it can reply immediately
