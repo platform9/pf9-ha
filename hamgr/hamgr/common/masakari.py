@@ -130,11 +130,11 @@ def delete_failover_segment(token, name):
             resp = requests.delete(url, headers=headers)
             if resp.status_code not in [requests.codes.no_content,
                                         requests.codes.not_found]:
-                LOG.debug('unexpected status %s while deleting host %s',
+                LOG.warning('unexpected status %s while deleting host %s',
                           str(resp), str(node))
                 resp.raise_for_status()
     except Exception:
-        LOG.warning('error when delete host from segment %s', str(name),
+        LOG.error('error when delete host from segment %s', str(name),
                  exc_info=True)
         raise
 
