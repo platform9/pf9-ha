@@ -126,7 +126,7 @@ def delete_failover_segment(token, name):
                          str(node['name']), str(name))
             url = '/'.join([_URL, 'segments', node['failover_segment_id'],
                             'hosts', node['uuid']])
-            LOG.debug('remove host from masakari segment : %s', str(url))
+            LOG.info('Removing host from masakari segment %s: %s', str(name), str(url))
             resp = requests.delete(url, headers=headers)
             if resp.status_code not in [requests.codes.no_content,
                                         requests.codes.not_found]:
@@ -147,7 +147,7 @@ def delete_failover_segment(token, name):
                   str(name))
         resp.raise_for_status()
     else:
-        LOG.info('successfully deleted masakari segment %s', str(name))
+        LOG.info('Successfully deleted masakari segment %s', str(name))
 
 
 def create_failover_segment(token, name, hosts):

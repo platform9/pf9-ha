@@ -174,7 +174,7 @@ def generate_consul_conf(server_mode, ignore_expect=False):
         if not server_mode:
             LOG.debug('generate consul config as slave')
             # Start consul with agent conf
-            with open(PF9_CONSUL_CONF_DIR + 'client.json.template') as fptr:
+            with open(PF9_CONSUL_CONF_DIR + 'client.json.template', 'r') as fptr:
                 agent_conf = json.load(fptr)
             agent_conf['advertise_addr'] = ip_address
             agent_conf['bind_addr'] = bind_address
@@ -202,7 +202,7 @@ def generate_consul_conf(server_mode, ignore_expect=False):
             if bootstrap_expect <= 0:
                 bootstrap_expect = 3
             # Start consul with server conf
-            with open(PF9_CONSUL_CONF_DIR + 'server.json.template') as fptr:
+            with open(PF9_CONSUL_CONF_DIR + 'server.json.template', 'r') as fptr:
                 server_conf = json.load(fptr)
             server_conf['advertise_addr'] = ip_address
             server_conf['bind_addr'] = bind_address
@@ -227,9 +227,9 @@ def generate_consul_conf(server_mode, ignore_expect=False):
                 os.remove(clt_file)
         LOG.debug('consul config file %s is now generated', cfg_file)
         return True
-    except Exception as ex:
-        LOG.warning('unhandled exception when generate consul config : %s', str(ex))
-    LOG.debug('consul config file %s fail to be generated', cfg_file)
+    except Exception:
+        LOG.exception('unhandled exception when generating consul config')
+    LOG.error('consul config file %s failed to be generated', cfg_file)
     return False
 
 
@@ -253,6 +253,7 @@ def start_consul_service():
                 LOG.warning('Consul service was already running. now stop it before start')
                 retcode = run_cmd('sudo service pf9-consul stop')
                 LOG.debug('retcode of command "sudo service pf9-consul stop" : %s', str(retcode))
+                sleep(5)
 
             # force to kill the consul process if it exists
             # the 'sudo service pf9-consul stop' sometimes did not stop the consul
@@ -292,7 +293,7 @@ def start_consul_service():
             if retcode == 0:
                 retcode = run_cmd('sudo service pf9-consul status')
                 if retcode == 0:
-                    LOG.debug('Consul service started')
+                    LOG.info('Consul service started')
                     retval = True
                     break
                 else:
@@ -302,8 +303,8 @@ def start_consul_service():
 
             service_start_retry = service_start_retry - 1
             sleep(3)
-    except Exception as ex:
-        LOG.warning('unhandled exception when start consul service : %s', str(ex))
+    except Exception:
+        LOG.exception('unhandled exception when starting consul service')
     return retval
 
 
@@ -317,7 +318,7 @@ def clean_consul_cache():
                 LOG.debug('remove consul cache folder %s', folder_path)
                 rmtree(folder_path, ignore_errors=True)
     except:
-        LOG.exception('unhandled exception when remove folder %s', folder_path)
+        LOG.exception('unhandled exception when removing folder %s', folder_path)
 
 
 def _run_command_with_retry(cmd, retries=3, interval=0.500):
@@ -358,7 +359,7 @@ def _replay_consul_role_rebalance_request(rebalance_mgr,
                                        status=reply_status,
                                        message=message,
                                        **kwargs)
-    LOG.debug('send consul role rebalance response : %s', str(resp))
+    LOG.info('sending consul role rebalance response : %s', str(resp))
     rebalance_mgr.send_rpc_message(resp, message_type=message_types.MSG_ROLE_REBALANCE_RESPONSE)
 
     # remove cached request file if needed
@@ -390,7 +391,7 @@ def switch_to_new_consul_role(rebalance_mgr,
                               current_host_id,
                               join_ips,
                               request_file):
-    LOG.debug('start to process consul role rebalance request : %s',
+    LOG.info('start to process consul role rebalance request : %s',
               str(request))
     req_id = request['id']
     current_role = request['old_role']
@@ -421,7 +422,7 @@ def switch_to_new_consul_role(rebalance_mgr,
             no_need_to_change = True
 
     elif cached_status == 'done':
-        LOG.debug("cached request was done, reply anyway")
+        LOG.info("rebalance: cached request was done, reply anyway")
         _replay_consul_role_rebalance_request(rebalance_mgr,
                                               cluster,
                                               req_id,
@@ -432,7 +433,7 @@ def switch_to_new_consul_role(rebalance_mgr,
         return True
     else:
         msg = 'unknown status in cached request %s : %s' % (cached_status, str(cached_request))
-        LOG.debug("remove %s, as %s", request_file, msg)
+        LOG.info("rebalance: removing request_file %s, as %s", request_file, msg)
         os.remove(request_file)
         _replay_consul_role_rebalance_request(rebalance_mgr,
                                               cluster,
@@ -444,9 +445,8 @@ def switch_to_new_consul_role(rebalance_mgr,
         return False
 
     if no_need_to_change:
-        LOG.debug(
-            'host %s in consul cluster is already in expected role %s',
-            current_host_id, target_role)
+        LOG.debug('rebalance: host %s in consul cluster is already in expected role %s',
+                  current_host_id, target_role)
         _replay_consul_role_rebalance_request(rebalance_mgr,
                                               cluster,
                                               req_id,
@@ -456,9 +456,8 @@ def switch_to_new_consul_role(rebalance_mgr,
                                               request_file)
         return True
 
-    LOG.info(
-        'consul role needs to be switched to expected : %s, its role in cluster : %s',
-        target_role, str(host_role))
+    LOG.info('rebalance: consul role needs to be switched to: %s, its role in cluster : %s',
+             target_role, str(host_role))
 
     server_mode = False
     if target_role == constants.CONSUL_ROLE_SERVER:
@@ -466,8 +465,8 @@ def switch_to_new_consul_role(rebalance_mgr,
     elif target_role == constants.CONSUL_ROLE_CLIENT:
         server_mode = False
     else:
-        msg = 'unknown consul role %s' % target_role
-        LOG.debug(msg)
+        msg = 'rebalance: unknown consul role %s' % target_role
+        LOG.warning(msg)
         _replay_consul_role_rebalance_request(rebalance_mgr,
                                               cluster,
                                               req_id,
@@ -482,7 +481,7 @@ def switch_to_new_consul_role(rebalance_mgr,
     result = generate_consul_conf(server_mode, ignore_expect=True)
     if not result:
         error = 'failed to create consul config file'
-        LOG.debug('rebalance request failed. request : %s, error : %s', error)
+        LOG.error('rebalance request failed. request: %s, error: %s', req_id, error)
         _replay_consul_role_rebalance_request(rebalance_mgr,
                                               cluster,
                                               req_id,
@@ -494,11 +493,11 @@ def switch_to_new_consul_role(rebalance_mgr,
         return False
 
     # now consul config is updated, need to restart pf9-consul and re-join
-    LOG.debug('restart consul service ...')
+    LOG.info('restarting consul service after updating consul role')
     result = start_consul_service()
     if not result:
         error = 'failed to restart pf9-consul service'
-        LOG.debug('rebalance request failed. request : %s, error : %s', error)
+        LOG.error('rebalance request failed. request: %s, error: %s', req_id, error)
         _replay_consul_role_rebalance_request(rebalance_mgr,
                                               cluster,
                                               req_id,
@@ -513,11 +512,11 @@ def switch_to_new_consul_role(rebalance_mgr,
 
     # re-join the new cluster
     cmd = 'consul join {ip}'.format(ip=join_ips)
-    LOG.debug('join in consul cluster ...')
+    LOG.info('rejoining in consul cluster ...')
     result = _run_command_with_retry(cmd)
     if not result:
         error = 'failed to re-join into consul cluster %s' % join_ips
-        LOG.debug('rebalance request failed. request : %s, error : %s', error)
+        LOG.error('rebalance request failed. request: %s, error: %s', req_id, error)
         _replay_consul_role_rebalance_request(rebalance_mgr,
                                               cluster,
                                               req_id,
@@ -531,9 +530,8 @@ def switch_to_new_consul_role(rebalance_mgr,
     LOG.debug('re-join to cluster successfully')
 
     # finally send response with finished status
-    msg = 'successfully switched consul role from %s to %s' % (
-    current_role, target_role)
-    LOG.debug('%s',msg)
+    msg = 'Successfully switched consul role from %s to %s' % (current_role, target_role)
+    LOG.info('%s',msg)
     _update_request_status(request_file, 'done')
     # when rebalance succeeded, also return the current consul status
     # in the response through kwargs key 'consul_status'
@@ -550,7 +548,7 @@ def switch_to_new_consul_role(rebalance_mgr,
                                           request_file,
                                           **dict(consul_status=consul_status_report)
                                           )
-    LOG.debug('consul role switched to %s', target_role)
+    LOG.info('consul role of host switched to %s', target_role)
     return True
 
 
@@ -590,14 +588,14 @@ def handle_consul_refresh_request(rebalance_mgr, hostid, cluster, request):
                                'createdBy': hostid
                                })
             global_consul_mgr.kv_update(key, data)
-            LOG.debug('consul refresh request %s is stored in kv store : %s', req_id, data)
+            LOG.info('consul refresh request %s is stored in kv store : %s', req_id, data)
         else:
             LOG.debug('consul refresh request %s already exist in kv store : %s', req_id, str(existing))
 
         # only leader can act on the request
         is_leader = global_consul_mgr.am_i_cluster_leader()
         if not is_leader:
-            LOG.debug('i am not leader, so not response for consul refresh request. leader %s', str(global_consul_mgr.cluster_leader()))
+            LOG.debug('i am not leader, so no response for consul refresh request. leader %s', str(global_consul_mgr.cluster_leader()))
             return
 
         # scan kv to see whether there are valid consul refresh requests
@@ -638,9 +636,9 @@ def handle_consul_refresh_request(rebalance_mgr, hostid, cluster, request):
                 rebalance_mgr.send_rpc_message(resp, message_type=message_types.MSG_CONSUL_REFRESH_RESPONSE)
                 LOG.debug('consul refresh response is sent at %s : %s', str(datetime.utcnow()), str(resp))
             else:
-                LOG.debug('no valid consul refresh request')
-            LOG.debug('delete consul refresh requst from kv store')
+                LOG.warning('not a valid consul refresh request message: %s', str(req_type))
             key = key_prefix + req_id
+            LOG.info('deleting consul refresh request %s from kv store', key)
             global_consul_mgr.kv_delete(key)
     except Exception as e:
         LOG.exception('unhandled exception when process consul refresh request : %s', str(e))
@@ -652,7 +650,7 @@ def on_consul_role_rebalance_request(role_rebalance_request):
     global global_skip_config_refresh
 
     cluster = CONF.consul.cluster_name
-    LOG.debug('handle consul role rebalance request received : %s', str(role_rebalance_request))
+    LOG.info('handle consul role rebalance request received : %s', str(role_rebalance_request))
     if not role_rebalance_request:
         LOG.warning('ignore empty consul role rebalance request')
         return
@@ -665,9 +663,10 @@ def on_consul_role_rebalance_request(role_rebalance_request):
                  str(role_rebalance_request['cluster']), str(role_rebalance_request))
         return
     if role_rebalance_request['host_id'] != global_hostid:
-        LOG.warning('ignore consul role rebalance request not for me %s but for %s: %s', str(global_hostid),
+        LOG.warning('ignore consul role rebalance request not for me %s but for host %s: %s', str(global_hostid),
                  role_rebalance_request['host_id'], str(role_rebalance_request))
         return
+
     # when hamgr requests consul role rebalance, it first updates the role
     # settings for host and send rpc to host. hostagent will sync the setting into host.
     # however, it will restart pf9-ha-slave due to the settings changes.
@@ -688,10 +687,10 @@ def on_consul_role_rebalance_request(role_rebalance_request):
         # to do the rebalance
         # here we turn asynchronous operation (event based) to
         # synchronous operation to avoid conflict . mainly due to hostagent
-        # which update service config slower than here we procecc RPC request.
-        with open(request_file, mode='w') as fp:
+        # which update service config slower than here we process RPC request.
+        with open(request_file, 'w') as fp:
             fp.write(json.dumps(data))
-            LOG.debug("cached request received '%s' to file '%s' for processing later",
+            LOG.info("cached rebalance request received '%s' to file '%s' for processing later",
                       str(role_rebalance_request), request_file)
     except:
         LOG.exception('unhandled exception in on_consul_role_rebalance_request')
@@ -701,12 +700,11 @@ def on_consul_status_request(status_request):
     global global_hostid
     global global_join_ips
 
-    cluster = CONF.consul.cluster_name
-
     if not status_request:
         LOG.warning('ignore null or empty consul status request')
         return
     msg_type = status_request['type']
+    cluster = CONF.consul.cluster_name
     if msg_type != message_types.MSG_CONSUL_REFRESH_REQUEST:
         LOG.warning('ignore non consul refresh request : %s', str(status_request))
         return
@@ -715,7 +713,7 @@ def on_consul_status_request(status_request):
                  str(status_request['cluster']), str(status_request))
         return
 
-    LOG.debug('received consul refresh request at %s : %s', str(datetime.utcnow()), str(status_request))
+    LOG.info('received consul refresh request at %s : %s', str(datetime.utcnow()), str(status_request))
     handle_consul_refresh_request(global_rpc_mgr, global_hostid, cluster=cluster, request=status_request)
 
 def repair_consul_wiped_files_if_needed():
@@ -736,7 +734,7 @@ def repair_consul_wiped_files_if_needed():
         else:
             LOG.debug('consul node-id file exist, now check its content')
             nodeid_old = None
-            with open(nodeid_file) as fp:
+            with open(nodeid_file, 'r') as fp:
                 nodeid_old = fp.read()
             if not nodeid_old:
                 with open(nodeid_file, 'w') as fp:
@@ -753,7 +751,7 @@ def repair_consul_wiped_files_if_needed():
             if os.path.exists(keyring_file):
                 content=''
                 LOG.debug('%s file exist, now check its content ...', keyring_file)
-                with open(keyring_file) as fp:
+                with open(keyring_file, 'r') as fp:
                     content=fp.read()
                 if len(content) == 0:
                     LOG.debug('content of %s is empty, now delete it', keyring_file)
@@ -839,7 +837,7 @@ def config_needs_refresh():
         LOG.debug('file %s not exist (bootstrap_expect : %s)', cfg_file, str(CONF.consul.bootstrap_expect))
         return True
 
-    with open(cfg_file) as fptr:
+    with open(cfg_file, 'r') as fptr:
         settings_consul = json.load(fptr)
     LOG.debug('found settings of consul used from %s : %s', cfg_file, str(settings_consul))
 
@@ -881,7 +879,7 @@ def config_needs_refresh():
             return True
 
         file_content = None
-        with open(file_path) as fp:
+        with open(file_path, 'r') as fp:
             file_content = fp.read()
 
         if file_content != b64decode(settings_source[content_key]):
@@ -933,7 +931,7 @@ def start_rpc_process():
                 amqp_host, amqp_port, amqp_user, amqp_passwd, amqp_exchange, amqp_exchange_type,
                 amqp_queue_for_receiving, amqp_routingkey_sending, amqp_routingkey_receiving
             )
-            msg = 'create consul role rebalance manager with : %s' % parameters
+            msg = 'create consul role rebalance RPC manager with : %s' % parameters
             LOG.debug(msg)
             global_rpc_mgr = RpcManager(amqp_host,
                                         amqp_port,
@@ -947,7 +945,7 @@ def start_rpc_process():
                                         amqp_routingkey_receiving,
                                         application='pf9-ha-slave'
                                         )
-            LOG.debug('consul role rebalance manager is created')
+            LOG.info('consul role rebalance RPC manager is created')
 
             # to get better performance , rather than polling message from rabbitmq (which causes too much CPU usage)
             # redesign it to be event based by invoke callbacks once the driver received messages
@@ -955,7 +953,7 @@ def start_rpc_process():
             global_rpc_mgr.subscribe_message(message_types.MSG_ROLE_REBALANCE_REQUEST, on_consul_role_rebalance_request)
             global_rpc_mgr.subscribe_message(message_types.MSG_CONSUL_REFRESH_REQUEST, on_consul_status_request)
     except Exception:
-        LOG.exception('unhandled exception when start RPC process')
+        LOG.exception('unhandled exception when starting RPC manager')
     return global_rpc_mgr
 
 
@@ -967,10 +965,10 @@ def handle_cached_rebalance_requests():
 
     # check files under /opt/pf9/consul-data-dir named 'req-{uud}'
     files = [f for f in os.listdir(PF9_CONSUL_DATA_DIR) if f.startswith('req-')]
-    LOG.debug('handle cached requests under %s : %s ', PF9_CONSUL_DATA_DIR, str(files))
     if len(files) < 1:
         LOG.debug('no cached requests, will check later')
         return
+    LOG.info('handling cached rebalance requests under %s : %s ', PF9_CONSUL_DATA_DIR, str(files))
     # ideally there should be only one such file. but if there more , usually
     # the latest file is the last request, we should only handle the latest one
     # and remove any old ones
@@ -978,7 +976,7 @@ def handle_cached_rebalance_requests():
     for file in files:
         full_path = os.path.join(PF9_CONSUL_DATA_DIR, file)
         content = {}
-        with open(full_path, mode='r') as fp:
+        with open(full_path, 'r') as fp:
             content = json.load(fp)
         if not content:
             continue
@@ -995,24 +993,25 @@ def handle_cached_rebalance_requests():
         staled = False
         created = datetime.strptime(obj['time'],'%Y-%m-%d %H:%M:%S')
         if (datetime.utcnow() - created) > timedelta(minutes=5):
-            LOG.debug('cached request is staled now, will remove it')
+            LOG.debug('cached request %s is older than 5min now, will remove it',
+                      str(obj['content']))
             staled = True
-        done = True
+        done = False
         status = obj['content']['status']
         # as long as it was not done (can be 'created', 'running', 'done')
         # will retry it.  if in 'running' status , most likely the hostagent
         # restarted the pf9-ha-slave before it could send rebalance replay
         if status == 'done':
-            LOG.debug('cached request %s was done, will remove it',
+            LOG.info('cached request %s was done, will remove it',
                       str(obj['content']))
-        else:
-            done = False
+            done = True
 
         if staled or done:
             os.remove(obj['file'])
+
     # only process latest one
     latest = ordered[0]
-    LOG.debug('handle latest cached request : %s', json.dumps(latest))
+    LOG.info('handle latest cached rebalance request : %s', json.dumps(latest))
     role_rebalance_request = latest['content']['request']
     cluster = CONF.consul.cluster_name
     request_file = latest['file']
@@ -1029,7 +1028,7 @@ def handle_cached_rebalance_requests():
                                                                request_file)
     except:
         LOG.exception('unhandled exception from switch_to_new_consul_role')
-    LOG.debug('cached request completed successfully ? %s', str(global_skip_config_refresh))
+    LOG.info('cached rebalance request completed successfully ? %s', str(global_skip_config_refresh))
 
 
 def loop():
@@ -1074,7 +1073,7 @@ def loop():
     # Assume that consul was not running beforehand
     # TODO(pacharya): If consul was running beforehand we need to cleanup the
     #                 data dir of consul to get rid of the earlier state.
-    LOG.debug('start consul service deamon')
+    LOG.debug('start consul service daemon')
     consul_started = start_consul_service()
     LOG.debug('is consul running ? %s', str(consul_started))
 
@@ -1101,7 +1100,6 @@ def loop():
                 # so pick up from there before any consul configure changes
                 if cluster_configured:
                     # check consul role rebalance cached requests
-                    LOG.debug('checking cached request first')
                     handle_cached_rebalance_requests()
 
                 # if config from resmgr changed, the service should have
@@ -1110,8 +1108,8 @@ def loop():
                 # hostagent changed the service's config, here it may overwrite
                 # the settings from rpc rebalance request.
                 if config_needs_refresh():
-                    LOG.debug('configuration changes detected for consul, '
-                              'now re-config consul')
+                    LOG.info('configuration changes detected for consul, '
+                             'now re-configuring consul')
                     cluster_configured = False
 
                 if not cluster_configured:
@@ -1128,27 +1126,24 @@ def loop():
                         LOG.error('null or empty consul join ip list in config file')
                         sleep(sleep_time)
                         continue
-                    LOG.debug('try to join cluster members %s', global_join_ips)
+                    LOG.info('trying to join consul cluster members %s', global_join_ips)
                     retcode = run_cmd('consul join {ip}'.format(ip=global_join_ips))
                     leader = None
                     if retcode == 0:
                         sleep(sleep_time)
                         leader = global_consul_mgr.cluster_leader()
-                        LOG.debug('joined consul cluster members {ip}, with leader {lead}'.format(
-                            ip=global_join_ips, lead=leader))
                         if leader:
                             cluster_configured = True
                             global_consul_mgr.log_kvstore()
+                            LOG.info('joined consul cluster with leader %s', str(leader))
                     if not leader or retcode != 0:
-                        LOG.debug('join consul cluster %s failed, code %s, leader %s . try to re-config and re-start',
-                                 global_join_ips,
-                                 str(retcode),
-                                 str(leader))
                         cluster_configured = False
+                        LOG.error('joining consul cluster failed, retcode %s, leader %s. Retrying',
+                                 str(retcode), str(leader))
 
                 # if still now configured, can not move on
                 if not cluster_configured:
-                    LOG.debug('consul is not configured , or not running')
+                    LOG.debug('consul is not configured, or not running')
                     sleep(sleep_time)
                     continue
 
@@ -1157,7 +1152,7 @@ def loop():
                     global_consul_mgr.log_kvstore()
                     cluster_stat = global_consul_mgr.get_cluster_status()
                     if cluster_stat:
-                        LOG.debug('i am leader %s, found changes : %s', str(leader), str(cluster_stat))
+                        LOG.info('i am leader %s, found changes : %s', str(leader), str(cluster_stat))
                         LOG.debug('cluster_stat: %s', cluster_stat)
                         if reporter.report_status(cluster_stat):
                             LOG.debug('consul status is reported to hamgr: %s',
@@ -1165,7 +1160,7 @@ def loop():
                             global_consul_mgr.log_kvstore()
                             global_consul_mgr.update_reported_status(cluster_stat)
                         else:
-                            LOG.debug('report consul status to hamgr failed')
+                            LOG.error('reporting consul status to hamgr failed')
                     else:
                         LOG.debug('i am leader %s, but no changes to report for now', str(leader))
                     global_consul_mgr.log_kvstore()
@@ -1192,3 +1187,4 @@ def loop():
     del global_rpc_mgr
     LOG.error('pf9-ha-slave service exiting (start_loop=%s, consul_configured=%s)...',
               str(consul_started), str(cluster_configured))
+
