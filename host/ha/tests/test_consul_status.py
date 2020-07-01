@@ -140,7 +140,8 @@ def g_consul_agent_members(*args, **kwargs):
             "Status": status,
             "Name": xid,
             "Port": int(g_consul_port),
-            "Addr": addr.split(":")[0]
+            "Addr": addr.split(":")[0],
+            "Tags": {}
         })
     g_logger('consul members %s', str(members))
     return members

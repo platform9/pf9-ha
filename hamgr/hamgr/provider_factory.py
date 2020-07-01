@@ -33,7 +33,6 @@ def ha_provider():
             module = getattr(pkg.providers, provider_name)
             provider = module.get_provider(conf)
             g._ha_provider = provider
-        LOG.info('ha provider : %s', str(provider))
         return provider
 
 
@@ -47,5 +46,4 @@ def db_provider():
             provider = getattr(pkg.db, 'api')
             provider.init(conf)
             g._db_provider = provider
-        LOG.info('db provider : %s', str(provider))
         return provider

@@ -100,8 +100,8 @@ class RebalanceController(object):
         # send responses to routing key for responses) need to make sure
         # exchange type to be 'direct'
         if exchange_type != 'direct':
-            LOG.warning("configured exchange type is %s, now force it to "
-                        "direct", exchange_type)
+            LOG.warning("configured exchange type is %s, now force it to direct",
+                        exchange_type)
             exchange_type = 'direct'
 
         if self.rpc_manager:
@@ -161,8 +161,8 @@ class RebalanceController(object):
         # in asynchronous mode, need to wait till response arrive or timed out
         resp = self._wait_for_response_or_timeout(self._received_role_rebalance_responses,
                                                   req_id,
-                                                  timeout_seconds=120)
-        LOG.debug('response for request %s : %s', req_id, str(resp))
+                                                  timeout_seconds=180)
+        LOG.info('response for rebalance request %s : %s', req_id, str(resp))
         return resp
 
     def _wait_for_response_or_timeout(self, receive_buffer, request_id, timeout_seconds = 60):
@@ -171,10 +171,9 @@ class RebalanceController(object):
         payload = None
         while True:
             if datetime.datetime.utcnow() - time_start > time_delta:
-                LOG.debug('response not received after %s '
+                LOG.error('response not received after %s '
                           'seconds for request %s',
-                          str(),
-                          str(request_id))
+                          str(timeout_seconds), str(request_id))
                 return None
             size = len(receive_buffer)
             if not size:
@@ -198,7 +197,7 @@ class RebalanceController(object):
                 when = datetime.datetime.strptime(payload['timestamp'],
                                          '%Y-%m-%d %H:%M:%S')
                 if (datetime.datetime.utcnow() - when) > time_delta:
-                    LOG.debug('remove received message that old than %s '
+                    LOG.debug('remove received message that is older than %s '
                               'seconds : %s', str(timeout_seconds),
                               str(payload))
                     receive_buffer.remove(payload)
