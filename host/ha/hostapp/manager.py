@@ -16,7 +16,6 @@ import json
 import os
 import io
 import logging
-from ConfigParser import ConfigParser
 from datetime import datetime
 from datetime import timedelta
 from subprocess import call
@@ -34,6 +33,9 @@ from shared.messages import message_types
 from shared.exceptions import ha_exceptions
 from shared.constants import LOGGER_PREFIX
 
+from six import iteritems
+from six.moves.configparser import ConfigParser
+
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 
@@ -44,11 +46,11 @@ def _show_conf(conf):
     output = output + '\r\n' + 'CONF : sections - %s' % str(conf.list_all_sections())
     output = output + '\r\n'
     output = output + '\r\n' + '[DEFAULT]' + '\r\n'
-    for key, val in conf.iteritems():
+    for key, val in iteritems(conf):
         if isinstance(val, cfg.ConfigOpts.GroupAttr):
             output = output + '\r\n'
             output = output + '\r\n' + '[' + str(key) + ']' + '\r\n'
-            for g_key, g_val in val.iteritems():
+            for g_key, g_val in iteritems(val):
                 output  = output + '\r\n' + str(g_key) + '=' + str(g_val)
         else:
             if key in ['config_dir', 'config_file']:
@@ -137,19 +139,19 @@ def add_consul_secure_settings(conf):
         content = b64decode(CONF.consul.ca_file_content)
         file = os.path.join(PF9_CONSUL_CONF_DIR, 'consul_ca.pem')
         with open(file, 'w') as cafp:
-            cafp.write(content)
+            cafp.write(content.decode())
         conf['ca_file'] = file
     if CONF.consul.cert_file_content:
         content = b64decode(CONF.consul.cert_file_content)
         file = os.path.join(PF9_CONSUL_CONF_DIR, 'consul_cert.pem')
         with open(file, 'w') as certfp:
-            certfp.write(content)
+            certfp.write(content.decode())
         conf['cert_file'] = file
     if CONF.consul.key_file_content:
         content = b64decode(CONF.consul.key_file_content)
         file = os.path.join(PF9_CONSUL_CONF_DIR, 'consul_key.pem')
         with open(file, 'w') as keyfp:
-            keyfp.write(content)
+            keyfp.write(content.decode())
         conf['key_file'] = file
     LOG.debug('consul secure settings : %s', str(conf))
     return conf
@@ -882,11 +884,11 @@ def config_needs_refresh():
         with open(file_path, 'r') as fp:
             file_content = fp.read()
 
-        if file_content != b64decode(settings_source[content_key]):
+        if file_content.encode() != b64decode(settings_source[content_key]):
             LOG.info('detected changes in content in %s, source content: %s , consul cfg  content : %s',
                      file_path,
                      b64decode(settings_source[content_key]),
-                     file_content)
+                     file_content.encode())
             return True
 
     # consul log level

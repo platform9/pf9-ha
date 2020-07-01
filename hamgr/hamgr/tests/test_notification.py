@@ -23,9 +23,10 @@ handler.setLevel(logging.DEBUG)
 handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
 logger.addHandler(handler)
 
-from ConfigParser import ConfigParser
 from hamgr.notification import NotificationManager
 from shared.messages.cluster_event import ClusterEvent
+
+from six.moves.configparser import ConfigParser
 
 
 @unittest.skip('tests requires rabbitmq server runs locally')

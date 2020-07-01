@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from ConfigParser import ConfigParser
 import unittest
 
 from hamgr.db import api as db_api
 from shared import constants
 
 import mock
+
+from six.moves.configparser import ConfigParser
 
 
 class DbAPITest(unittest.TestCase):
@@ -27,7 +28,7 @@ class DbAPITest(unittest.TestCase):
         config = ConfigParser()
         config.add_section('database')
         config.set('database', 'sqlconnectURI', 'sqlite://')
-        config.set('database', 'sqlite_synchronous', False)
+        config.set('database', 'sqlite_synchronous', 'False')
 
         db_api.init(config)
 

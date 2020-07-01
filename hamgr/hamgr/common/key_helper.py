@@ -19,8 +19,10 @@ import datetime
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from subprocess import Popen, PIPE
-from ConfigParser import ConfigParser
 from shared.constants import LOGGER_PREFIX
+
+from six import iteritems
+from six.moves.configparser import ConfigParser
 
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
@@ -37,7 +39,7 @@ hamgr_config = os.path.join(hamgr_config_base, 'hamgr.conf')
 def execute_shell_command(command, in_directory=None, env_variables=dict()):
     envs = os.environ.copy()
     if env_variables:
-        for x, y in env_variables.iteritems():
+        for x, y in iteritems(env_variables):
             envs[x] = y
     LOG.debug('command "%s"', str(command))
     if in_directory:
@@ -95,7 +97,7 @@ def get_consul_gossip_encryption_key(cluster_name="", seed=""):
         key = key[0:16]
     LOG.debug('consul gossip encryption key clear text : %s', key)
     # key needs to be 64 base encoded
-    return base64.b64encode(key)
+    return base64.b64encode(key.encode())
 
 
 def get_general_configs():
@@ -119,12 +121,12 @@ def get_general_configs():
             parser.has_option(section, 'customer_fullname') and \
             parser.has_option(section, 'region_name'):
         LOG.debug('read du general settings from %s', hamgr_config)
-        configs['du_fqdn'] = parser.get(section, 'du_fqdn', None)
+        configs['du_fqdn'] = parser.get(section, 'du_fqdn')
         configs['customer_shortname'] = parser.get(section,
-                                                   'customer_shortname', None)
+                                                   'customer_shortname')
         configs['customer_fullname'] = parser.get(section,
-                                                  'customer_fullname', None)
-        configs['region_name'] = parser.get(section, 'region_name', None)
+                                                  'customer_fullname')
+        configs['region_name'] = parser.get(section, 'region_name')
 
     # if no required settings from hamgr config, throw exception
     if not configs['du_fqdn'] or \
@@ -378,8 +380,8 @@ def read_key_cert_pair(key_file, cert_file, base64_encode=True):
     else:
         LOG.warning('cert file %s requested does not exist', cert_file)
     if base64_encode:
-        content_key = base64.b64encode(content_key)
-        content_cert = base64.b64encode(content_cert)
+        content_key = base64.b64encode(content_key.encode())
+        content_cert = base64.b64encode(content_cert.encode())
     return content_key, content_cert
 
 

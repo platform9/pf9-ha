@@ -15,16 +15,18 @@
 import logging
 import logging.config
 import logging.handlers
-import ConfigParser
 import hamgr
 from os.path import exists
 from os.path import dirname
 from os import makedirs
 from shared.constants import ROOT_LOGGER
 
+from six.moves.configparser import ConfigParser
+
+
 def setup_root_logger(conf=None):
     if conf is None:
-        conf = ConfigParser.ConfigParser()
+        conf = ConfigParser()
         if exists(hamgr.DEFAULT_CONF_FILE):
             with open(hamgr.DEFAULT_CONF_FILE) as fp:
                 conf.readfp(fp)

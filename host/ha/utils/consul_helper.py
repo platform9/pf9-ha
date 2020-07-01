@@ -97,7 +97,7 @@ def get_ip_address():
     # No IP address has been configured try to get it directly
     try:
         # Get the interface where the default gateway is configured
-        default_interface = gateways()['default'].values()[0][1]
+        default_interface = list(gateways()['default'].values())[0][1]
         # Get the IP address configured on that interface
         default_ip = ifaddresses(default_interface)[AF_INET][0]['addr']
         return default_ip

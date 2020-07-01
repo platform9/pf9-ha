@@ -33,8 +33,7 @@ def get_failover_segment(token, name):
     resp.raise_for_status()
 
     if 'segments' in resp.json():
-        expected_seg = filter(lambda s: s['name'] == name, resp.json()[
-            'segments'])
+        expected_seg = [s for s in resp.json()['segments'] if s['name'] == name]
         if len(expected_seg) == 0:
             raise exceptions.SegmentNotFound(name)
     else:
@@ -254,7 +253,7 @@ def is_host_on_maintenance(token, host_id, segment_name):
     target_segment = get_failover_segment(token, segment_name)
     # confirm host exist in target segment
     hosts = get_nodes_in_segment(token, segment_name)
-    xhosts = filter(lambda x: x['name'] == str(host_id), hosts)
+    xhosts = [x for x in hosts if x['name'] == str(host_id)]
     if len(xhosts) != 1:
         LOG.error('host %s does not exist in masakari segment %s', host_id,
                   segment_name)
@@ -280,7 +279,7 @@ def update_host_maintenance(token, host_id, segment_name, on_maintenance):
     segment_uuid = target_segment['uuid']
     # confirm host exist in target segment
     hosts = get_nodes_in_segment(token, segment_name)
-    xhosts = filter(lambda x: x['name'] == str(host_id), hosts)
+    xhosts = [x for x in hosts if x['name'] == str(host_id)]
     if len(xhosts) != 1:
         LOG.error('host %s does not exist in masakari segment %s', host_id,
                   segment_name)

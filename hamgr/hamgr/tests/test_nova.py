@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from ConfigParser import ConfigParser
 import unittest
 
 from hamgr.db import api as db_api
@@ -21,6 +20,9 @@ from hamgr.providers.nova import get_provider
 from shared import constants
 
 import mock
+
+from six.moves.configparser import ConfigParser
+
 
 class FakeNovaClient(object):
     class Hypervisors(object):
@@ -66,7 +68,7 @@ class NovaProviderTest(unittest.TestCase):
         config = ConfigParser()
         config.add_section('database')
         config.set('database', 'sqlconnectURI', 'sqlite://')
-        config.set('database', 'sqlite_synchronous', False)
+        config.set('database', 'sqlite_synchronous', 'False')
 
         config.add_section('keystone_middleware')
         config.set('keystone_middleware', 'admin_user', 'fake')
@@ -177,13 +179,13 @@ class NovaProviderTest(unittest.TestCase):
         self.assertIsNotNone(aggregates, 'no aggregates found')
         self.assertTrue(len(aggregates) == 1, 'at least there is one aggregate')
         aggregate = aggregates[0]
-        self.assertTrue(aggregate['enabled']== False)
+        self.assertTrue(aggregate['enabled'] is False)
         # after request is processed
         self._provider.process_ha_enable_disable_requests()
         aggregates = self._provider.get('fake')
         self.assertIsNotNone(aggregates)
         aggregate = aggregates[0]
-        self.assertTrue(aggregate['enabled'] == True)
+        self.assertTrue(aggregate['enabled'] is True)
 
     @mock.patch('hamgr.common.utils.get_token')
     @mock.patch('requests.post')

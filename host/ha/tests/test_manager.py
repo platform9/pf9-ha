@@ -125,7 +125,7 @@ amqp_exchange_type = direct
     def _logging_to_console(self, *args, **kwargs):
         if len(args) > 0:
             msg = args[0] % (args[1:])
-            print msg
+            print(msg)
 
     def _get_conf(self):
         return self.local_cfg

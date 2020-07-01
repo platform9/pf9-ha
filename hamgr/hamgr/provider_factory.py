@@ -13,10 +13,11 @@
 # limitations under the License.
 
 import logging
-from ConfigParser import ConfigParser
 from hamgr import app
 from flask import g
 from shared.constants import LOGGER_PREFIX
+
+from six.moves.configparser import ConfigParser
 
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 

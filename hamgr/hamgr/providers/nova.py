@@ -2121,7 +2121,7 @@ class NovaProvider(Provider):
 
     def get_aggregate_info_for_cluster(self, cluster_id_or_name):
         try:
-            if not isinstance(cluster_id_or_name, basestring) and \
+            if not isinstance(cluster_id_or_name, str) and \
                     not isinstance(cluster_id_or_name, int):
                 LOG.info('cluster_id_or_name %s can only be string or int', str(cluster_id_or_name))
                 return None
@@ -2129,7 +2129,7 @@ class NovaProvider(Provider):
             nova_client = self._get_nova_client()
             clusters = db_api.get_all_active_clusters()
             targets = []
-            if isinstance(cluster_id_or_name, basestring):
+            if isinstance(cluster_id_or_name, str):
                 targets = [cluster for cluster in clusters if cluster.name == cluster_id_or_name]
             elif isinstance(cluster_id_or_name, int):
                 targets = [cluster for cluster in clusters if cluster.id == cluster_id_or_name]

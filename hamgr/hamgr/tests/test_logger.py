@@ -15,8 +15,9 @@
 import unittest
 import glob
 import os
-import ConfigParser
 from hamgr import logger
+
+from six.moves.configparser import ConfigParser
 
 LOG = None
 FILE = "log.txt"
@@ -31,7 +32,7 @@ class LogConfigTest(unittest.TestCase):
 
     def setUp(self):
         self._clean()
-        conf = ConfigParser.ConfigParser()
+        conf = ConfigParser()
         conf.add_section("log")
         conf.set("log", "location", FILE)
         conf.set("log", "rotate_counts", '5')

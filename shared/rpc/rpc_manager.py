@@ -15,14 +15,14 @@
 import logging
 import threading
 
-import Queue
-
 from shared.exceptions import ha_exceptions
 from shared.messages import message_schemas
 from shared.messages import message_types
 from shared.rpc.rpc_consumer import RpcConsumer
 from shared.rpc.rpc_producer import RpcProducer
 from shared.constants import LOGGER_PREFIX
+
+from six.moves.queue import Queue
 
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
@@ -99,7 +99,7 @@ class RpcManager(object):
         self.message_buffers = dict()
         self.message_callbacks = dict()
         for msg_type in message_schemas.valid_message_types():
-            self.message_buffers[msg_type] = Queue.Queue()
+            self.message_buffers[msg_type] = Queue()
             self.message_callbacks[msg_type] = []
         # in the rebalance scenario, the controller needs to broadcast request
         # to all hosts

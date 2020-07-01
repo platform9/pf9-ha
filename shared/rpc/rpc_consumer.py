@@ -19,6 +19,8 @@ from datetime import datetime
 from shared.rpc.rpc_channel import RpcChannel
 from shared.constants import LOGGER_PREFIX
 
+from six import iteritems
+
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 
@@ -89,7 +91,7 @@ class RpcConsumer(object):
                   body)
         channel = self._rpc_channel.get_channel()
         channel.basic_ack(tag)
-        for k, v in self._callbacks_list.iteritems():
+        for k, v in iteritems(self._callbacks_list):
             try:
                 v({'tag': tag, 'body': json.loads(body)})
             except Exception as e:
@@ -150,5 +152,5 @@ class RpcConsumer(object):
         if not callable(messages_callback):
             raise Exception('messages_callback needs to be a method')
         LOG.debug('attach callback to receive RPC messages')
-        if not self._callbacks_list.has_key(str(messages_callback)):
+        if str(messages_callback) not in self._callbacks_list:
             self._callbacks_list[str(messages_callback)] = messages_callback

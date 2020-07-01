@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from ConfigParser import ConfigParser
 import logging
 import json
 from datetime import datetime, timedelta
@@ -57,7 +56,7 @@ def get_status(aggregate_id):
 @app.route('/v1/ha/<int:aggregate_id>/<action>', methods=['PUT'])
 @error_handler
 def update_status(aggregate_id, action):
-    if not isinstance(action, basestring):
+    if not isinstance(action, str):
         return jsonify(dict(error='Not Found')), 400, CONTENT_TYPE_HEADER
     action = action.lower()
     if action not in ['enable', 'disable']:

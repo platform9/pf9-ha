@@ -82,7 +82,7 @@ def g_init():
 def g_logger(*args, **kwargs):
     if len(args) > 0:
         msg = args[0] % (args[1:])
-        print msg
+        print(msg)
 
 
 def g_consul_kv_get(key, *args, **kwargs):

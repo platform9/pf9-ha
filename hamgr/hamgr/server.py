@@ -22,7 +22,6 @@
 import argparse
 import logging
 
-import ConfigParser
 from eventlet import listen
 from eventlet import wsgi
 from hamgr.logger import setup_root_logger
@@ -31,6 +30,8 @@ from paste.deploy import loadapp
 from hamgr import periodic_task
 from hamgr import provider_factory
 from shared.constants import LOGGER_PREFIX
+
+from six.moves.configparser import ConfigParser
 
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
@@ -77,7 +78,7 @@ def start_server(conf, paste_ini):
 
 if __name__ == '__main__':
     parser = _get_arg_parser()
-    conf = ConfigParser.ConfigParser()
+    conf = ConfigParser()
     with open(parser.config_file) as f:
         conf.readfp(f)
     # setup root logger in main entry before any logging methods is used
