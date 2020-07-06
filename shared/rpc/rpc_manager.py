@@ -170,7 +170,7 @@ class RpcManager(object):
         payload = message['body']
         if payload:
             type = payload['type']
-            LOG.debug("received rpc message with payload type %s : %s", type, str(payload))
+            LOG.info("received rpc message with payload type %s : %s", type, str(payload))
             if type in message_schemas.valid_message_types():
                 self.message_buffers[type].put(message)
                 # use thread to unblock message processing

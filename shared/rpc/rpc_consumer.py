@@ -68,6 +68,8 @@ class RpcConsumer(object):
         self._callbacks_list = dict()
 
     def start(self):
+        LOG.debug('starting RPC consumer for %s', self._application)
+        self._rpc_channel.start()
         # register callbacks
         # - connection_ready
         # - connection_close
@@ -75,7 +77,7 @@ class RpcConsumer(object):
             self.on_connection_ready)
         self._rpc_channel.add_connection_close_callback(
             self.on_connection_close)
-        self._rpc_channel.start()
+        LOG.info('started RPC consumer for %s', self._application)
 
     def stop(self):
         if self._rpc_channel:

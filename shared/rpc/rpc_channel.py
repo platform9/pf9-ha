@@ -74,7 +74,7 @@ class RpcChannel(object):
             self._connection_close_callback = connection_close_callback
 
     def _open_connection(self):
-        LOG.debug('creat RPC pike connecting to amqp://%s:%s@%s:%s/ for %s', self._user,
+        LOG.debug('create RPC pike connecting to amqp://%s:%s@%s:%s/ for %s', self._user,
                   self._password, self._host, str(self._port), self._application)
         return pika.SelectConnection(self._connection_parameters,
                                      on_open_callback=self._on_connection_open,
@@ -203,6 +203,9 @@ class RpcChannel(object):
             time.sleep(interval_seconds)
         LOG.debug('RPC pika channel IOLoop thread stopped for %s', self._application)
 
+    def is_channel_ready(self):
+        return self._connection_ready
+
     def start(self):
         LOG.debug('starting RPC pika channel for %s', self._application)
         self._ioloop_thread = threading.Thread(name='RPCPikaIoloop', target=self._run)
@@ -213,13 +216,13 @@ class RpcChannel(object):
         ready = True
         timeout = datetime.timedelta(seconds=timeout_seconds)
         time_start = datetime.datetime.utcnow()
-        while not self._connection_ready:
+        while not self.is_channel_ready():
             time.sleep(.100)
             if datetime.datetime.utcnow() - time_start > timeout:
                 ready = False
                 break
         if ready:
-            LOG.debug('RPC pika channel started for %s', self._application)
+            LOG.info('RPC pika channel started for %s', self._application)
         else:
             LOG.warning('RPC pika channel for %s has not started in %s seconds',
                         self._application, str(timeout_seconds))
