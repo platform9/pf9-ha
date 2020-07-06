@@ -1078,9 +1078,8 @@ def loop():
     LOG.debug('is consul running ? %s', str(consul_started))
 
     if not cluster_configured or not consul_started:
-        raise ha_exceptions.ConfigException('failed to generate consul '
-                                            'configuration file or consul '
-                                            'cluster fail to run')
+        raise ha_exceptions.ConfigException('failed to generate consul configuration '
+                                            'file or consul cluster failed to run')
 
     global_rpc_mgr = None
     global_skip_config_refresh = False

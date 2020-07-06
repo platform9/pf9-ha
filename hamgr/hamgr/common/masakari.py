@@ -105,20 +105,9 @@ def is_failover_segment_under_recovery(token, name):
     return False
 
 
-def delete_failover_segment(token, name):
+def delete_all_nodes_in_failover_segment(token, name):
     headers = {'X-Auth-Token': token['id']}
-    seg = None
     try:
-        seg = get_failover_segment(token, name)
-    except exceptions.SegmentNotFound as e:
-        LOG.error('error when get segment info for %s : %s', str(name), str(e))
-        return
-    if seg is None:
-        LOG.debug('masakari segment %s does not exist ', str(name))
-        return
-
-    try:
-        # Delete hosts in failover segment before deleting the segment itself
         nodes = get_nodes_in_segment(token, name)
         for node in nodes:
             if node.get('on_maintenance', None):
@@ -134,9 +123,26 @@ def delete_failover_segment(token, name):
                           str(resp), str(node))
                 resp.raise_for_status()
     except Exception:
-        LOG.error('error when delete host from segment %s', str(name),
-                 exc_info=True)
+        LOG.exception('error when deleting host from segment %s', name)
         raise
+
+
+def delete_failover_segment(token, name):
+    headers = {'X-Auth-Token': token['id']}
+    seg = None
+    try:
+        seg = get_failover_segment(token, name)
+    except exceptions.SegmentNotFound as e:
+        LOG.error('error when get segment info for %s : %s', str(name), str(e))
+        return
+    if seg is None:
+        LOG.debug('masakari segment %s does not exist ', str(name))
+        return
+
+    # Delete hosts in failover segment before deleting the segment itself
+    delete_all_nodes_in_failover_segment(token, name)
+    # Retry once more to confirm all hosts are deleted from the segment
+    delete_all_nodes_in_failover_segment(token, name)
 
     url = '/'.join([_URL, 'segments', seg['uuid']])
     LOG.debug('delete masakari segment : %s', str(url))

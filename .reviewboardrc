@@ -1,5 +1,7 @@
 REVIEWBOARD_URL = "https://rbcommons.com/s/platform9"
 REPOSITORY = "pf9-ha"
 REPOSITORY_TYPE = "git"
-BRANCH = "atherton"
-LAND_DEST_BRANCH = "atherton"
+GUESS_DESCRIPTION = True
+GUESS_SUMMARY = True
+TARGET_GROUPS = 'platform9'
+TRACKING_BRANCH = 'origin/atherton'
