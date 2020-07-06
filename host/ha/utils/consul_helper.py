@@ -496,7 +496,7 @@ class consul_status(object):
         consul members : %s\n
         ------------------------------------\n
         """
-        LOG.debug(fresh_msg, 'before', str(kv_list), str(self.changed_clusters), str(self.last_status), str(self._get_consul_members()))
+        LOG.debug(fresh_msg, 'before', self.kv_print(kv_list), str(self.changed_clusters), str(self.last_status), str(self._get_consul_members()))
 
         if kv_list is None:
             kv_list = []
@@ -729,13 +729,20 @@ class consul_status(object):
         # after the report process is completed
         self.current_status = current_status
         LOG.info("cache is updated with info from kv store and latest consul status : %s ", str(self.changed_clusters))
-        LOG.debug(fresh_msg, 'after', str(kv_list), str(self.changed_clusters), str(self.last_status), str(self._get_consul_members()))
+        LOG.debug(fresh_msg, 'after', self.kv_print(kv_list), str(self.changed_clusters), str(self.last_status), str(self._get_consul_members()))
 
     def cluster_alive(self):
         try:
             return self.cc.status.leader() != ''
         except Exception:
             return False
+
+    def kv_print(self, kv_list):
+        out = ''
+        if kv_list:
+            for kv in kv_list:
+                out = out + "\nKey: %s, Value: %s" % (kv['Key'], kv['Value'])
+        return out
 
     def kv_fetch(self, key, recurse=False):
         try:
@@ -794,7 +801,7 @@ class consul_status(object):
 
     def cleanup_consul_kv_store(self):
         _, kv_list = self.kv_fetch('', recurse=True)
-        LOG.debug('kv store before clean up staled items: %s', str(kv_list))
+        LOG.debug('kv store before clean up staled items: %s', self.kv_print(kv_list))
         for kv in kv_list:
             key = kv['Key']
             value = kv['Value']
@@ -834,7 +841,7 @@ class consul_status(object):
     def log_kvstore(self):
         try:
             _, kv_list = self.kv_fetch('', recurse=True)
-            LOG.debug('kv store after join: %s', str(kv_list))
+            LOG.debug('kv store after join: %s', self.kv_print(kv_list))
             # dump current kv store into file
             record = {
                 'timestamp': str(datetime.utcnow()),

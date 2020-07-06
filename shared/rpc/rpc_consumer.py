@@ -66,6 +66,7 @@ class RpcConsumer(object):
         self._callbacks_list = dict()
 
     def start(self):
+        LOG.debug('starting RPC consumer for %s', self._application)
         # register callbacks
         # - connection_ready
         # - connection_close
@@ -74,6 +75,7 @@ class RpcConsumer(object):
         self._rpc_channel.add_connection_close_callback(
             self.on_connection_close)
         self._rpc_channel.start()
+        LOG.info('started RPC consumer for %s', self._application)
 
     def stop(self):
         if self._rpc_channel:
@@ -106,7 +108,7 @@ class RpcConsumer(object):
     def _on_cancel_ok(self, unused_frame):
         LOG.debug("server acknowledged the cancellation of the consumer, "
                   "now close connection")
-        self.close_channel()
+        self._rpc_channel.close_channel()
 
     def on_connection_close(self):
         channel = self._rpc_channel.get_channel()
@@ -123,8 +125,8 @@ class RpcConsumer(object):
             channel.queue_declare(self._on_queue_declare_ok, queue_name,
                                         auto_delete=self._auto_delete_queue)
         except Exception:
-            LOG.excception('unhandled RPC consumer queue %s declaration',
-                      queue_name)
+            LOG.exception('unhandled RPC consumer queue %s declaration',
+                          queue_name)
 
     def _on_queue_declare_ok(self, method_frame):
         LOG.debug(

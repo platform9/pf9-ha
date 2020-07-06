@@ -78,12 +78,11 @@ class RpcProducer(object):
             self.on_connection_ready)
         self._rpc_channel.add_connection_close_callback(
             self.on_connection_close)
-        LOG.debug('starting RPC producer for %s', self._application)
         self._rpc_channel.start()
+        LOG.info('RPC producer for %s started', self._application)
         self._sending_thread = threading.Thread(name='RpcProducerMsgSending',
                                                 target=self._sending_messages)
         self._sending_thread.start()
-        LOG.debug('RPC producer for %s started', self._application)
 
     def stop(self):
         LOG.debug('stopping RPC producer for %s', self._application)
@@ -185,8 +184,9 @@ class RpcProducer(object):
                     channel.basic_publish(self._exchange,
                                           routing,
                                           payload)
-                    LOG.debug('RPC producer for %s published message at %s : %s',
-                              self._application, str(datetime.utcnow()), payload)
+                    LOG.debug('RPC producer for %s published message (%s:%s) at %s : %s',
+                              self._application, str(datetime.utcnow()),
+                              self._exchange, routing, payload)
             except Exception:
                 LOG.exception('exception when RPC producer for %s sending message : %s',
                               self._application, str(payload))

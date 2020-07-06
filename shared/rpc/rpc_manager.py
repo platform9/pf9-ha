@@ -19,7 +19,6 @@ import Queue
 
 from shared.exceptions import ha_exceptions
 from shared.messages import message_schemas
-from shared.messages import message_types
 from shared.rpc.rpc_consumer import RpcConsumer
 from shared.rpc.rpc_producer import RpcProducer
 from shared.constants import LOGGER_PREFIX
@@ -59,8 +58,6 @@ class RpcManager(object):
             raise ha_exceptions.ArgumentException(error % 'exchange_name')
         if not exchange_type:
             raise ha_exceptions.ArgumentException(error % 'exchange_type')
-        # if not queue_for_receiving:
-        #     raise ha_exceptions.ArgumentException(error % 'queue_for_receiving')
 
         # save the settings
         self.host = host
@@ -166,11 +163,10 @@ class RpcManager(object):
         if not message:
             LOG.warning('received rpc message is empty')
             return
-        tag = message['tag']
         payload = message['body']
         if payload:
             type = payload['type']
-            LOG.debug("received rpc message with payload type %s : %s", type, str(payload))
+            LOG.info("received rpc message with payload type %s : %s", type, str(payload))
             if type in message_schemas.valid_message_types():
                 self.message_buffers[type].put(message)
                 # use thread to unblock message processing
