@@ -383,7 +383,7 @@ def get_change_events_between_times(cluster_id,
 # create event, return event created to caller
 def create_processing_event(event_uuid, event_type, host_name, cluster_id, notification_status = '', error_state=''):
     if event_type not in constants.VALID_EVENT_TYPES:
-        raise exceptions.ArgumentException('event_type not in %s' % \
+        raise exceptions.ArgumentException('event_type not in %s' %
                                            str(constants.VALID_EVENT_TYPES))
     if host_name is None:
         raise exceptions.ArgumentException('host_name is empty')
