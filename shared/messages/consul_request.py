@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import logging
-from datetime import datetime
 from shared.messages import message_types as message_types
 from shared.messages.message_base import MessageBase
 from shared.constants import LOGGER_PREFIX

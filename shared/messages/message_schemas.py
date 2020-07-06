@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from shared.messages import message_types as message_types
-from shared.messages.message_base import MessageBase
 from shared.messages.cluster_event import ClusterEvent
 from shared.messages.rebalance_request import ConsulRoleRebalanceRequest
 from shared.messages.rebalance_response import ConsulRoleRebalanceResponse

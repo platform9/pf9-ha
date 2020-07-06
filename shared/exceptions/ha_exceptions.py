@@ -127,20 +127,21 @@ class HostsIpNotFound(Exception):
         message = "IP for hosts %s not found" % str(hosts)
         super(HostsIpNotFound, self).__init__(message)
 
+
 class ArgumentException(Exception):
-    def __init__(self, message, innerException):
-        message = 'Invalid argument. %s . %s' % (message, str(innerException))
+    def __init__(self, message):
+        message = 'Invalid argument: %s' % message
         super(ArgumentException, self).__init__(message)
 
 
 class ConfigException(Exception):
-    def __init__(self, message, innerException):
-        message = '%s . %s' % (message, str(innerException))
+    def __init__(self, message):
+        message = 'Config error: %s' % message
         super(ConfigException, self).__init__(message)
 
 
 class NoCommonSharedNfsException(Exception):
-    def __init__(self, message, innerException = None):
-        message = '%s . %s' % (message, str(innerException))
+    def __init__(self, message):
+        message = 'NFS mismatch: %s' % message
         super(NoCommonSharedNfsException, self).__init__(message)
 

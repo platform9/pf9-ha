@@ -193,10 +193,11 @@ class NovaProvider(Provider):
                 LOG.debug('no host events found')
                 return
             events = sorted(unhandled_events, key=lambda x: x.event_time)
-            if not events or len(events) <= 0:
+            if not events:
                 LOG.debug('no host events to process')
                 return
-            LOG.debug('found host events : %s', str(events))
+            LOG.info('found host events : %s', str(events))
+
             self._token = self._get_v3_token()
             nova_client = self._get_nova_client()
             time_out = timedelta(minutes=self._notification_stale_minutes)
@@ -209,22 +210,22 @@ class NovaProvider(Provider):
                 cluster = db_api.get_cluster(int(event.cluster_id))
                 # if cluster of this event is disabled, no need to handle it
                 if not cluster or not cluster.enabled:
-                    LOG.debug('cluster %s in event %s is not enabled nor exist',
-                              event.cluster_id, str(event))
+                    LOG.warning('cluster %s in event %s is not enabled or does not exist',
+                                event.cluster_id, str(event_uuid))
                     continue
                 LOG.debug('found ha cluster with id %s : %s', event.cluster_id,
                           str(cluster))
                 nova_aggregate = self._get_aggregate(nova_client, cluster.name)
                 # if no such host aggregate, no need to handle it
                 if not nova_aggregate:
-                    LOG.debug('no nova host aggregation found with name %s',
-                              str(cluster.name))
+                    LOG.warning('no nova host aggregation found with name %s for event %s',
+                                str(cluster.name), str(event_uuid))
                     continue
                 # if host in the event not exist in host aggregate, no need to
                 # handle the event
                 if host_name not in nova_aggregate.hosts:
-                    LOG.debug('host %s in event does not exist in nova %s',
-                              host_name, str(nova_aggregate.hosts))
+                    LOG.warning('host %s in event %s does not exist in nova aggregate %s',
+                                host_name, str(event_uuid), str(nova_aggregate.hosts))
                     continue
 
                 # when same event type for the same host was reported
@@ -279,16 +280,15 @@ class NovaProvider(Provider):
                 # check whether host is active in nova
                 LOG.debug('try to check whether host %s in nova is active ', str(host_name))
                 is_active = self._is_nova_service_active(host_name, nova_client=nova_client)
-                LOG.debug('is host %s active in nova ? %s', host_name,
-                          str(is_active))
+                LOG.debug('is host %s active in nova ? %s', host_name, str(is_active))
 
                 # for 'host-down' event
                 if event_type == constants.EVENT_HOST_DOWN:
                     if not event.notification_uuid:
                         if is_active:
-                            LOG.warning('still report host_down event to masakari, even the host %s is alive in nova',
-                                     event_uuid)
-                        #
+                            LOG.warning('still report host_down event to masakari, even if host %s is alive in nova',
+                                        event_uuid)
+
                         # when masakari received host-down notification, the host in masakari will be set on maintenance
                         # if a host in masakari is makred as on maintenance, it will give 409 error if you try to
                         # create another host-down notification for it. we have another task to reset the maintenance
@@ -306,26 +306,26 @@ class NovaProvider(Provider):
                             masakari_host_on_maintenance = masakari.is_host_on_maintenance(self._token, host_name,
                                                                                            cluster.name)
                             if masakari_host_on_maintenance:
-                                LOG.warning('%s event %s for host %s, which in masakari segment %s '
-                                         'is on maintenance', event_type, str(event_uuid),
-                                         host_name, cluster.name)
+                                LOG.warning('%s event %s for host %s, which is in masakari segment %s '
+                                            'is on maintenance', event_type, event_uuid,
+                                            host_name, cluster.name)
                         LOG.debug('try to report event %s id %s for host %s to masakari',
                                  str(event_type), str(event_uuid), host_name)
                         notification_obj = self._report_event_to_masakari(event)
                         if notification_obj:
-                            LOG.info('event %s for host %s is reported to masakari, notification id %s', event_uuid,
-                                     host_name, str(notification_obj))
+                            LOG.info('event %s for host %s is reported to masakari, notification id %s',
+                                     event_uuid, host_name, str(notification_obj))
                             event.notification_uuid = notification_obj['notification']['notification_uuid']
                             state = self._tracking_masakari_notification(event)
-                            LOG.info('event %s for host %s is updated with notification state %s', event_uuid,
-                                     host_name, state)
+                            LOG.info('event %s for host %s is updated with notification state %s',
+                                     event_uuid, host_name, state)
                         else:
-                            LOG.warning('failed to report event %s for host %s to masakari : %s',
-                                     str(event_type), str(host_name), str(event))
+                            LOG.error('failed to report %s event %s for host %s to masakari : %s',
+                                      event_type, event_uuid, host_name, str(event))
                     else:
                         state = self._tracking_masakari_notification(event)
-                        LOG.info('event %s for host %s is updated with notification state %s', event_uuid,
-                                 host_name, state)
+                        LOG.info('event %s for host %s is updated with notification state %s',
+                                 event_uuid, host_name, state)
                 elif event_type == constants.EVENT_HOST_UP:
                     if is_active:
                         if not masakari.is_failover_segment_under_recovery(self._token, cluster.name):
@@ -334,7 +334,7 @@ class NovaProvider(Provider):
                             self._toggle_masakari_hosts_maintenance_status(segment_name=cluster.name,
                                                                            host_ids=[host_name])
                         else:
-                            LOG.info('need to retry toggle maintence state for host %s as cluster %s under recovery ',
+                            LOG.info('retry toggle maintence state for host %s as cluster %s is in recovery',
                                      str(host_name), str(cluster.name))
 
                         db_api.update_processing_event_with_notification(event_uuid,
@@ -354,7 +354,7 @@ class NovaProvider(Provider):
                                  event_time, datetime.utcnow())
                 LOG.debug('end of handling event %s', str(event))
         except Exception:
-            LOG.exception('unhandled exception when process host events')
+            LOG.exception('unhandled exception when processing host events')
         finally:
             # release thread lock
             with self.events_processing_lock:
@@ -379,13 +379,12 @@ class NovaProvider(Provider):
                                              event.host_name,
                                              str(event.event_time),
                                              data)
-            if notification_obj and notification_obj.get('notification',
-                                                         None):
+            if notification_obj and notification_obj.get('notification', None):
                 return notification_obj
         except Exception:
             LOG.error('failed to create masakari notification, error', exc_info=True)
-        LOG.warning('no valid masakari notification was created for event %s %s for host %s: %s', str(event.event_type),
-                 str(event.event_uuid), str(event.host_name), str(notification_obj))
+        LOG.warning('no valid masakari notification was created for event %s %s for host %s: %s',
+                    event.event_type, event.event_uuid, event.host_name, str(notification_obj))
         return None
 
     def _tracking_masakari_notification(self, event):
@@ -396,7 +395,7 @@ class NovaProvider(Provider):
         state = masakari.get_notification_status(self._token, notification_uuid)
         # save the state to event
         LOG.info('updating event %s %s with masakari notification %s status : %s',
-                 str(event.event_type), str(event.event_uuid), str(notification_uuid), str(state))
+                 event.event_type, event.event_uuid, notification_uuid, str(state))
         db_api.update_processing_event_with_notification(event.event_uuid,
                                                          event.notification_uuid,
                                                          event.notification_created,
@@ -461,11 +460,12 @@ class NovaProvider(Provider):
                 # is there a ha cluster for this id ?
                 hamgr_clusters_for_agg = [x for x in hamgr_all_clusters if x.name == str(nova_agg_id)]
                 if len(hamgr_clusters_for_agg) <= 0:
-                    LOG.debug('there is no matched vmha cluster with name matches to nova aggregate id %s', str(nova_agg_id))
+                    LOG.debug('there is no matched vmha cluster with name matches to nova aggregate id %s',
+                              str(nova_agg_id))
                     continue
                 elif len(hamgr_clusters_for_agg) > 1:
-                    LOG.warning('there are more than 1 vmha clusters with name matches to nova aggregate id %s : %s',
-                             str(nova_agg_id), str(hamgr_clusters_for_agg))
+                    LOG.warning('there are more than 1 vmha clusters for nova aggregate id %s : %s',
+                                str(nova_agg_id), str(hamgr_clusters_for_agg))
 
                 # we only support one-to-one mapping between vmha cluster to nova aggregate
                 current_cluster = hamgr_clusters_for_agg[0]
@@ -485,30 +485,37 @@ class NovaProvider(Provider):
                 masakari_hosts = []
 
                 # add hosts found in nova aggregate but not in masakari segment
-                if masakari.is_failover_segment_exist(self._token, str(cluster_name)):
-                    masakari_hosts = masakari.get_nodes_in_segment(self._token, str(cluster_name))
+                if masakari.is_failover_segment_exist(self._token, cluster_name):
+                    masakari_hosts = masakari.get_nodes_in_segment(self._token, cluster_name)
                 masakari_hids = [x['name'] for x in masakari_hosts]
                 common_ids = set(nova_agg_hosts).intersection(set(masakari_hids))
                 nova_delta_ids = set(nova_agg_hosts) - set(common_ids)
                 if len(nova_delta_ids) > 0:
-                    LOG.info('found new hosts added into nova aggregate %s : %s', str(nova_agg_id), str(nova_delta_ids))
+                    LOG.info('found new hosts added into nova aggregate %s : %s', nova_agg_id, str(nova_delta_ids))
                     # need to add those additional hosts into masakari
-                    if masakari.is_failover_segment_under_recovery(self._token, str(cluster_name)):
+                    if masakari.is_failover_segment_under_recovery(self._token, cluster_name):
                         LOG.info('will retry to add hosts %s to masakari segment %s, '
                                  'as the segment is under recovery',
-                                 str(nova_delta_ids), str(cluster_name))
+                                 str(nova_delta_ids), cluster_name)
                     else:
                         # hosts already in nova aggregate so only need to add to masakari
-                        LOG.info('add additional hosts %s found in nova aggregate %s to masakari segment %s',
-                                 str(nova_delta_ids), nova_agg_name, str(cluster_name))
+                        LOG.info('add new hosts %s found in nova aggregate %s to masakari segment %s',
+                                 str(nova_delta_ids), nova_agg_name, cluster_name)
                         masakari.add_hosts_to_failover_segment(self._token,
-                                                               str(cluster_name),
+                                                               cluster_name,
                                                                nova_delta_ids)
                         if cluster_enabled:
-                            # in order to make the consul cluster work, by default we set all hosts as consul server
-                            # and trigger a role rebalance request
-                            LOG.info('add ha slave role to added host : %s', str(nova_delta_ids))
-                            self._add_ha_slave_if_not_exist(cluster_name, nova_delta_ids, 'server', common_ids)
+                            # pick consul role for new host based on other cluster members
+                            consul_role = constants.CONSUL_ROLE_SERVER
+                            c_report = self._get_latest_consul_status(cluster_name)
+                            if c_report and c_report.get('members', []):
+                                members = c_report.get('members')
+                                c_servers = [x for x in members if x['Tags']['role'] == 'consul']
+                                c_servers_alive = [x for x in c_servers if x['Status'] == 1]
+                                if len(c_servers_alive) >= constants.SERVER_THRESHOLD:
+                                    consul_role = constants.CONSUL_ROLE_CLIENT
+                            LOG.info('add ha slave role (%s) to added hosts: %s', consul_role, str(nova_delta_ids))
+                            self._add_ha_slave_if_not_exist(cluster_name, nova_delta_ids, consul_role, common_ids)
                             # trigger a consul role rebalance request
                             time.sleep(30)
                             self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_ADDED)
@@ -534,8 +541,7 @@ class NovaProvider(Provider):
                                  str(masakari_delta_ids), str(cluster_name))
                     else:
                         LOG.info('remove additional hosts %s found in masakari from segment %s ',
-                                 str(masakari_delta_ids),
-                                 str(cluster_name))
+                                 str(masakari_delta_ids), str(cluster_name))
                         masakari.delete_hosts_from_failover_segment(self._token,
                                                                     str(cluster_name),
                                                                     masakari_delta_ids)
@@ -561,16 +567,16 @@ class NovaProvider(Provider):
                     # in case previous action(disable vmha, or hostagent failed) failed to remove the pf9-ha-slave
                     # this will make sure pf9-ha-slave not left on hosts when vmha disabled for a nova aggregate
                     try:
-                        LOG.debug('cluster (name %s, status %s, task state %s) is not enabled, '
-                                 'try to remove pf9-ha-slave roles from hosts',
+                        LOG.info('cluster (name %s, status %s, task state %s) is not enabled, '
+                                 'trying to remove pf9-ha-slave role from hosts',
                                  str(cluster_name), str(cluster_status), str(cluster_task_state))
                         self._deauth(nova_agg_hosts)
                     except Exception:
-                        LOG.warning('remove pf9-ha-slave on hosts %s failed, will retry later', str(nova_agg_hosts))
-
+                        LOG.warning('remove pf9-ha-slave on hosts %s failed, will retry later',
+                                    str(nova_agg_hosts))
                     continue
 
-                LOG.debug('cluster %s is enabled, now checking slave role ', str(cluster_name))
+                LOG.debug('cluster %s is enabled, now checking slave role', cluster_name)
                 aggregate_id = current_cluster.name
                 segment_name = str(cluster_name)
                 aggregate = self._get_aggregate(nova_client, aggregate_id)
@@ -582,8 +588,7 @@ class NovaProvider(Provider):
                 removed_host_ids = set()
                 nova_active_host_ids = set()
                 try:
-                    nodes = masakari.get_nodes_in_segment(self._token,
-                                                          segment_name)
+                    nodes = masakari.get_nodes_in_segment(self._token, segment_name)
                     masakari_host_ids = set([node['name'] for node in nodes])
 
                     LOG.debug("hosts records from nova : %s",
@@ -683,28 +688,24 @@ class NovaProvider(Provider):
                         LOG.info('hosts are removed from nova aggregate %s : %s, now remove pf9-ha-slave role',
                                  aggregate_id, str(removed_host_ids))
                         self._remove_ha_slave_if_exist(removed_host_ids)
-                        LOG.info('try to rebalance consul roles after removed hosts : %s', str(removed_host_ids))
+                        LOG.info('try to rebalance consul roles after removing hosts: %s', str(removed_host_ids))
                         time.sleep(30)
                         self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_REMOVED)
 
                     if len(existing_inactive_host_ids) > 0:
-                        LOG.warning('existing inactive hosts in segment %s : %s , wait for hosts to become active',
-                                 segment_name, str(existing_inactive_host_ids))
+                        LOG.warning('existing inactive hosts in segment %s: %s, wait for hosts to become active',
+                                    segment_name, str(existing_inactive_host_ids))
 
                 except ha_exceptions.ClusterBusy:
                     pass
                 except ha_exceptions.InsufficientHosts:
-                    LOG.warning('Detected number of aggregate %s hosts is '
-                             'insufficient', aggregate_id)
+                    LOG.warning('Detected number of aggregate %s hosts is insufficient', aggregate_id)
                 except ha_exceptions.SegmentNotFound:
-                    LOG.warning('Masakari segment for cluster: %s was not found',
-                             current_cluster.name)
+                    LOG.warning('Masakari segment for cluster: %s was not found', current_cluster.name)
                 except ha_exceptions.HostPartOfCluster:
-                    LOG.error("Not enabling cluster as cluster hosts are part of"
-                              "another cluster")
-                except Exception as e:
-                    LOG.exception('Exception while processing aggregate %s: %s',
-                                  aggregate_id, e)
+                    LOG.error("Not enabling cluster as cluster hosts are part of another cluster")
+                except Exception:
+                    LOG.exception('Exception while processing aggregate %s', aggregate_id)
         except Exception as e:
             LOG.exception('unhandled exception in host aggregate change processing task : %s', str(e))
         finally:
@@ -877,7 +878,7 @@ class NovaProvider(Provider):
         report = self._get_latest_consul_status(cluster_name)
         if not report:
             LOG.warning('not inspect consul role rebalance, as failed to '
-                        'refresh consul status for cluster %s', str(cluster_name))
+                        'refresh consul status for cluster %s', cluster_name)
             return
 
         LOG.debug('consul status refresh report : %s', str(report))
@@ -885,9 +886,9 @@ class NovaProvider(Provider):
         members = report.get('members', [])
         _, _, cluster_details = self._get_join_info(cluster_name)
         if len(members) != len(cluster_details):
-            LOG.warning('not inspect consul role rebalance, as num of hosts '
+            LOG.warning('not inspecting consul role rebalance, as num of hosts '
                         'in consul status does not match expected cluster. '
-                        'stauts : %s, expected : %s',
+                        'status : %s, expected : %s',
                         str(members), str(cluster_details))
             return
 
@@ -1061,10 +1062,10 @@ class NovaProvider(Provider):
             hypervisors = nova_client.hypervisors.list()
             hosts_info = self._resmgr_client.fetch_hosts_details(all_hosts, self._token['id'])
             ip_lookup, cluster_ip_lookup, nodes_details = self._get_ips_for_hosts_v2(hypervisors,
-                                                                      all_hosts,
-                                                                      hosts_info)
-
-            self._auth(cluster_name, ip_lookup, cluster_ip_lookup, nodes_details, self._token, role_missed_host_ids, consul_role)
+                                                                                     all_hosts,
+                                                                                     hosts_info)
+            self._auth(cluster_name, ip_lookup, cluster_ip_lookup, nodes_details,
+                        self._token, role_missed_host_ids, consul_role)
             self._wait_for_role_to_ok_v2(role_missed_host_ids)
 
     def _remove_ha_slave_if_exist(self, host_ids):
@@ -1087,11 +1088,11 @@ class NovaProvider(Provider):
         services = nova_client.services.list(binary=binary, host=host_id)
         if len(services) == 1:
             if services[0].state == 'up':
-                disabled_reason = 'Host disabled by PF9 HA manager'
+                disabled_reason = constants.PF9_DISABLED_REASON
                 if services[0].status != 'enabled' and \
                         services[0].disabled_reason == disabled_reason:
                     LOG.info('host %s state is up, status is %s, '
-                             'disabled reason %s, so enable it',
+                             'disabled reason %s, so enabling it',
                              str(host_id), str(services[0].status),
                              str(services[0].disabled_reason))
                     nova_client.services.enable(binary=binary, host=host_id)
@@ -1100,7 +1101,7 @@ class NovaProvider(Provider):
             LOG.debug("nova host %s state is down", str(host_id))
             return False
         else:
-            LOG.error('Found %s nova compute services with %s host id'
+            LOG.error('Found %s nova compute services with host id %s'
                       % (str(len(services)), host_id))
             raise ha_exceptions.HostNotFound(host_id)
 
@@ -1636,13 +1637,16 @@ class NovaProvider(Provider):
             resp = self._resmgr_client.delete_role(node, "pf9-ha-slave", self._token['id'])
             # Retry deauth if resmgr throws conflict error for upto 2 minutes
             while resp.status_code == requests.codes.conflict:
-                LOG.info('Role removal conflict error for node %s, retrying'
+                LOG.info('Role removal conflict error for node %s, retrying '
                          'after 5 sec', node)
                 time.sleep(5)
                 resp = self._resmgr_client.delete_role(node, "pf9-ha-slave", self._token['id'])
                 if datetime.now() - start_time > timedelta(seconds=self._max_auth_wait_seconds):
+                    if resp.status_code != requests.codes.ok:
+                        LOG.error('De-auth timed out for pf9-ha-slave role on node %s', node)
                     break
             resp.raise_for_status()
+            LOG.info('De-authorizing pf9-ha-slave role on node %s complete.', node)
 
     def _disable(self, aggregate_id, synchronize=False,
                  next_state=constants.TASK_COMPLETED):
@@ -1683,7 +1687,7 @@ class NovaProvider(Provider):
             db_api.update_request_status(cluster.id, constants.HA_STATE_REQUEST_DISABLE)
             self._notify_status(constants.HA_STATE_REQUEST_DISABLE, "cluster", cluster.id)
         except Exception as e:
-            LOG.error('unhandled exceptions when disable cluster with name %s : %s ', str_aggregate_id, str(e))
+            LOG.exception('unhandled exception when disabling cluster with name %s', str_aggregate_id)
 
     def process_ha_enable_disable_requests(self):
         with self.ha_status_processing_lock:
@@ -2001,24 +2005,25 @@ class NovaProvider(Provider):
         consul_servers_alive = [x for x in consul_servers if x['Status'] == 1]
         consul_slaves = [x for x in members if x['Tags']['role'] == 'node']
         consul_slaves_alive = [x for x in consul_slaves if x['Status'] == 1]
-        msg = 'found %s alive consul role of server : %s' % (
-            str(len(consul_servers_alive)), str(consul_servers_alive))
-        LOG.info(msg)
-        msg = 'found %s alive consul role of slave : %s' % (str(len(consul_slaves_alive)), str(consul_slaves_alive))
-        LOG.info(msg)
+        msg = 'found %s alive consul role of server: %s' % (
+              str(len(consul_servers_alive)), str(consul_servers_alive))
+        LOG.debug(msg)
+        msg = 'found %s alive consul role of slave: %s' % (
+              str(len(consul_slaves_alive)), str(consul_slaves_alive))
+        LOG.debug(msg)
+
         # rebalance consul roles
-        server_threshold = 5
         old_role = ""
         new_role = ""
         candidates = []
-        if len(consul_servers_alive) > server_threshold:
+        if len(consul_servers_alive) > constants.SERVER_THRESHOLD:
             # move servers to slaves
             LOG.info('more than %s alive consul role of server found, currently %s',
-                     str(server_threshold),
+                     str(constants.SERVER_THRESHOLD),
                      str(len(consul_servers_alive)))
             old_role = constants.CONSUL_ROLE_SERVER
             new_role = constants.CONSUL_ROLE_CLIENT
-            start = server_threshold
+            start = constants.SERVER_THRESHOLD
             end = len(consul_servers_alive)
             for i in range(start, end):
                 consul_host = consul_servers_alive[i - start]
@@ -2028,37 +2033,39 @@ class NovaProvider(Provider):
                                        'old_role': old_role,
                                        'new_role': new_role,
                                        'member': consul_host})
-        elif len(consul_servers_alive) < server_threshold:
-            wanted = server_threshold - len(consul_servers_alive)
-            LOG.info('not enough alive consul role of server, found %s, required %s, wanted %s',
+        elif len(consul_servers_alive) < constants.SERVER_THRESHOLD:
+            wanted = constants.SERVER_THRESHOLD - len(consul_servers_alive)
+            LOG.info('not enough alive consul role of server, found %s, required %s, wanted %s more',
                      str(len(consul_servers_alive)),
-                     str(server_threshold),
+                     str(constants.SERVER_THRESHOLD),
                      str(wanted))
-            if wanted == server_threshold:
-                LOG.error('ignore consul role rebalance as not enough alive consul slaves to change to servers')
+            if len(consul_slaves_alive) == 0:
+                LOG.error('ignore consul role rebalance as there are no '
+                          'alive consul agents to change to servers')
             else:
-                # move slaves to servers
+                # move clients to servers
                 old_role = constants.CONSUL_ROLE_CLIENT
                 new_role = constants.CONSUL_ROLE_SERVER
-                start = 0
                 end = 0
 
                 if len(consul_slaves_alive) >= wanted:
                     end = wanted
-                elif len(consul_slaves_alive) < wanted:
-                    end = len(consul_slaves_alive)
-                for i in range(start, end):
-                    consul_host = consul_slaves_alive[i - start]
+                if wanted > len(consul_slaves_alive):
+                    wanted = len(consul_slaves_alive)
+                for i in range(0, len(consul_slaves_alive)):
+                    consul_host = consul_slaves_alive[i]
                     # only active host can be used for rebalance
                     if self._is_nova_service_active(consul_host['Name']):
+                        wanted = wanted - 1
                         candidates.append({'host': consul_host['Name'],
                                            'old_role': old_role,
                                            'new_role': new_role,
                                            'member': consul_host})
+                    if not wanted:
+                        break
         else:
-            LOG.info('consul role rebalance is not needed, num of alive consul servers %s meets required %s',
-                     str(len(consul_servers_alive)),
-                     str(server_threshold))
+            LOG.debug('consul role rebalance is not needed, num of alive consul servers %s meets required %s',
+                      str(len(consul_servers_alive)), str(constants.SERVER_THRESHOLD))
         if candidates:
             LOG.info('found consul role rebalance candidates. consul members: %s, candidates : %s',
                      str(consul_members), str(candidates))
@@ -2107,6 +2114,7 @@ class NovaProvider(Provider):
                                                             json.dumps(consul_report) if consul_report else None,
                                                             json.dumps(rebalance_action),
                                                             str(uuid4()))
+                    #TODO: check there is no rebalance action for another host in same segment
         except:
             LOG.exception('unhandled exception during reporting consul rebalance')
 
@@ -2192,7 +2200,7 @@ class NovaProvider(Provider):
                          req.uuid, str(req.event_uuid), str(req.rebalance_action))
                 # first check by time, abort request if timestamp shows the request older than 15 minutes
                 if (datetime.utcnow() - req.last_updated) > timedelta(minutes=15):
-                    error = 'request created at %s is staled' % req.last_updated
+                    error = 'request created at %s is stale' % req.last_updated
                     LOG.warning('ignore consul role rebalance request %s, as %s', str(req_id), error)
                     db_api.update_consul_role_rebalance(req.uuid,
                                                         None,

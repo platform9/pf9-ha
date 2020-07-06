@@ -326,11 +326,11 @@ def is_cert_expired(cert_file, expire_threshold_days=1):
         is_expired = True \
             if time_delta < datetime.timedelta(days=expire_threshold_days) \
             else False
-        LOG.debug('cert %s not valid after %s, is it expire ? : %s',
-                 str(cert_file), str(expire_at), str(is_expired))
+        if is_expired:
+            LOG.info('cert %s not valid after %s', str(cert_file), str(expire_at))
     except Exception as ex:
-        LOG.warning('unhandled exception when detect expiration of cert %s : %s',
-                 cert_file, str(ex))
+        LOG.error('unhandled exception when detect expiration of cert %s : %s',
+                  cert_file, str(ex))
     return is_expired
 
 

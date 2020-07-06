@@ -219,6 +219,7 @@ def get_all_unhandled_enable_or_disable_requests():
             return query.all()
         except SQLAlchemyError as se:
             LOG.error('DB error when query unhandled cluster requests : %s', se)
+            raise
 
 
 def update_request_status(cluster_id, status):
@@ -246,7 +247,7 @@ def _create_cluster(session, cluster_name, task_state):
         session.add(clstr)
         return clstr
     except SQLAlchemyError as se:
-        LOG.error('DB error: %s', se)
+        LOG.error('DB error when creating cluster %s: %s', cluster_name, se)
         raise
 
 
@@ -328,7 +329,7 @@ def create_change_event(cluster_id, events, event_id=''):
             LOG.debug('successfully committed change event : %s', str(change))
             return change
         except SQLAlchemyError as se:
-            LOG.error('DB error when create change event : %s', se)
+            LOG.error('DB error when creating change event : %s', se)
 
 
 def get_change_event_by_id(uuid):
@@ -383,7 +384,7 @@ def get_change_events_between_times(cluster_id,
 # create event, return event created to caller
 def create_processing_event(event_uuid, event_type, host_name, cluster_id, notification_status = '', error_state=''):
     if event_type not in constants.VALID_EVENT_TYPES:
-        raise exceptions.ArgumentException('event_type not in %s' % \
+        raise exceptions.ArgumentException('event_type not in %s' %
                                            str(constants.VALID_EVENT_TYPES))
     if host_name is None:
         raise exceptions.ArgumentException('host_name is empty')
@@ -555,6 +556,7 @@ def add_consul_status(cluster_id,
             return status
         except SQLAlchemyError as se:
             LOG.error('DB error when create consul status : %s', se)
+            raise
 
 
 def add_consul_role_rebalance_record(event_name,
