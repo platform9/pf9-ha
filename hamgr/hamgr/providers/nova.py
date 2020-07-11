@@ -45,8 +45,6 @@ from shared.constants import LOGGER_PREFIX
 
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
-# max no. of hosts in a consul cluster running in server mode
-SERVER_THRESHOLD = 5
 
 class NovaProvider(Provider):
     def __init__(self, config):
@@ -336,7 +334,7 @@ class NovaProvider(Provider):
                             self._toggle_masakari_hosts_maintenance_status(segment_name=cluster.name,
                                                                            host_ids=[host_name])
                         else:
-                            LOG.info('need to retry toggle maintence state for host %s as cluster %s is under recovery',
+                            LOG.info('retry toggle maintence state for host %s as cluster %s is in recovery',
                                      str(host_name), str(cluster.name))
 
                         db_api.update_processing_event_with_notification(event_uuid,
@@ -508,14 +506,14 @@ class NovaProvider(Provider):
                                                                nova_delta_ids)
                         if cluster_enabled:
                             # pick consul role for new host based on other cluster members
-                            consul_role = 'server'
+                            consul_role = constants.CONSUL_ROLE_SERVER
                             c_report = self._get_latest_consul_status(cluster_name)
                             if c_report and c_report.get('members', []):
                                 members = c_report.get('members')
                                 c_servers = [x for x in members if x['Tags']['role'] == 'consul']
                                 c_servers_alive = [x for x in c_servers if x['Status'] == 1]
-                                if len(c_servers_alive) >= SERVER_THRESHOLD:
-                                    consul_role = 'agent'
+                                if len(c_servers_alive) >= constants.SERVER_THRESHOLD:
+                                    consul_role = constants.CONSUL_ROLE_CLIENT
                             LOG.info('add ha slave role (%s) to added hosts: %s', consul_role, str(nova_delta_ids))
                             self._add_ha_slave_if_not_exist(cluster_name, nova_delta_ids, consul_role, common_ids)
                             # trigger a consul role rebalance request
@@ -1090,7 +1088,7 @@ class NovaProvider(Provider):
         services = nova_client.services.list(binary=binary, host=host_id)
         if len(services) == 1:
             if services[0].state == 'up':
-                disabled_reason = 'Host disabled by PF9 HA manager'
+                disabled_reason = constants.PF9_DISABLED_REASON
                 if services[0].status != 'enabled' and \
                         services[0].disabled_reason == disabled_reason:
                     LOG.info('host %s state is up, status is %s, '
@@ -1639,7 +1637,7 @@ class NovaProvider(Provider):
             resp = self._resmgr_client.delete_role(node, "pf9-ha-slave", self._token['id'])
             # Retry deauth if resmgr throws conflict error for upto 2 minutes
             while resp.status_code == requests.codes.conflict:
-                LOG.info('Role removal conflict error for node %s, retrying'
+                LOG.info('Role removal conflict error for node %s, retrying '
                          'after 5 sec', node)
                 time.sleep(5)
                 resp = self._resmgr_client.delete_role(node, "pf9-ha-slave", self._token['id'])
@@ -2004,23 +2002,25 @@ class NovaProvider(Provider):
         consul_servers_alive = [x for x in consul_servers if x['Status'] == 1]
         consul_slaves = [x for x in members if x['Tags']['role'] == 'node']
         consul_slaves_alive = [x for x in consul_slaves if x['Status'] == 1]
-        msg = 'found %s alive consul role of server : %s' % (
-            str(len(consul_servers_alive)), str(consul_servers_alive))
-        LOG.info(msg)
-        msg = 'found %s alive consul role of slave : %s' % (str(len(consul_slaves_alive)), str(consul_slaves_alive))
-        LOG.info(msg)
+        msg = 'found %s alive consul role of server: %s' % (
+              str(len(consul_servers_alive)), str(consul_servers_alive))
+        LOG.debug(msg)
+        msg = 'found %s alive consul role of slave: %s' % (
+              str(len(consul_slaves_alive)), str(consul_slaves_alive))
+        LOG.debug(msg)
+
         # rebalance consul roles
         old_role = ""
         new_role = ""
         candidates = []
-        if len(consul_servers_alive) > SERVER_THRESHOLD:
+        if len(consul_servers_alive) > constants.SERVER_THRESHOLD:
             # move servers to slaves
             LOG.info('more than %s alive consul role of server found, currently %s',
-                     str(SERVER_THRESHOLD),
+                     str(constants.SERVER_THRESHOLD),
                      str(len(consul_servers_alive)))
             old_role = constants.CONSUL_ROLE_SERVER
             new_role = constants.CONSUL_ROLE_CLIENT
-            start = SERVER_THRESHOLD
+            start = constants.SERVER_THRESHOLD
             end = len(consul_servers_alive)
             for i in range(start, end):
                 consul_host = consul_servers_alive[i - start]
@@ -2030,38 +2030,39 @@ class NovaProvider(Provider):
                                        'old_role': old_role,
                                        'new_role': new_role,
                                        'member': consul_host})
-        elif len(consul_servers_alive) < SERVER_THRESHOLD:
-            wanted = SERVER_THRESHOLD - len(consul_servers_alive)
-            LOG.info('not enough alive consul role of server, found %s, required %s, wanted %s',
+        elif len(consul_servers_alive) < constants.SERVER_THRESHOLD:
+            wanted = constants.SERVER_THRESHOLD - len(consul_servers_alive)
+            LOG.info('not enough alive consul role of server, found %s, required %s, wanted %s more',
                      str(len(consul_servers_alive)),
-                     str(SERVER_THRESHOLD),
+                     str(constants.SERVER_THRESHOLD),
                      str(wanted))
-            if wanted == SERVER_THRESHOLD:
-                LOG.error('ignore consul role rebalance as there are not enough '
+            if len(consul_slaves_alive) == 0:
+                LOG.error('ignore consul role rebalance as there are no '
                           'alive consul agents to change to servers')
             else:
-                # move slaves to servers
+                # move clients to servers
                 old_role = constants.CONSUL_ROLE_CLIENT
                 new_role = constants.CONSUL_ROLE_SERVER
-                start = 0
                 end = 0
 
                 if len(consul_slaves_alive) >= wanted:
                     end = wanted
-                elif len(consul_slaves_alive) < wanted:
-                    end = len(consul_slaves_alive)
-                for i in range(start, end):
-                    consul_host = consul_slaves_alive[i - start]
+                if wanted > len(consul_slaves_alive):
+                    wanted = len(consul_slaves_alive)
+                for i in range(0, len(consul_slaves_alive)):
+                    consul_host = consul_slaves_alive[i]
                     # only active host can be used for rebalance
                     if self._is_nova_service_active(consul_host['Name']):
+                        wanted = wanted - 1
                         candidates.append({'host': consul_host['Name'],
                                            'old_role': old_role,
                                            'new_role': new_role,
                                            'member': consul_host})
+                    if not wanted:
+                        break
         else:
-            LOG.info('consul role rebalance is not needed, num of alive consul servers %s meets required %s',
-                     str(len(consul_servers_alive)),
-                     str(SERVER_THRESHOLD))
+            LOG.debug('consul role rebalance is not needed, num of alive consul servers %s meets required %s',
+                      str(len(consul_servers_alive)), str(constants.SERVER_THRESHOLD))
         if candidates:
             LOG.info('found consul role rebalance candidates. consul members: %s, candidates : %s',
                      str(consul_members), str(candidates))

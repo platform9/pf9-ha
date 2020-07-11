@@ -69,3 +69,9 @@ VALID_TASK_STATES = [TASK_CREATING, TASK_MIGRATING, TASK_REMOVING,
 
 CONSUL_ROLE_SERVER = 'server'
 CONSUL_ROLE_CLIENT = 'client'
+
+# Desired/maximum no. of hosts in a consul cluster running in server mode
+SERVER_THRESHOLD = 5
+
+PF9_DISABLED_REASON = 'Host disabled by PF9 HA manager'
+

@@ -184,8 +184,9 @@ class RpcProducer(object):
                     channel.basic_publish(self._exchange,
                                           routing,
                                           payload)
-                    LOG.debug('RPC producer for %s published message at %s : %s',
-                              self._application, str(datetime.utcnow()), payload)
+                    LOG.debug('RPC producer for %s published message (%s:%s) at %s : %s',
+                              self._application, str(datetime.utcnow()),
+                              self._exchange, routing, payload)
             except Exception:
                 LOG.exception('exception when RPC producer for %s sending message : %s',
                               self._application, str(payload))

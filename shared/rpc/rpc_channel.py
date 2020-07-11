@@ -74,8 +74,8 @@ class RpcChannel(object):
             self._connection_close_callback = connection_close_callback
 
     def _open_connection(self):
-        LOG.debug('create RPC pike connecting to amqp://%s:%s@%s:%s/ for %s', self._user,
-                  self._password, self._host, str(self._port), self._application)
+        LOG.debug('create RPC pika connecting to amqp://password:%s@%s:%s/ for %s', self._user,
+                  self._host, str(self._port), self._application)
         return pika.SelectConnection(self._connection_parameters,
                                      on_open_callback=self._on_connection_open,
                                      on_open_error_callback=self._on_connection_open_fault,
