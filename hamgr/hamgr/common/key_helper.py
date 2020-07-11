@@ -97,7 +97,7 @@ def get_consul_gossip_encryption_key(cluster_name="", seed=""):
         key = key[0:16]
     LOG.debug('consul gossip encryption key clear text : %s', key)
     # key needs to be 64 base encoded
-    return base64.b64encode(key.encode())
+    return base64.b64encode(key.encode()).decode()
 
 
 def get_general_configs():
@@ -319,7 +319,7 @@ def is_cert_expired(cert_file, expire_threshold_days=1):
 
     is_expired = False
     try:
-        cert = x509.load_pem_x509_certificate(content, default_backend())
+        cert = x509.load_pem_x509_certificate(content.encode(), default_backend())
         expire_at = cert.not_valid_after
         utc_now = datetime.datetime.utcnow()
         time_delta = expire_at - utc_now
@@ -382,7 +382,7 @@ def read_key_cert_pair(key_file, cert_file, base64_encode=True):
     if base64_encode:
         content_key = base64.b64encode(content_key.encode())
         content_cert = base64.b64encode(content_cert.encode())
-    return content_key, content_cert
+    return content_key.decode(), content_cert.decode()
 
 
 def read_consul_ca_key_cert_pair(base64_encode=True):

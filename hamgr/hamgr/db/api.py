@@ -323,7 +323,7 @@ def create_change_event(cluster_id, events, event_id=''):
             change.uuid = str(uuid4()) if not event_id else event_id
             change.cluster = int(cluster_id)
             change.timestamp = datetime.datetime.utcnow()
-            change.events = str(events)
+            change.events = events.encode()
             session.add(change)
             LOG.debug('successfully committed change event : %s', str(change))
             return change
@@ -549,9 +549,9 @@ def add_consul_status(cluster_id,
             status.clusterId = cluster_id
             status.clusterName = cluster_name
             status.leader = leader
-            status.peers = peers
-            status.members = members
-            status.kvstore = kv
+            status.peers = peers.encode()
+            status.members = members.encode()
+            status.kvstore = kv.encode()
             status.joins = joins
             status.lastUpdate = datetime.datetime.utcnow()
             status.lastEvent = str(last_event)
@@ -574,7 +574,7 @@ def add_consul_role_rebalance_record(event_name,
             record.uuid = str(request_uuid)
             record.event_name = event_name
             record.event_uuid = str(event_uuid)
-            record.before_rebalance = before_rebalance
+            record.before_rebalance = before_rebalance.encode()
             record.rebalance_action = rebalance_action
             record.last_updated = datetime.datetime.utcnow()
             session.add(record)
@@ -649,7 +649,7 @@ def update_consul_role_rebalance(uuid,
                 LOG.warning('no consul role rebalance record with uuid %s found', uuid)
                 return None
             if after_rebalance:
-                record.after_rebalance = after_rebalance
+                record.after_rebalance = after_rebalance.encode()
             if action_finished:
                 record.action_finished = action_finished
             else:
@@ -663,3 +663,4 @@ def update_consul_role_rebalance(uuid,
         except SQLAlchemyError as se:
             LOG.error('DB error when getting consul role rebalance record  %s : %s', uuid, se)
         return None
+

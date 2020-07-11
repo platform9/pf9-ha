@@ -1342,7 +1342,7 @@ class NovaProvider(Provider):
             LOG.debug('authorize by updating settings for host %s for pf9-ha-slave with : %s', node, str(data))
             resp = self._resmgr_client.update_role(node, 'pf9-ha-slave', data, self._token['id'])
             if resp.status_code == requests.codes.not_found and \
-                    resp.content.find('HostDown'):
+                    resp.content.find(b'HostDown'):
                 continue
                 #raise ha_exceptions.HostOffline(node)
             # Retry auth if resmgr throws conflict error for upto 2 minutes
