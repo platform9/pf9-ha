@@ -319,7 +319,7 @@ def is_cert_expired(cert_file, expire_threshold_days=1):
 
     is_expired = False
     try:
-        cert = x509.load_pem_x509_certificate(content, default_backend())
+        cert = x509.load_pem_x509_certificate(content.encode(), default_backend())
         expire_at = cert.not_valid_after
         utc_now = datetime.datetime.utcnow()
         time_delta = expire_at - utc_now

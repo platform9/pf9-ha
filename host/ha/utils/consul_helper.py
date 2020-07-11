@@ -197,7 +197,7 @@ class consul_status(object):
                                                         id=self.host_id))
                     self.kv_update(key, self.host_id)
                 else:
-                    if data['Value'] != self.host_id:
+                    if data['Value'].decode() != self.host_id:
                         LOG.debug('Updating {key} to {id}'.format(
                             key=key, id=self.host_id))
                         self.kv_update(key, self.host_id)
@@ -382,7 +382,7 @@ class consul_status(object):
                 #  (b) reported = True  : already reported to hamgr
                 # 2. eventType = 1
                 #  host now alive from previous down state, should also report
-                data_obj = data['Value']
+                data_obj = data['Value'].decode()
                 cls_obj = report_object.from_str(data_obj)
                 if retval.event['eventType'] == 1:
                     LOG.debug('founded change for host %s is host up, and existed in kv '
@@ -502,7 +502,7 @@ class consul_status(object):
             kv_list = []
         for kv in kv_list:
             key = kv['Key']
-            value = kv['Value']
+            value = kv['Value'].decode()
             if UUID_PATTERN.match(key):
                 cls = report_object.from_str(value)
                 cached_item = self.changed_clusters.get(cls.event['hostName'], None)
@@ -625,7 +625,7 @@ class consul_status(object):
                     if kv_data:
                         LOG.debug('checking whether existing data for host %s has already reported : %s',
                                   hostName, str(kv_data))
-                        existing_cls = report_object.from_str(kv_data['Value'])
+                        existing_cls = report_object.from_str(kv_data['Value'].decode())
                         if existing_cls.event['reported']:
                             reported_before = True
                             reported_time = datetime.strptime(existing_cls.event['reportedAt'],
@@ -741,7 +741,7 @@ class consul_status(object):
         out = ''
         if kv_list:
             for kv in kv_list:
-                out = out + "\nKey: %s, Value: %s" % (kv['Key'], kv['Value'])
+                out = out + "\nKey: %s, Value: %s" % (kv['Key'], kv['Value'].decode())
         return out
 
     def kv_fetch(self, key, recurse=False):
@@ -769,7 +769,7 @@ class consul_status(object):
     def get_report_status(self, hostid):
         ignore, data = self.kv_fetch(hostid)
         if data:
-            return json.loads(data['Value'])
+            return json.loads(data['Value'].decode())
         LOG.warning('{id} tried to access report status for {host} which '
                  'did not exist'.format(id=self.host_id, host=hostid))
         return None
@@ -804,7 +804,7 @@ class consul_status(object):
         LOG.debug('kv store before clean up staled items: %s', self.kv_print(kv_list))
         for kv in kv_list:
             key = kv['Key']
-            value = kv['Value']
+            value = kv['Value'].decode()
             if UUID_PATTERN.match(key):
                 # Dealing with a status report key-value pair
                 value = report_object.from_str(value)

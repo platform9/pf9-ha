@@ -1279,7 +1279,7 @@ class NovaProvider(Provider):
             resp = self._resmgr_client.update_role(node, 'pf9-ha-slave', data, self._token['id'])
             LOG.debug('authorize by updating settings for host %s for pf9-ha-slave with : %s', node, str(data))
             if resp.status_code == requests.codes.not_found and \
-                    resp.content.find('HostDown'):
+                    resp.content.find(b'HostDown'):
                 raise ha_exceptions.HostOffline(node)
             # Retry auth if resmgr throws conflict error for upto 2 minutes
             while resp.status_code == requests.codes.conflict:
@@ -1642,8 +1642,11 @@ class NovaProvider(Provider):
                 time.sleep(5)
                 resp = self._resmgr_client.delete_role(node, "pf9-ha-slave", self._token['id'])
                 if datetime.now() - start_time > timedelta(seconds=self._max_auth_wait_seconds):
+                    if resp.status_code != requests.codes.ok:
+                        LOG.error('De-auth timed out for pf9-ha-slave role on node %s', node)
                     break
             resp.raise_for_status()
+            LOG.info('De-authorizing pf9-ha-slave role on node %s complete.', node)
 
     def _disable(self, aggregate_id, synchronize=False,
                  next_state=constants.TASK_COMPLETED):
@@ -1684,7 +1687,7 @@ class NovaProvider(Provider):
             db_api.update_request_status(cluster.id, constants.HA_STATE_REQUEST_DISABLE)
             self._notify_status(constants.HA_STATE_REQUEST_DISABLE, "cluster", cluster.id)
         except Exception as e:
-            LOG.error('unhandled exceptions when disable cluster with name %s : %s ', str_aggregate_id, str(e))
+            LOG.exception('unhandled exception when disabling cluster with name %s', str_aggregate_id)
 
     def process_ha_enable_disable_requests(self):
         with self.ha_status_processing_lock:
