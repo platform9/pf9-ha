@@ -210,8 +210,7 @@ def create_notification(token, ntype, hostname, time, payload):
     if resp.status_code == requests.codes.accepted:
         LOG.debug('Status notification successfully accepted by masakari')
     elif resp.status_code == requests.codes.conflict and \
-            resp.content.find('ignored as the host is already under '
-                              'maintenance'):
+            resp.content.find(b'ignored as the host is already under maintenance'):
         LOG.warning('Masakari ignored the notification since host %s is already '
                  'under maintenance', hostname)
     else:

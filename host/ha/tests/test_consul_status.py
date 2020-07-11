@@ -70,7 +70,7 @@ def g_init():
         # simulate the consul cluster status
         g_consul_cache.append({
             'Key': kv_key,
-            'Value': xid
+            'Value': xid.encode()
         })
         xip = g_base_ip_format % str(i-1)
         g_join_ips = g_join_ips + ' ' + xip
@@ -109,7 +109,7 @@ def g_consul_kv_put(key, *args, **kwargs):
     if existing is not None:
         g_consul_cache.remove(existing)
 
-    g_consul_cache.append({"Key": key, "Value": args[0]})
+    g_consul_cache.append({"Key": key, "Value": args[0].encode()})
 
 
 def g_consul_kv_delete(key, *args, **kwargs):
@@ -120,7 +120,7 @@ def g_consul_kv_delete(key, *args, **kwargs):
         if kv['Key'] == key:
             existing = kv
             _key = key
-            _val = kv['Value']
+            _val = kv['Value'].decode()
             break
     if existing is not None:
         ids = set(g_host_ids)
@@ -276,7 +276,7 @@ class ConsulStatusTest(unittest.TestCase):
             # self.assertIsNone(status)
 
     def _assert_host_status_change(self, host_index, host_status):
-        xid = g_consul_cache[host_index]["Value"]
+        xid = g_consul_cache[host_index]["Value"].decode()
         g_host_status[xid] = host_status
         self._consul_helper.refresh_cache_from_consul()
         # check host down event is reported
@@ -304,7 +304,7 @@ class ConsulStatusTest(unittest.TestCase):
         report = g_consul_kv_get(host_id)
         self.assertIsNotNone(report)
         self.assertIsNotNone(report[1])
-        body = json.loads(report[1]['Value'])
+        body = json.loads(report[1]['Value'].decode())
         consul_info = body['consul']
         self.assertIsNotNone(consul_info)
         event_info = body['event']
@@ -313,13 +313,13 @@ class ConsulStatusTest(unittest.TestCase):
 
     def _assert_host_down_then_up(self, host_index):
         # make host down
-        host_id = g_consul_cache[host_index]["Value"]
+        host_id = g_consul_cache[host_index]["Value"].decode()
         g_logger('make host %s down and verify event is reported', host_id)
         self._assert_host_status_change(host_index, 2)
         self._assert_report_status(host_id, True)
 
         # make host up
-        host_id = g_consul_cache[host_index]["Value"]
+        host_id = g_consul_cache[host_index]["Value"].decode()
         g_logger('make host %s up and check status', str(host_id))
         self._assert_host_status_change(host_index, 1)
 
@@ -337,7 +337,7 @@ class ConsulStatusTest(unittest.TestCase):
         self._assert_initial_consul_status()
         # set second host (non leader) as down
         host_index = 1
-        host_id = g_consul_cache[host_index]["Value"]
+        host_id = g_consul_cache[host_index]["Value"].decode()
         self._assert_host_status_change(host_index, 3)
         self._assert_report_status(host_id, True)
 
@@ -354,13 +354,13 @@ class ConsulStatusTest(unittest.TestCase):
 
         # make second host down
         host_index = 1
-        host_id = g_consul_cache[host_index]["Value"]
+        host_id = g_consul_cache[host_index]["Value"].decode()
         self._assert_host_status_change(host_index, 5)
         self._assert_report_status(host_id, True)
 
         # make third host down
         host_index = 2
-        host_id = g_consul_cache[host_index]["Value"]
+        host_id = g_consul_cache[host_index]["Value"].decode()
         self._assert_host_status_change(host_index, 7)
         self._assert_report_status(host_id, True)
 
@@ -370,7 +370,7 @@ class ConsulStatusTest(unittest.TestCase):
 
         # make second host down then up
         host_index = 1
-        g_logger('verify host down then up for host : %s',g_consul_cache[host_index]["Value"])
+        g_logger('verify host down then up for host : %s',g_consul_cache[host_index]["Value"].decode())
         self._assert_host_down_then_up(host_index)
 
     def test_non_leader_host_repeatedly_down_and_up(self):
@@ -380,7 +380,7 @@ class ConsulStatusTest(unittest.TestCase):
         host_index = 1
         while host_index < 4:
             # simulate host down then up, for all hosts, one by one
-            g_logger('verify host %s down then up ', g_consul_cache[host_index]["Value"])
+            g_logger('verify host %s down then up ', g_consul_cache[host_index]["Value"].decode())
             self._assert_host_down_then_up(host_index)
 
             host_index = host_index + 1
@@ -391,7 +391,7 @@ class ConsulStatusTest(unittest.TestCase):
         self._assert_initial_consul_status()
         # make host down so there will be report in consul
         host_index = 1
-        host_id = g_consul_cache[host_index]["Value"]
+        host_id = g_consul_cache[host_index]["Value"].decode()
         g_logger('set host status to 9 and verify host-down is reported')
         self._assert_host_status_change(host_index, 9)
         # check the reported report will be cleaned out
@@ -410,7 +410,7 @@ class ConsulStatusTest(unittest.TestCase):
         self._assert_initial_consul_status()
         # make one host down
         host_index = 1
-        host_id = g_consul_cache[host_index]["Value"]
+        host_id = g_consul_cache[host_index]["Value"].decode()
         g_host_status[host_index] = 9
         # try to remove the host from 'consul members' result
         g_consul_add_excluded_host(host_id)
