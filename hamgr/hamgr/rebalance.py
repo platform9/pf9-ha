@@ -200,7 +200,10 @@ class RebalanceController(object):
                     LOG.debug('remove received message that is older than %s '
                               'seconds : %s', str(timeout_seconds),
                               str(payload))
-                    receive_buffer.remove(payload)
+                    try:
+                        receive_buffer.remove(payload)
+                    except ValueError:
+                        pass
 
         LOG.debug('response found for request id %s : %s', str(request_id), str(payload))
         return payload
@@ -215,7 +218,7 @@ class RebalanceController(object):
                   str(datetime.datetime.utcnow()), str(request))
         self.rpc_manager.send_rpc_message(request,
                                           message_type=message_types.MSG_CONSUL_REFRESH_REQUEST)
-        resp = self._wait_for_response_or_timeout(self._received_status_responses, request.id(), timeout_seconds=120)
+        resp = self._wait_for_response_or_timeout(self._received_status_responses, request.id(), timeout_seconds=180)
         LOG.debug('consul refresh response received at %s : %s',
                   str(datetime.datetime.utcnow()), str(resp))
         return resp

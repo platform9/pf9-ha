@@ -163,7 +163,7 @@ def get_consul_status(aggregate_id=None):
                          str(members))
                 continue
 
-            # get host status in consul members
+            # get host status in consul members: 1=Alive, 2=Leaving, 3=Left, 4=Failed
             host_status = 'up' if member['Status'] == 1 else 'down'
             # get consul role for host
             host_role = 'server' if member['Tags']['role'] == 'consul' else 'agent'
