@@ -219,7 +219,6 @@ def get_all_unhandled_enable_or_disable_requests():
             return query.all()
         except SQLAlchemyError as se:
             LOG.error('DB error when query unhandled cluster requests : %s', se)
-            raise
 
 
 def update_request_status(cluster_id, status):
@@ -360,7 +359,6 @@ def get_change_events_between_times(cluster_id,
         raise exceptions.ArgumentException('start_time is bigger than end_time')
     if event_type not in constants.VALID_EVENT_TYPES:
         raise exceptions.ArgumentException('event_type is null or empty or not valid')
-    etype = ''
     if event_type == constants.EVENT_HOST_DOWN:
         etype = '\'eventType\': 2'
     elif event_type == constants.EVENT_HOST_UP:
@@ -370,12 +368,13 @@ def get_change_events_between_times(cluster_id,
             query = session.query(ChangeEvents)
             query = query.filter(ChangeEvents.cluster == cluster_id)
             query = query.filter(
-                ChangeEvents.events.contains(host_name),
-                ChangeEvents.events.contains(etype))
+                ChangeEvents.events.like('%{0}%'.format(host_name)),
+                ChangeEvents.events.like('%{0}%'.format(etype)))
             query = query.filter(
                 ChangeEvents.timestamp >= start_time,
                 ChangeEvents.timestamp <= end_time
             )
+            #LOG.debug('SQL query: %s', str(query.statement.compile(compile_kwargs={"literal_binds": True})))
             return query.all()
         except SQLAlchemyError as se:
             LOG.error('DB error when query change events : %s', se)
@@ -472,24 +471,29 @@ def get_processing_events_between_times(event_type,
 def update_processing_event_with_notification(event_uuid, notification_uuid,
                                               notification_created,
                                               notification_status,
-                                              error_state=''):
+                                              error_state='',
+                                              update_all=False):
     if event_uuid is None:
         raise exceptions.ArgumentException('event_uuid is empty')
     with dbsession() as session:
         try:
             query = session.query(EventsProcessing)
             query = query.filter_by(event_uuid=event_uuid)
-            ep = query.first()
-            if not ep:
-                LOG.debug('event %s does not exist', event_uuid)
+            if update_all:
+                result = query.all()
+            else:
+                result = [query.first()]
+            if not result:
+                LOG.warning('update ignored: event %s does not exist', event_uuid)
                 return
-            LOG.debug('found processing event %s : %s', event_uuid, str(ep))
-            ep.notification_uuid = notification_uuid
-            ep.notification_created = notification_created
-            ep.notification_status = notification_status
-            ep.error_state = error_state
-            ep.notification_updated = datetime.datetime.utcnow()
-            return ep
+            for ep in result:
+                LOG.debug('found processing event %s : %s', event_uuid, str(ep))
+                ep.notification_uuid = notification_uuid
+                ep.notification_created = notification_created
+                ep.notification_status = notification_status
+                ep.error_state = error_state
+                ep.notification_updated = datetime.datetime.utcnow()
+            return result
         except Exception:
             LOG.error('failed to update event with notification', exc_info=True)
         return None
@@ -642,7 +646,7 @@ def update_consul_role_rebalance(uuid,
             query = query.filter_by(uuid=uuid)
             record = query.first()
             if not record:
-                LOG.warning('no consul role rebalance record with uuid %s found')
+                LOG.warning('no consul role rebalance record with uuid %s found', uuid)
                 return None
             if after_rebalance:
                 record.after_rebalance = after_rebalance
