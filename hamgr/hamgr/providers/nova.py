@@ -2026,7 +2026,7 @@ class NovaProvider(Provider):
                                                  json.dumps(peers),
                                                  json.dumps(members),
                                                  json.dumps(kv),
-                                                 joins,
+                                                 str(joins),
                                                  event_uuid)
 
                         LOG.info('event processing record is created for host %s on '
@@ -2331,7 +2331,7 @@ class NovaProvider(Provider):
                     # masakari notification status can be :
                     # "new", "running", "error", "failed", "ignored", "finished", "aborted"
                     #  will retry when the host event has not been processed
-                    if event_status is None or event_status in ['new', 'running']:
+                    if not event_status or event_status in ['new', 'running']:
                         # since the host event has not been handled, can not do rebalance, so keep the request
                         LOG.info('will retry consul role rebalance request, as associated host event %s (%s) has not '
                                  'been processed yet, current status: %s',

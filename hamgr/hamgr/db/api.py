@@ -149,7 +149,7 @@ def dbsession():
         if _has_unsaved_changes(db_session):
             db_session.commit()
     except SQLAlchemyError as se:
-        LOG.error('Error working with db sesssion: %s', se)
+        LOG.error('Error working with db session: %s', se)
         if _has_unsaved_changes(db_session):
             db_session.rollback()
     finally:
@@ -323,7 +323,7 @@ def create_change_event(cluster_id, events, event_id=''):
             change.uuid = str(uuid4()) if not event_id else event_id
             change.cluster = int(cluster_id)
             change.timestamp = datetime.datetime.utcnow()
-            change.events = events.encode()
+            change.events = str(events).encode()
             session.add(change)
             LOG.debug('successfully committed change event : %s', str(change))
             return change
@@ -368,8 +368,8 @@ def get_change_events_between_times(cluster_id,
             query = session.query(ChangeEvents)
             query = query.filter(ChangeEvents.cluster == cluster_id)
             query = query.filter(
-                ChangeEvents.events.like('%{0}%'.format(host_name)),
-                ChangeEvents.events.like('%{0}%'.format(etype)))
+                ChangeEvents.events.like('%{0}%'.format(host_name).encode()),
+                ChangeEvents.events.like('%{0}%'.format(etype).encode()))
             query = query.filter(
                 ChangeEvents.timestamp >= start_time,
                 ChangeEvents.timestamp <= end_time
@@ -574,8 +574,8 @@ def add_consul_role_rebalance_record(event_name,
             record.uuid = str(request_uuid)
             record.event_name = event_name
             record.event_uuid = str(event_uuid)
-            record.before_rebalance = before_rebalance.encode()
-            record.rebalance_action = rebalance_action
+            record.before_rebalance = str(before_rebalance).encode()
+            record.rebalance_action = str(rebalance_action)
             record.last_updated = datetime.datetime.utcnow()
             session.add(record)
             LOG.debug('successfully commited consul role rebalance record : %s', str(record))
@@ -649,7 +649,7 @@ def update_consul_role_rebalance(uuid,
                 LOG.warning('no consul role rebalance record with uuid %s found', uuid)
                 return None
             if after_rebalance:
-                record.after_rebalance = after_rebalance.encode()
+                record.after_rebalance = str(after_rebalance).encode()
             if action_finished:
                 record.action_finished = action_finished
             else:
