@@ -59,10 +59,11 @@ ${buildroot}/opt/pf9/pf9-ha/bin/python \
 
 PBR_VERSION=3.1.1 \
 PIP_CACHE_DIR=~/.cache/pip-py36-netsvc ${buildroot}/opt/pf9/pf9-ha/bin/python \
-    ${buildroot}/opt/pf9/pf9-ha/bin/pip install . -chttps://raw.githubusercontent.com/openstack/requirements/stable/pike/upper-constraints.txt
+    ${buildroot}/opt/pf9/pf9-ha/bin/pip install -c https://raw.githubusercontent.com/openstack/requirements/stable/rocky/upper-constraints.txt .
+
 # Following should be removed when pf9-ha is upgraded to stable/stein
 PIP_CACHE_DIR=~/.cache/pip-py36-netsvc ${buildroot}/opt/pf9/pf9-ha/bin/python \
-    ${buildroot}/opt/pf9/pf9-ha/bin/pip install eventlet==0.24.1
+    ${buildroot}/opt/pf9/pf9-ha/bin/pip install -c https://raw.githubusercontent.com/openstack/requirements/stable/rocky/upper-constraints.txt eventlet==0.24.1
 popd
 
 # patch the #!python with the venv's python
