@@ -2331,10 +2331,10 @@ class NovaProvider(Provider):
                     # masakari notification status can be :
                     # "new", "running", "error", "failed", "ignored", "finished", "aborted"
                     #  will retry when the host event has not been processed
-                    if event_status is None or event_status in ['new', 'running']:
-                        # since the host event has not been handled, can not do rebalance, so keep the request
-                        LOG.info('will retry consul role rebalance request, as associated host event %s (%s) has not '
-                                 'been processed yet, current status: %s',
+                    if not event_status or event_status in ['new', 'running']:
+                        # since the host event has not been handled, cannot do rebalance, so keep the request
+                        LOG.info('will retry consul role rebalance request, as associated host event %s (%s) '
+                                 'has not been processed yet, current status: %s',
                                  event_uuid,
                                  event_type,
                                  event_status)
@@ -2343,7 +2343,7 @@ class NovaProvider(Provider):
                     # host events has been aborted, no need to rebalance consul role
                     if event_status in ['error', 'failed', 'ignored', 'aborted']:
                         error = "associated host event %s (%s) was in %s status" % (
-                            event_uuid, event_type, event_status)
+                                event_uuid, event_type, event_status)
                         LOG.warning('abort consul role rebalance request as the %s', error)
                         db_api.update_consul_role_rebalance(req.uuid,
                                                             None,
