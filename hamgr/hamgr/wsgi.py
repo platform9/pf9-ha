@@ -66,21 +66,21 @@ def update_status(aggregate_id, action):
         provider.put(aggregate_id, action)
         return jsonify(dict(success=True)), 200, CONTENT_TYPE_HEADER
     except exceptions.InsufficientHosts as ex:
-        LOG.error('Bad request was made. %s', ex)
-        return jsonify(dict(error=ex.message)), 400, CONTENT_TYPE_HEADER
+        LOG.error('Bad request: %s', ex)
+        return jsonify(dict(error=str(ex))), 400, CONTENT_TYPE_HEADER
     except exceptions.AggregateNotFound:
         LOG.error('Aggregate %s was not found', aggregate_id)
         return jsonify(dict(success=False)), 404, CONTENT_TYPE_HEADER
     except (exceptions.HostOffline, exceptions.InvalidHostRoleStatus,
             exceptions.InvalidHypervisorRoleStatus) as ex:
         LOG.error('Cannot update cluster status since %s', ex)
-        return jsonify(dict(error=ex.message)), 409, CONTENT_TYPE_HEADER
+        return jsonify(dict(error=str(ex))), 409, CONTENT_TYPE_HEADER
     except exceptions.HostPartOfCluster as ex:
         LOG.error("Cannot enable cluster since %s", ex)
         # According to HTTP response code list, error code 412 represents
         # precondition failed.
         return jsonify(
-            dict(success=False, error=ex.message)), 412, CONTENT_TYPE_HEADER
+            dict(success=False, error=str(ex))), 412, CONTENT_TYPE_HEADER
 
 
 @app.route('/v1/ha/<uuid:host_uuid>', methods=['POST'])
@@ -248,9 +248,9 @@ def get_hosts_configs(aggregate_id):
         config = ha_provider.get_common_hosts_configs(aggregate_id)
         return jsonify(config)
     except exceptions.NoCommonSharedNfsException as e1:
-        return jsonify(dict(success=False, error=e1.message)), 500, CONTENT_TYPE_HEADER
+        return jsonify(dict(success=False, error=str(e1))), 500, CONTENT_TYPE_HEADER
     except Exception as e2:
-        return jsonify(dict(success=False, error=e2.message)), 500, CONTENT_TYPE_HEADER
+        return jsonify(dict(success=False, error=str(e2))), 500, CONTENT_TYPE_HEADER
 
 
 @app.route('/v1/cluster', methods=['GET'])

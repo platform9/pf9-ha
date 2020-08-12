@@ -1239,7 +1239,6 @@ class NovaProvider(Provider):
             raise ha_exceptions.HostPartOfCluster(str(invalid_hosts))
 
     def _validate_hosts(self, hosts, check_cluster=True, check_host_insufficient=True):
-        # TODO Make this check configurable
         # Since the consul needs 3 to 5 servers for bootstrapping, it is safe
         # to enable HA only if 4 hosts are present. So that even if 1 host goes
         # down after cluster is created, we can reconfigure it.
@@ -1514,6 +1513,9 @@ class NovaProvider(Provider):
         aggregate = self._get_aggregate(nova_client, aggregate_id)
         if not hosts:
             hosts = aggregate.hosts
+            # validate only when enabling HA on all aggregate hosts
+            self._validate_hosts(hosts)
+
         # observed that hosts sometimes need longer time to get to converged state
         # so here don't validate hosts, let the _handle_enable_request processor retry
         # this method's role is to save the request to db
