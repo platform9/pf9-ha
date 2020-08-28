@@ -46,6 +46,7 @@ from shared.constants import LOGGER_PREFIX
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 AMQP_HOST_QUEUE_PREFIX = 'queue-receiving-for-host'
+AMQP_HTTP_PORT = 15672
 
 class NovaProvider(Provider):
     def __init__(self, config):
@@ -62,6 +63,7 @@ class NovaProvider(Provider):
         self._consul_bootstrap_expect = 3
         self._amqp_user = config.get("amqp", "username")
         self._amqp_password = config.get("amqp", "password")
+        self._amqp_host = config.get("amqp", "host")
         self._db_uri = config.get("database", "sqlconnectURI")
         self._db_pwd = self._db_uri
         if self._db_uri:
@@ -1719,8 +1721,9 @@ class NovaProvider(Provider):
                           node, str(resp))
 
             # Explicitly delete rabbitmq queue for the host being deauthed
-            req_url = 'http://{0}:{1}@localhost:15672/api/queues/%2f/{2}-{3}' \
-                      .format(self._amqp_user, self._amqp_password, AMQP_HOST_QUEUE_PREFIX, node)
+            req_url = 'http://{0}:{1}@{2}:{3}/api/queues/%2f/{4}-{5}' \
+                      .format(self._amqp_user, self._amqp_password, self._amqp_host,
+                              AMQP_HTTP_PORT, AMQP_HOST_QUEUE_PREFIX, node)
             resp = requests.delete(req_url)
             if resp.status_code not in (requests.codes.no_content, requests.codes.not_found):
                 LOG.warning('Failed to delete rabbitmq queue for host %s on role deauth: %s',
