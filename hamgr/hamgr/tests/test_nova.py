@@ -77,6 +77,11 @@ class NovaProviderTest(unittest.TestCase):
         config.add_section('nova')
         config.set('nova', 'region', 'fake')
 
+        config.add_section('amqp')
+        config.set('amqp', 'username', 'ha')
+        config.set('amqp', 'password', 'ha_password')
+        config.set('amqp', 'host', 'localhost')
+
         config.set('DEFAULT', 'event_report_threshold_seconds', '30')
         config.set('DEFAULT', 'resmgr_endpoint','http://localhost:8080/resmgr')
         config.set('DEFAULT', 'du_fqdn', '')
