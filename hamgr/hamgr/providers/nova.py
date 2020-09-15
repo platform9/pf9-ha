@@ -1177,7 +1177,9 @@ class NovaProvider(Provider):
         auth = loader.load_from_options(auth_url=self._auth_uri,
                                         username=self._username,
                                         password=self._passwd,
-                                        project_name=self._tenant)
+                                        project_name=self._tenant,
+                                        user_domain_id="default",
+                                        project_domain_id="default")
         sess = session.Session(auth=auth)
         nova = client.Client(2, session=sess, region_name=self._region)
         return nova
