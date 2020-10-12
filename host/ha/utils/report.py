@@ -35,11 +35,10 @@ keystone_auth_grp = cfg.OptGroup(
 keystone_opts = [
     cfg.BoolOpt('insecure', default=False,
                 help='Whether to use SSL when connecting to DU'),
-    cfg.StrOpt('auth_uri', help='The uri for keystone authentication'),
-    cfg.StrOpt('admin_user', help='User to be used with Masakari requests'),
-    cfg.StrOpt('admin_password', help='Password for masakari user'),
-    cfg.StrOpt('admin_tenant_name',
-               help='Tenant associated with masakari user')
+    cfg.StrOpt('auth_url', help='The uri for keystone authentication'),
+    cfg.StrOpt('username', help='User to be used with Masakari requests'),
+    cfg.StrOpt('password', help='Password for masakari user'),
+    cfg.StrOpt('project_name', help='Tenant associated with masakari user')
 ]
 
 CONF.register_group(keystone_auth_grp)
@@ -52,24 +51,24 @@ class Reporter(object):
         # unless we change the url from ansible here
         # 'ansible-stack/roles/hamgr-configure/tasks/main.yml#73'
         # still use the local hardcoded base url
-        #self.auth_uri = CONF.keystone_authtoken.auth_uri
-        self.auth_uri = '/'.join([DU_URL, 'keystone', 'v3'])
+        # self.auth_url = CONF.keystone_authtoken.auth_url
+        self.auth_url = '/'.join([DU_URL, 'keystone', 'v3'])
         self.insecure = CONF.keystone_authtoken.insecure
         self.token = self._get_token()
 
     def _get_token(self):
 
         try:
-            auth_uri = self.auth_uri
-            tenant = CONF.keystone_authtoken.admin_tenant_name
-            username = CONF.keystone_authtoken.admin_user
-            password = CONF.keystone_authtoken.admin_password
-            auth = v3.Password(auth_url=auth_uri,
+            auth_url = self.auth_url
+            tenant = CONF.keystone_authtoken.project_name
+            username = CONF.keystone_authtoken.username
+            password = CONF.keystone_authtoken.password
+            auth = v3.Password(auth_url=auth_url,
                                username=username,
                                password=password,
                                project_name=tenant,
-                               project_domain_name='default',
-                               user_domain_name='default'
+                               project_domain_id='default',
+                               user_domain_id='default'
                                )
             sess = session.Session(auth=auth)
             id = sess.get_token()

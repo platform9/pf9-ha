@@ -71,10 +71,13 @@ class NovaProviderTest(unittest.TestCase):
         config.set('database', 'sqlite_synchronous', 'False')
 
         config.add_section('keystone_middleware')
-        config.set('keystone_middleware', 'admin_user', 'fake')
-        config.set('keystone_middleware', 'admin_password', 'fake')
-        config.set('keystone_middleware', 'auth_uri', 'fake')
-        config.set('keystone_middleware', 'admin_tenant_name', 'fake')
+        config.set('keystone_middleware', 'username', 'fake')
+        config.set('keystone_middleware', 'password', 'fake')
+        config.set('keystone_middleware', 'auth_url', 'fake')
+        config.set('keystone_middleware', 'project_name', 'fake')
+        config.set('keystone_middleware', 'auth_plugin', 'v3password')
+        config.set('keystone_middleware', 'user_domain_id', 'default')
+        config.set('keystone_middleware', 'project_domain_id', 'default')
 
         config.add_section('nova')
         config.set('nova', 'region', 'fake')

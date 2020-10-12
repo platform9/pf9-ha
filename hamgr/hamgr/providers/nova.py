@@ -50,11 +50,10 @@ AMQP_HTTP_PORT = 15672
 
 class NovaProvider(Provider):
     def __init__(self, config):
-        self._username = config.get('keystone_middleware', 'admin_user')
-        self._passwd = config.get('keystone_middleware', 'admin_password')
-        self._auth_uri = config.get('keystone_middleware', 'auth_uri')
-        self._auth_uri_v3 = "%s/v3" % self._auth_uri
-        self._tenant = config.get('keystone_middleware', 'admin_tenant_name')
+        self._username = config.get('keystone_middleware', 'username')
+        self._passwd = config.get('keystone_middleware', 'password')
+        self._auth_url = config.get('keystone_middleware', 'auth_url')
+        self._tenant = config.get('keystone_middleware', 'project_name')
         self._region = config.get('nova', 'region')
         self._resmgr_endpoint = config.get('DEFAULT', 'resmgr_endpoint')
 
@@ -142,7 +141,7 @@ class NovaProvider(Provider):
         self.consul_encryption_processing_running = False
 
     def _get_v3_token(self):
-        self._token = utils.get_token(self._auth_uri_v3,
+        self._token = utils.get_token(self._auth_url,
                                       self._tenant, self._username,
                                       self._passwd, self._token)
         return self._token
@@ -1174,7 +1173,7 @@ class NovaProvider(Provider):
         # reference:
         # https://docs.openstack.org/python-novaclient/latest/reference/api/index.html
         loader = loading.get_plugin_loader('password')
-        auth = loader.load_from_options(auth_url=self._auth_uri,
+        auth = loader.load_from_options(auth_url=self._auth_url,
                                         username=self._username,
                                         password=self._passwd,
                                         project_name=self._tenant,

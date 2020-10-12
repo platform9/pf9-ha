@@ -31,11 +31,11 @@ cluster_ip = 10.80.86.23
 ip_address = 10.80.86.23
 
 [keystone_authtoken]
-auth_uri = http://localhost:8080/keystone
+auth_url = http://localhost:8080/keystone/v3
 insecure = True
-admin_tenant_name = services
-admin_password = elv28zLIzKumSkmp
-admin_user = pf9-ha-slave
+project_name = services
+password = elv28zLIzKumSkmp
+username = pf9-ha-slave
 
 [consul]
 join = 10.80.86.51,10.80.86.46,10.80.86.36,10.80.86.31,10.80.86.47,10.80.86.27,10.80.86.25,10.80.86.40,10.80.86.34,10.80.86.43,10.80.86.44,10.80.86.42,10.80.86.45,10.80.86.22,10.80.86.37,10.80.86.48,10.80.86.41,10.80.86.29,10.80.86.23,10.80.86.49,10.80.86.39,10.80.86.52,10.80.86.28,10.80.86.32,10.80.86.33,10.80.86.35,10.80.86.38,10.80.86.21,10.80.86.26,10.80.86.50,10.80.86.30,10.80.86.24

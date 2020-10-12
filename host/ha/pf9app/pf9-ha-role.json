@@ -100,10 +100,10 @@
       "config": {
         "ha_slave_conf": {
           "keystone_authtoken": {
-            "auth_uri": "%(ha_slave.auth_uri)s",
-            "admin_user": "%(ha_slave.auth_user)s",
-            "admin_password": "%(ha_slave.auth_password)s",
-            "admin_tenant_name": "%(ha_slave.auth_tenant_name)s",
+            "auth_url": "%(ha_slave.auth_url)s",
+            "username": "%(ha_slave.username)s",
+            "password": "%(ha_slave.password)s",
+            "project_name": "%(ha_slave.project_name)s",
             "insecure": "True"
           },
           "DEFAULT": {
