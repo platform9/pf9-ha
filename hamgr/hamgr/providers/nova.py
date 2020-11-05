@@ -139,6 +139,8 @@ class NovaProvider(Provider):
         # lock for consul encryption change processing
         self.consul_encryption_processing_lock = threading.Lock()
         self.consul_encryption_processing_running = False
+        self.queue_processing_lock = threading.Lock()
+        self.queue_processing_running = False
 
     def _get_v3_token(self):
         self._token = utils.get_token(self._auth_url,
@@ -410,6 +412,34 @@ class NovaProvider(Provider):
                                                          event.notification_created,
                                                          state)
         return state
+
+    def process_queue_for_unauthed_hosts(self):
+        with self.queue_processing_lock:
+            if self.queue_processing_running:
+                LOG.debug('Queue processing is already running')
+                return
+            self.queue_processing_running = True
+
+        LOG.debug('queue processing task starts to run at %s',
+                  str(datetime.utcnow()))
+        self._token = self._get_v3_token()
+        resmgr_hosts = self._resmgr_client.get_hosts_info(self._token)
+        for host in resmgr_hosts:
+            if (not self.aggregate_task_running and
+                    not self.consul_role_rebalance_processing_running and
+                    "pf9-ha-slave" not in host["roles"]):
+                req_url = 'http://{0}:{1}@{2}:{3}/api/queues/%2f/{4}-{5}' \
+                    .format(self._amqp_user, self._amqp_password,
+                            self._amqp_host, AMQP_HTTP_PORT,
+                            AMQP_HOST_QUEUE_PREFIX, host["id"])
+                resp = requests.get(req_url)
+                if resp.status_code == requests.codes.ok:
+                    resp = requests.delete(req_url)
+                    if resp.status_code not in (requests.codes.no_content,
+                                                requests.codes.not_found):
+                        LOG.warning('Failed to delete rabbitmq queue for host '
+                                    '%s on role deauth: %s', host["id"],
+                                    resp.status_code)
 
     def process_host_aggregate_changes(self):
         try:

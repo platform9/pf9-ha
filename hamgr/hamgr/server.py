@@ -67,6 +67,10 @@ def start_server(conf, paste_ini):
         # background thread for handling HA enable/disable request
         LOG.debug('add task process_ha_enable_disable_requests')
         periodic_task.add_task(provider.process_ha_enable_disable_requests, 5, run_now=True)
+        # task to verify queue is not present for unauthed host
+        LOG.debug("add task process_queue_for_unauthed_hosts")
+        periodic_task.add_task(provider.process_queue_for_unauthed_hosts, 600,
+                               run_now=True)
         LOG.debug('start wsgi server')
         wsgi_app = loadapp('config:%s' % paste_file, 'main')
         wsgi.server(listen(('', conf.getint("DEFAULT", "listen_port"))),
