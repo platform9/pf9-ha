@@ -46,7 +46,10 @@ class ResmgrClient:
         return resp
 
     def get_hosts_info(self, token):
-        return self.get(token, "/hosts")
+        resp = self.get(token, "/hosts")
+        if resp.status_code == requests.codes.ok:
+            return resp.json()
+        return {}
 
     def get_host_info(self, host_id, token):
         return self.get(token, "/hosts/{0}".format(host_id))
