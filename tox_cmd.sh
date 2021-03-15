@@ -22,4 +22,4 @@ pip install -U pip
 echo 'upgrade setuptools ...'
 pip install -U setuptools==33.1.1
 echo 'install dependencies from ' + $@
-pip install -chttps://raw.githubusercontent.com/openstack/requirements/stable/pike/upper-constraints.txt $@
+pip install -chttps://raw.githubusercontent.com/openstack/requirements/stable/rocky/upper-constraints.txt $@
