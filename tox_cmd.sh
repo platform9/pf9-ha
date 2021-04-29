@@ -17,9 +17,7 @@ set -e
 # the cryptography dependency requires higher version of pip and setuptools
 # during tox install cryptography package, so customize tox virtualenv
 # before install the dependencies
-echo 'upgrade pip ...'
-pip install -U pip
-echo 'upgrade setuptools ...'
-pip install -U setuptools==33.1.1
+echo 'upgrade pip, setuptools, pbr...'
+pip install -U pip==20.2.4 setuptools pbr==3.1.1
 echo 'install dependencies from ' + $@
 pip install -chttps://raw.githubusercontent.com/openstack/requirements/stable/pike/upper-constraints.txt $@
