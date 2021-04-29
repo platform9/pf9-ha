@@ -53,9 +53,10 @@ cp -f ${srcroot}/setup.py $buildroot/tmp/
 rm -rf $buildroot/tmp/shared/tests
 
 pushd $buildroot/tmp
-PBR_VERSION=3.1.1 \
-${buildroot}/opt/pf9/pf9-ha/bin/python \
-    ${srcroot}/setup.py install
+PIP_CACHE_DIR=~/.cache/pip-py36-netsvc ${buildroot}/opt/pf9/pf9-ha/bin/python \
+    ${buildroot}/opt/pf9/pf9-ha/bin/pip install --upgrade pip==20.2.4 pbr setuptools
+
+PBR_VERSION=3.1.1 ${buildroot}/opt/pf9/pf9-ha/bin/python ${srcroot}/setup.py install
 
 PBR_VERSION=3.1.1 \
 PIP_CACHE_DIR=~/.cache/pip-py36-netsvc ${buildroot}/opt/pf9/pf9-ha/bin/python \
@@ -63,12 +64,14 @@ PIP_CACHE_DIR=~/.cache/pip-py36-netsvc ${buildroot}/opt/pf9/pf9-ha/bin/python \
 
 # Following should be removed when pf9-ha is upgraded to stable/stein
 PIP_CACHE_DIR=~/.cache/pip-py36-netsvc ${buildroot}/opt/pf9/pf9-ha/bin/python \
-    ${buildroot}/opt/pf9/pf9-ha/bin/pip install -c https://raw.githubusercontent.com/openstack/requirements/stable/rocky/upper-constraints.txt eventlet==0.24.1
+    ${buildroot}/opt/pf9/pf9-ha/bin/pip install eventlet==0.24.1
 popd
 
 # patch the #!python with the venv's python
 sed -i "s/\#\!.*python/\#\!\/opt\/pf9\/pf9-ha\/bin\/python/" \
            ${buildroot}/opt/pf9/pf9-ha/bin/*
+sed -i "s/exec' .*python/exec' \/opt\/pf9\/pf9-ha\/bin\/python/" \
+    ${buildroot}/opt/pf9/pf9-ha/bin/*
 
 # Create required directories
 install -d -m 755 ${buildroot}/opt/pf9/etc/pf9-consul/conf.d
