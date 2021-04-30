@@ -39,7 +39,7 @@ tar xf %{_sourcedir}/source.tar
 # virtualenv and setup
 virtualenv -p python3 %{buildroot}/opt/pf9/%{project}
 
-%{buildroot}/opt/pf9/%{project}/bin/python %{buildroot}/opt/pf9/%{project}/bin/pip install -U pip==20.2.4 pbr==3.1.1 setuptools
+%{buildroot}/opt/pf9/%{project}/bin/python %{buildroot}/opt/pf9/%{project}/bin/pip install -U pip==20.2.4 pbr==3.1.1 setuptools==33.1.1
 
 # setup.py install with pbr version 1.8.1 does not seem to collect the requirements to
 # site-packages. Just pip install of root directory seems to fix the issue
