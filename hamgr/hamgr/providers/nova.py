@@ -145,7 +145,7 @@ class NovaProvider(Provider):
     def _get_v3_token(self):
         self._token = utils.get_token(self._auth_url,
                                       self._tenant, self._username,
-                                      self._passwd, self._token)
+                                      self._passwd, self._token, self._region)
         return self._token
 
     def _is_consul_encryption_enabled(self):
