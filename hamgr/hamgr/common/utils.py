@@ -17,7 +17,7 @@ import time
 # import _striptime to avoid deadlock when call time.striptime
 # in multiple thread environment
 import _strptime
-from keystoneclient.v3 import  client as v3client
+from keystoneclient.v3 import client as v3client
 from keystoneclient.v3.tokens import TokenManager
 from keystoneauth1.identity import v3
 from keystoneauth1 import session
@@ -26,7 +26,7 @@ from shared.constants import LOGGER_PREFIX
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 
-def _get_auth_token(auth_url, tenant, user, password):
+def _get_auth_token(auth_url, tenant, user, password, region_name):
     auth = v3.Password(auth_url=auth_url,
                        username=user,
                        password=password,
@@ -36,7 +36,7 @@ def _get_auth_token(auth_url, tenant, user, password):
                        )
     sess = session.Session(auth=auth)
     raw = sess.get_token()
-    keystone = v3client.Client(session=sess)
+    keystone = v3client.Client(session=sess, region_name=region_name)
     mgr = TokenManager(keystone)
     data = mgr.get_token_data(raw)
     token = data['token']
@@ -58,12 +58,12 @@ def _need_refresh(token):
         else False
 
 
-def get_token(auth_url, tenant, user, password, old_token):
+def get_token(auth_url, tenant, user, password, old_token, region_name):
 
     token = old_token
 
     if not old_token or _need_refresh(old_token):
         LOG.debug('Refreshing token...')
-        token = _get_auth_token(auth_url, tenant, user, password)
+        token = _get_auth_token(auth_url, tenant, user, password, region_name)
 
     return token
