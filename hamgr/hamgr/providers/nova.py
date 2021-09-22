@@ -1697,7 +1697,7 @@ class NovaProvider(Provider):
 
     def _wait_for_role_to_ok_v2(self, nodes):
 
-        timeout = len(nodes) * self._max_role_converged_wait_seconds
+        timeout = self._max_role_converged_wait_seconds
         start_time = datetime.now()
         converged=set()
 
@@ -1715,6 +1715,7 @@ class NovaProvider(Provider):
             for node in nodes:
                 resp = hosts_info.get(node, {})
                 if resp:
+                    # TODO: check for haslave role explicitly
                     if resp.get('role_status', '') == 'ok':
                         converged.add(node)
                         all_ok &= True
@@ -1730,7 +1731,10 @@ class NovaProvider(Provider):
 
         not_converged = list(set(nodes).difference(converged))
         if len(not_converged) > 0:
+            LOG.error('_wait_for_role_to_ok_v2: %d hosts not converged out of %d',
+                      len(not_converged), len(nodes))
             raise ha_exceptions.RoleConvergeFailed(','.join(not_converged))
+        LOG.debug('End _wait_for_role_to_ok_v2')
 
     def _deauth(self, nodes):
         self._token = self._get_v3_token()
@@ -1874,12 +1878,13 @@ class NovaProvider(Provider):
             db_api.update_request_status(cluster.id, constants.HA_STATE_DISABLING)
             self._notify_status(constants.HA_STATE_DISABLING, "cluster", cluster.id)
             if hosts:
-                LOG.debug('De-authorize roles from hosts and wait for complation')
+                LOG.debug('De-authorize roles from hosts and wait for completion')
                 self._deauth(hosts)
+                LOG.info('Waiting for role deauth to converge for cluster %s', cluster_name)
                 self._wait_for_role_to_ok_v2(hosts)
                 LOG.info('De-authorize process complete for aggregate %s hosts', cluster_name)
             else:
-                LOG.info('no hosts found in segment %s', cluster_name)
+                LOG.info('no hosts found in aggregate for deauth %s', cluster_name)
             LOG.info('Deleting failover segment %s from masakari', cluster_name)
             masakari.delete_failover_segment(self._token, cluster_name)
             # change status from 'disabling' to 'disabled'
@@ -1888,7 +1893,7 @@ class NovaProvider(Provider):
             LOG.info('Successfully processed disable request for aggregate %s', cluster_name)
         except Exception:
             if cluster:
-                LOG.exception('Disable HA request failed')
+                LOG.exception('Disable HA request failed for cluster %s', cluster_name)
                 # mark the status as 'error'
                 db_api.update_request_status(cluster.id, constants.HA_STATE_ERROR)
                 self._notify_status(constants.HA_STATE_ERROR, "cluster", cluster.id)
@@ -2188,7 +2193,8 @@ class NovaProvider(Provider):
 
     def _report_consul_rebalance(self, cluster_name, event_type, candidates, event_uuid=None, consul_report=None):
         try:
-            if not candidates:
+            cluster = db_api.get_cluster(str(cluster_name), read_deleted=False, raise_exception=True)
+            if not candidates or (cluster.status != constants.HA_STATE_ENABLED):
                 LOG.debug('cluster %s: no rebalance candidates or no need to rebalance', cluster_name)
                 return
 
@@ -2830,6 +2836,10 @@ class NovaProvider(Provider):
         cluster = db_api.get_cluster(str(aggregate_id),
                                       read_deleted=False,
                                       raise_exception=True)
+        if cluster.status != constants.HA_STATE_ENABLED:
+            LOG.warning('Ignoring set_consul_agent_role as cluster %s status is not enabled currently.',
+                        cluster_name)
+            return
         LOG.debug('found cluster %s : %s', str(aggregate_id), str(cluster))
         # 3 host needs to be in the aggregate
         host_ids = aggregate.hosts
