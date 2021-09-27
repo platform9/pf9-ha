@@ -13,72 +13,60 @@ class ResmgrClient:
         if self._base_url.rfind('v1') == -1:
             self._base_url = self._base_url + "/v1"
 
-    def get(self, token, route):
+    def _send_request(self, method, url, token, data={}):
         headers = {'X-Auth-Token': token, 'Content-Type': 'application/json'}
-        req_url = '{0}/{1}'.format(self._base_url, route)
-        resp = requests.get(req_url, headers=headers)
-        if resp.status_code != requests.codes.ok:
-            LOG.warning('request "%s" not succeeded, returns : %s', str(req_url), str(resp))
-        return resp
-
-    def put(self, token, route, json_data):
-        headers = {'X-Auth-Token': token, 'Content-Type': 'application/json'}
-        req_url = '{0}/{1}'.format(self._base_url, route)
-        resp = requests.put(req_url, headers=headers, json=json_data)
-        if resp.status_code != requests.codes.ok:
-            LOG.warning('request "%s" not succeeded, returns : %s', str(req_url), str(resp))
-        return resp
-
-    def post(self, token, route, json_data):
-        headers = {'X-Auth-Token': token, 'Content-Type': 'application/json'}
-        req_url = '{0}/{1}'.format(self._base_url, route)
-        resp = requests.post(req_url, headers=headers, json=json_data)
-        if resp.status_code != requests.codes.ok:
-            LOG.warning('request "%s" not succeeded, returns : %s', str(req_url), str(resp))
-        return resp
-
-    def delete(self, token, route):
-        headers = {'X-Auth-Token': token, 'Content-Type': 'application/json'}
-        req_url = '{0}/{1}'.format(self._base_url, route)
-        resp = requests.delete(req_url, headers=headers)
-        if resp.status_code != requests.codes.ok:
-            LOG.warning('request "%s" not succeeded, returns : %s', str(req_url), str(resp))
+        if method == "get":
+            resp = requests.get(url, headers=headers)
+            resp.raise_for_status()
+            return resp.json()
+        if method == "put":
+            resp = requests.put(url, headers=headers, json=data)
+        if method == "delete":
+            resp = requests.delete(url, headers=headers)
         return resp
 
     def get_hosts_info(self, token):
-        resp = self.get(token, "/hosts")
-        if resp.status_code == requests.codes.ok:
-            return resp.json()
-        return {}
+        return self._send_request("get", self._base_url + "/hosts", token)
 
     def get_host_info(self, host_id, token):
-        return self.get(token, "/hosts/{0}".format(host_id))
+        url = "%s/hosts/%s" % (self._base_url, host_id)
+        return self._send_request("get", url, token)
 
     def get_role_settings(self, host_id, role_name, token):
-        return self.get(token, "/hosts/{0}/roles/{1}".format(host_id, role_name))
+        url = "%s/hosts/%s/roles/%s" % (self._base_url, host_id, role_name)
+        return self._send_request("get", url, token)
+
+    def get_app_info(self, host_id, token):
+        url = "http://localhost:8082/v1/hosts/%s/apps" % host_id
+        return self._send_request("get", url, token)
 
     def update_role(self, host_id, role_name, role_settings, token):
-        return self.put(token, "/hosts/{0}/roles/{1}".format(host_id, role_name), role_settings)
+        url = "%s/hosts/%s/roles/%s" % (self._base_url, host_id, role_name)
+        return self._send_request("put", url, token, role_settings)
 
     def delete_role(self, host_id, role_name, token):
-        return self.delete(token, "/hosts/{0}/roles/{1}".format(host_id, role_name))
+        url = "%s/hosts/%s/roles/%s" % (self._base_url, host_id, role_name)
+        return self._send_request("delete", url, token)
 
-    def fetch_hosts_details(self, host_ids , token):
+    def fetch_hosts_details(self, host_ids, token):
         hosts_details = {}
         for host_id in host_ids:
-            resp = self.get_host_info(host_id, token)
-            host_info = {}
-            if resp.status_code == requests.codes.ok:
-                host_info = resp.json()
+            host_info = self.get_host_info(host_id, token)
             hosts_details[host_id] = host_info
             roles = host_info.get('roles', [])
             settings = {}
             for role in roles:
-                resp = self.get_role_settings(host_id, role, token)
-                role_settings = {}
-                if resp.status_code == requests.codes.ok:
-                    role_settings = resp.json()
-                settings.update({role:role_settings})
+                if role not in ["pf9-ostackhost-neutron", "pf9-ha-slave"]:
+                    continue
+                role_settings = self.get_role_settings(host_id, role, token)
+                settings.update({role: role_settings})
             hosts_details[host_id].update(dict(role_settings=settings))
-
         return hosts_details
+
+    def fetch_app_details(self, host_ids, token):
+        app_details = {}
+        for host_id in host_ids:
+            app_info = self.get_app_info(host_id, token)
+            if "desired_apps" not in app_info.get("pf9-ha-slave", {}):
+                app_details[host_id] = {"converged": True}
+        return app_details

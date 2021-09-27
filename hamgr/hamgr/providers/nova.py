@@ -1045,15 +1045,12 @@ class NovaProvider(Provider):
         #   b) just restart pf9-ha-slave service
         #
         self._token = self._get_v3_token()
-        result = self._resmgr_client.get_host_info(target_host_id, self._token['id'])
-        data = result.json()
+        data = self._resmgr_client.get_host_info(target_host_id, self._token['id'])
         conclusion = {
             'status': constants.RPC_TASK_STATE_FINISHED,
             'message': ''
         }
 
-        if result.status_code != requests.codes.ok:
-            LOG.warning('get info for host %s was unsuccessful, result : %s', target_host_id, str(result))
         if 'pf9-ha-slave' not in data['roles']:
             error = 'host %s does not have pf9-ha-slave role' % target_host_id
             LOG.warning('abort consul role rebalance request, as %s', error)
@@ -1709,14 +1706,13 @@ class NovaProvider(Provider):
                          str(start_time), str(datetime.now()))
                 break
 
-            hosts_info = self._resmgr_client.fetch_hosts_details(nodes, self._token['id'])
+            app_info = self._resmgr_client.fetch_app_details(nodes, self._token['id'])
 
             all_ok = True
             for node in nodes:
-                resp = hosts_info.get(node, {})
+                resp = app_info.get(node, {})
                 if resp:
-                    # TODO: check for haslave role explicitly
-                    if resp.get('role_status', '') == 'ok':
+                    if resp.get('converged', False) == True:
                         converged.add(node)
                         all_ok &= True
                     else:
@@ -2852,7 +2848,6 @@ class NovaProvider(Provider):
         slave_role = 'pf9-ha-slave'
         host_settings = self._resmgr_client.get_host_info(host_id,
                                                           self._token['id'])
-        host_settings = host_settings.json()
         LOG.debug('settings of role %s for host %s : %s', slave_role,
                   host_id, str(host_settings))
         if slave_role not in host_settings['roles']:
@@ -2877,7 +2872,6 @@ class NovaProvider(Provider):
             role_settings = self._resmgr_client.get_role_settings(host_id,
                                                                   slave_role,
                                                                   self._token['id'])
-            role_settings = role_settings.json()
             if 'bootstrap_expect' not in role_settings:
                 raise ha_exceptions.RoleSettingsNotFound(host_id, slave_role, 'bootstrap_expect')
             LOG.debug('get current agent role for host %s by checking resmgr settings : %s', str(host_id), str(role_settings))
