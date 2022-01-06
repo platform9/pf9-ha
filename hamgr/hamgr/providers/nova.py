@@ -423,7 +423,7 @@ class NovaProvider(Provider):
         LOG.debug('queue processing task starts to run at %s',
                   str(datetime.utcnow()))
         self._token = self._get_v3_token()
-        resmgr_hosts = self._resmgr_client.get_hosts_info(self._token)
+        resmgr_hosts = self._resmgr_client.get_hosts_info(self._token['id'])
         for host in resmgr_hosts:
             if (not self.aggregate_task_running and
                     not self.consul_role_rebalance_processing_running and
