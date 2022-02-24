@@ -436,7 +436,6 @@ def create_consul_svc_key_cert_pairs(cluster_name=""):
     if cluster_name is None:
         cluster_name = ""
 
-    setup_folders_if_not_exist()
     setup_openssl_if_not_exist()
 
     folder_certs = os.path.join(hamgr_config_base, 'certs')
