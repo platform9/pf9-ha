@@ -413,10 +413,8 @@ def read_consul_svc_key_cert_pair(cluster_name, base64_encode=True):
 def create_consul_ca_key_cert_pairs():
     if are_hamgr_ca_key_cert_pairs_exist():
         symbolic_link_ca_key_cert_pairs_if_exist()
-        return True
 
     # fallback to hamgr to create CA
-    setup_folders_if_not_exist()
     setup_openssl_if_not_exist()
     cfg_general = get_general_configs()
     folder_certs = os.path.join(hamgr_config_base, 'certs')
@@ -438,7 +436,6 @@ def create_consul_svc_key_cert_pairs(cluster_name=""):
     if cluster_name is None:
         cluster_name = ""
 
-    setup_folders_if_not_exist()
     setup_openssl_if_not_exist()
 
     folder_certs = os.path.join(hamgr_config_base, 'certs')
