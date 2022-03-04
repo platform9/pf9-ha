@@ -2531,7 +2531,8 @@ class NovaProvider(Provider):
                 svc_changed = False
                 # for ha enabled cluster, when svc key and cert not exist , or expired, then refresh them
                 if not keyhelper.are_consul_svc_key_cert_pair_exist(cluster_name) or \
-                        keyhelper.is_consul_svc_cert_expired(cluster_name):
+                        keyhelper.is_consul_svc_cert_expired(cluster_name) or \
+                        ca_changed:
                     svc_changed = keyhelper.create_consul_svc_key_cert_pairs(cluster_name)
                     LOG.info('expired svc key and cert for cluster %s are refreshed ? %s', cluster_name,
                              str(svc_changed))
