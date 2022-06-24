@@ -20,4 +20,4 @@ set -e
 echo 'upgrade pip, setuptools, pbr...'
 pip install -U pip==20.2.4 setuptools pbr==3.1.1
 echo 'install dependencies from ' + $@
-pip install -chttps://raw.githubusercontent.com/openstack/requirements/stable/rocky/upper-constraints.txt $@
+pip install -cupper-constraints.txt $@

@@ -57,7 +57,7 @@ start_process() {
     touch $PIDFILE
     mkdir -p `dirname $SERVER_LOGFILE`
     LD_LIBRARY_PATH="/opt/pf9/python/pf9-lib:/opt/pf9/python/pf9-hostagent-lib:${LD_LIBRARY_PATH}" \
-    PYTHONPATH="/opt/pf9/python/lib/python3.6:/opt/pf9/pf9-ha/lib/python3.6/site-packages:${PYTHONPATH}" \
+    PYTHONPATH="/opt/pf9/python/lib/python3.9:/opt/pf9/pf9-ha/lib/python3.9/site-packages:${PYTHONPATH}" \
     daemon --user pf9 "$SERVER_BIN $SERVER_OPTS >> $SERVER_LOGFILE 2>&1 &"
     RETVAL=$?
     pid=`pidofproc $SERVER_BIN`

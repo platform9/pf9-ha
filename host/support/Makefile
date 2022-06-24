@@ -16,11 +16,21 @@ PF9_VERSION ?= 3.6.0
 BUILD_NUMBER ?= 0
 UID ?= $(shell id -u)
 GID ?= $(shell id -g)
-SRCROOT = $(abspath $(dir $(CURDIR)))
-BUILD = $(SRCROOT)/../build
-STAGE = $(SRCROOT)/../build/stage
+THISDIR = $(abspath $(dir $(CURDIR)))
+BUILD = $(THISDIR)/../build
+STAGE = $(THISDIR)/../build/stage
+CENTOS_IMG ?= artifactory.platform9.horse/docker-local/py39-build-image:latest
 
-all: wrapper
+all:
+	docker run -i --rm -a stdout -a stderr \
+		-u $(UID):$(GID) \
+		-v $(THISDIR)/../:/src/pf9-ha \
+		-w /src/pf9-ha/host/support \
+		-e PF9_VERSION=$(PF9_VERSION) \
+		-e BUILD_NUMBER=$(BUILD_NUMBER) \
+		-e SIGN_PACKAGES=$(SIGN_PACKAGES) \
+		$(CENTOS_IMG) \
+		make wrapper
 
 wrapper: rpm deb wrapperstage
 

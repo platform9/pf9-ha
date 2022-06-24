@@ -31,7 +31,7 @@
 name=pf9-hamgr
 prog=pf9-hamgr
 root=/opt/pf9/hamgr
-exec="$root/bin/python $root/lib/python3.6/site-packages/hamgr/server.py"
+exec="$root/bin/python $root/lib/python3.9/site-packages/hamgr/server.py"
 pidfile=/var/run/pf9/hamgr.pid
 log_stdout="/var/log/pf9/hamgr/$name-out.log"
 

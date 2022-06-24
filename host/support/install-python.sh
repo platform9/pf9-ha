@@ -27,7 +27,7 @@ buildroot=$1
 python=$buildroot/opt/pf9/python
 mkdir -p $python
 
-url=artifacts.platform9.horse/repository/yum-repo-frozen/hostagent-components/python3.6.7.tgz
+url=https://artifactory.platform9.horse/artifactory/pf9-bins/python/3.9.10/python3.9.10.tgz
 wget -q -O- ${url} \
     | tar zxf - --strip-components=3 -C ${python}
 
