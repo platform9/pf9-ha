@@ -18,6 +18,6 @@ set -e
 # during tox install cryptography package, so customize tox virtualenv
 # before install the dependencies
 echo 'upgrade pip, setuptools, pbr...'
-pip install -U pip==20.2.4 setuptools pbr==3.1.1
+pip install -U pip==20.2.4 setuptools==57.1.0 pbr==3.1.1
 echo 'install dependencies from ' + $@
 pip install -cupper-constraints.txt $@

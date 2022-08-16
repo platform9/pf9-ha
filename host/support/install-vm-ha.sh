@@ -54,7 +54,7 @@ rm -rf $buildroot/tmp/shared/tests
 
 pushd $buildroot/tmp
 PIP_CACHE_DIR=~/.cache/pip-py39-netsvc ${buildroot}/opt/pf9/pf9-ha/bin/python \
-    ${buildroot}/opt/pf9/pf9-ha/bin/pip install --upgrade pip==20.2.4 pbr setuptools
+    ${buildroot}/opt/pf9/pf9-ha/bin/pip install --upgrade pip==20.2.4 pbr setuptools==57.1.0
 
 PBR_VERSION=3.1.1 ${buildroot}/opt/pf9/pf9-ha/bin/python ${srcroot}/setup.py install
 
