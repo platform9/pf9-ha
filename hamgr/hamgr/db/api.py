@@ -40,7 +40,8 @@ Base = declarative_base()
 
 _session_maker = None
 _engine = None
-
+_msession_maker = None
+_mengine = None
 
 class Cluster(Base):
     __tablename__ = 'clusters'
@@ -123,6 +124,23 @@ class ConsulRoleRebalanceRecord(Base):
     last_updated = Column('last_updated', DateTime)
     last_error = Column('last_error', Text)
 
+class Hosts(Base):
+    __tablename__ = 'hosts'
+    __table_args__ = {'mysql_engine': 'InnoDB'}
+    __mapper_args__ = {'always_refresh': True}
+
+    id = Column(Integer, primary_key=True)
+    deleted = Column(Integer, default=None)
+    updated_at = Column(DateTime, default=None)
+    created_at = Column(DateTime, default=None)
+    deleted_at = Column(DateTime, default=None)
+    name = Column(String(255))
+    type = Column(String(255))
+    uuid = Column(String(36))
+    failover_segment_id = Column(String(36))
+    reserved = Column(Integer)
+    on_maintenance = Column(Integer)
+    control_attributes = Column(Text)
 
 def init(config, connection_string=None):
     conn_str = connection_string or config.get('database', 'sqlconnectURI')
@@ -133,6 +151,15 @@ def init(config, connection_string=None):
     global _session_maker
     _session_maker = sessionmaker(bind=_engine, expire_on_commit=False)
 
+
+def connect_masakari(config, connection_string=None):
+    mconn_str = connection_string or config.get('masakari', 'sqlconnectURI')
+
+    global _mengine
+    _mengine = create_engine(mconn_str)
+
+    global _msession_maker
+    _msession_maker = sessionmaker(bind=_mengine, expire_on_commit=False)
 
 def _has_unsaved_changes(session):
     if any([session.dirty, session.new, session.deleted]):
@@ -155,6 +182,20 @@ def dbsession():
     finally:
         db_session.close()
 
+@contextmanager
+def mdbsession():
+    global _msession_maker
+    mdb_session = _msession_maker()
+    try:
+        yield mdb_session
+        if _has_unsaved_changes(mdb_session):
+            mdb_session.commit()
+    except SQLAlchemyError as se:
+        LOG.error('Error working with db session: %s', se)
+        if _has_unsaved_changes(mdb_session):
+            mdb_session.rollback()
+    finally:
+        mdb_session.close()
 
 def _get_all_clusters(session, read_deleted=False):
     query = session.query(Cluster)
@@ -330,6 +371,19 @@ def create_change_event(cluster_id, events, event_id=''):
         except SQLAlchemyError as se:
             LOG.error('DB error when creating change event : %s', se)
 
+
+def get_hosts_by_name(name):
+    if name is None:
+        raise exceptions.ArgumentException('host name is empty')
+    with mdbsession() as session:
+        try:
+            query = session.query(Hosts)
+            query = query.filter_by(name=name, deleted=0)
+            result = query.first()
+            return result
+        except Exception:
+            LOG.error('failed to get the host in masakari DB  %s', str(name), exc_info=True)
+    return None
 
 def get_change_event_by_id(uuid):
     if uuid is None:

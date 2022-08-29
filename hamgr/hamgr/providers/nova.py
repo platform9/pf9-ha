@@ -16,7 +16,6 @@ import json
 import logging
 import threading
 import time
-import MySQLdb
 from collections import defaultdict
 from datetime import datetime
 from datetime import timedelta
@@ -44,6 +43,7 @@ from hamgr.common import key_helper as keyhelper
 from hamgr.resmgr_client import ResmgrClient
 from shared.constants import LOGGER_PREFIX
 
+
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 AMQP_HOST_QUEUE_PREFIX = 'queue-receiving-for-host'
@@ -64,8 +64,7 @@ class NovaProvider(Provider):
         self._amqp_user = config.get("amqp", "username")
         self._amqp_password = config.get("amqp", "password")
         self._amqp_host = config.get("amqp", "host")
-        self._masakari_password = config.get("masakari", "password")
-
+        self._mdb_uri = config.get("masakari", "sqlconnectURI")
         self._db_uri = config.get("database", "sqlconnectURI")
         self._db_pwd = self._db_uri
         if self._db_uri:
@@ -524,7 +523,7 @@ class NovaProvider(Provider):
                 # if more hosts in nova aggregate, means they exist in nova aggregate but not in masakari
                 # if more hosts in masakari, means some of they are removed from nova aggregate
 
-                masakari_hosts=[]
+                masakari_hosts = []
 
                 # remove host found in masakari segment but not in nova aggregate
                 if masakari.is_failover_segment_exist(self._token, str(cluster_name)):
@@ -568,14 +567,8 @@ class NovaProvider(Provider):
                 nova_delta_ids = set(nova_agg_hosts) - set(common_ids)
                 if len(nova_delta_ids) > 0:
                     #Check if the host is already a part of Masakari Database before adding it to avoid any conflicts
-                    cnx = MySQLdb.connect(
-                    host="localhost",
-                    user="masakari" ,
-                    database="masakari",
-                    password=self._masakari_password)
-                    c = cnx.cursor()
-                    c.execute("""SELECT failover_segment_id FROM hosts where name= %s and deleted_at is NULL""",(nova_delta_ids,))
-                    result = c.fetchone()
+                    db_api.connect_masakari(masakari,self._mdb_uri)
+                    result = db_api.get_hosts_by_name(nova_delta_ids)
 
                     LOG.info('found new hosts added into nova aggregate %s : %s', nova_agg_id, str(nova_delta_ids))
                     # need to add those additional hosts into masakari
@@ -608,7 +601,6 @@ class NovaProvider(Provider):
                             # trigger a consul role rebalance request
                             time.sleep(30)
                             self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_ADDED)
-
                 # when cluster is enabled, make sure pf9-ha-slave role is on all active hosts
                 # ----------------------------------------------------------
                 # then reconcile masakari hosts and pf9-ha-slave on those

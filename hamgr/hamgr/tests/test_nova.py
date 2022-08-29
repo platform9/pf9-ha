@@ -86,6 +86,10 @@ class NovaProviderTest(unittest.TestCase):
         config.set('amqp', 'username', 'ha')
         config.set('amqp', 'password', 'ha_password')
         config.set('amqp', 'host', 'localhost')
+        
+        config.add_section('masakari')
+        config.set('masakari', 'notification_waiting_minutes', '60')
+        config.set('masakari', 'sqlconnectURI', 'sqlite://')
 
         config.set('DEFAULT', 'event_report_threshold_seconds', '30')
         config.set('DEFAULT', 'resmgr_endpoint','http://localhost:8080/resmgr')
