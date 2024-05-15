@@ -1,0 +1,8 @@
+[template]
+src = 'hamgr-api-paste.ini'
+dest = '/etc/pf9/hamgr/hamgr-api-paste.ini'
+owner = 'root'
+mode = '0644'
+keys = [
+    '/services/hamgr/keystone/password',
+]

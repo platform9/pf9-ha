@@ -1,0 +1,214 @@
+#!/usr/bin/env python
+
+# Copyright (c) 2017 Platform9 systems. All rights reserved
+
+# pylint: disable=too-many-locals
+
+import logging
+import random
+import requests
+import string
+import sys
+import os
+import errno
+from argparse import ArgumentParser
+
+from hamgr import dbmigrate
+from firkinize.configstore.consul import Consul
+from firkinize.database.mysqldb import MySqlDatabase
+
+LOG_DIR = '/var/log/pf9/hamgr/'
+
+logging.basicConfig(level=logging.DEBUG)
+LOG = logging.getLogger(__name__)
+
+
+def mkdir_p(dir_path):
+    """Create directories recursively."""
+    try:
+        os.makedirs(dir_path)
+    except OSError as ex:
+        if ex.errno != errno.EEXIST:
+            raise
+
+
+class HamgrConfig:
+    def __init__(self, consul, customer_uuid, region_uuid):
+        self._consul = consul
+        self._customer_uuid = customer_uuid
+        self._region_uuid = region_uuid
+        self._customer_prefix = f'customers/{self._customer_uuid}/'
+        self._region_prefix = f'{self._customer_prefix}regions/{self._region_uuid}/'
+        self._hamgr_prefix = f'{self._region_prefix}services/hamgr/'
+
+    def _add_keystone_endpoint(self):
+        key = f'customers/{self._customer_uuid}/regions/{self._region_uuid}/fqdn'
+        fqdn = self._consul.kv_get(key)
+        url = f'https://{fqdn}/hamgr'
+        prefix = f'customers/{self._customer_uuid}/keystone/endpoints/{self._region_uuid}/hamgr/'
+        updates = {
+            f'{prefix}type': 'hamgr',
+            f'{prefix}internal_url': url,
+            f'{prefix}admin_url': url,
+            f'{prefix}public_url': url
+        }
+        self._consul.kv_put_txn(updates)
+
+    def _copy_keystone_uris(self):
+        keystone_url = 'http://localhost:8080/keystone'
+        updates = {os.path.join(self._hamgr_prefix, 'keystone_uris/keystone'): keystone_url}
+        self._consul.kv_put_txn(updates)
+
+    def configure_keystone(self):
+        self._add_keystone_endpoint()
+        self._add_keystone_user(f'{self._customer_prefix}keystone/users/hamgr/', self._hamgr_prefix, 'hamgr')
+        self._add_keystone_user(f'{self._customer_prefix}keystone/users/pf9-ha-slave/',
+                                f'{self._region_prefix}services/pf9-ha-slave/', 'pf9-ha-slave')
+
+        self._copy_keystone_uris()
+
+    def _add_keystone_user(self, global_keystone_prefix, service_prefix, user):
+        updates = {}
+        password = self._get_password(service_prefix, 'keystone/password')
+        for prefix in [global_keystone_prefix, f'{service_prefix}keystone_user/']:
+            updates.update({
+                f'{prefix}email': user,
+                f'{prefix}password': password,
+                f'{prefix}project': 'services',
+                f'{prefix}role': 'admin'
+            })
+        self._consul.kv_put_txn(updates)
+        LOG.info(f'Added {user} user')
+
+    def add_rabbit_users(self):
+        hamgr_amqp_prefix = f"{self._hamgr_prefix}amqp/"
+        rabbit_broker_hamgr_prefix = f"{self._region_prefix}rabbit_broker/users/hamgr/"
+        password = self._get_password(hamgr_amqp_prefix, 'password')
+        rabbit_config = {
+            'username': 'hamgr',
+            'password': password,
+            'config': '^(pf9-changes)$',
+            'write': '^(pf9-changes)$',
+            'read': '^$',
+            'tags': 'administrator'
+        }
+        self._consul.kv_put_txn(
+            {f'{prefix}{key}': value for prefix in [hamgr_amqp_prefix, rabbit_broker_hamgr_prefix] for key, value in
+             rabbit_config.items()})
+
+    def _create_db_and_grant_privileges(self, root_dbinfo, hamgr_dbinfo, consul_key_prefix):
+        """
+        Create the database using the location and admin credentials associated
+        with the dbserver in hamgr's dbserver_key. Also, add a user and grant
+        permissions.
+        """
+        shortname = self._consul.kv_get(f'customers/{self._customer_uuid}/shortname')
+        LOG.info('Creating database for customer %s', shortname)
+        db = MySqlDatabase(host=root_dbinfo['host'], port=int(root_dbinfo['port']), admin_user=root_dbinfo['user'],
+                           admin_pass=root_dbinfo['password'])
+        db_created = db.check_create_db(root_dbinfo['name'])
+        grants_updated = db.check_add_grants(db_name=hamgr_dbinfo['name'], db_user=hamgr_dbinfo['user'],
+                                             db_pass=hamgr_dbinfo['password'])
+
+        if db_created or grants_updated:
+            LOG.info('Database was updated, updating config store with '
+                     'values: %s',
+                     {k: v for (k, v) in hamgr_dbinfo.items()
+                      if k != 'password'})
+            with self._consul.prefix(consul_key_prefix):
+                self._consul.kv_put_txn(hamgr_dbinfo)
+
+    def _create_tables(self, dbinfo):
+        LOG.info('Creating hamgr db tables')
+        db_url = f"mysql://{dbinfo['user']}:{dbinfo['password']}@{dbinfo['host']}:{dbinfo['port']}/{dbinfo['name']}"
+        # TODO: repo path need to be changed when python version is changed
+        dbmigrate.version_upgrade(
+            sql_connect_uri=db_url,
+            repo="/usr/local/lib/python3.9/site-packages/hamgr/db/"
+        )
+
+    def configure_db(self):
+        """
+        Configure the database by fetching the necessary parameters from Consul.
+        """
+        try:
+            db_server_key = self._consul.kv_get(f"{self._region_prefix}dbserver")
+            db_server_prefix = f"{self._customer_prefix}dbservers/{db_server_key}/"
+            dbkey = f'{self._hamgr_prefix}db/'
+
+            db_server = self._consul.kv_get_prefix(db_server_prefix)
+            dbspec = self._consul.kv_get_prefix(dbkey)
+
+            host = db_server[f'{db_server_prefix}host']
+            port = db_server[f'{db_server_prefix}port']
+            hamgr_db = dbspec.get(f'{dbkey}name', 'hamgr')
+
+            root_dbinfo = {
+                'user': db_server[f'{db_server_prefix}admin_user'],
+                'password': db_server[f'{db_server_prefix}admin_pass'],
+                'name': hamgr_db, 'host': host, 'port': port
+            }
+            hamgr_dbinfo = {
+                'user': dbspec.get(f'{dbkey}user', 'hamgr'),
+                'password': dbspec.get(f'{dbkey}password', _random_string()),
+                'name': hamgr_db, 'host': host, 'port': port
+            }
+
+        except KeyError as e:
+            LOG.error(f'The dbserver_key specified for hamgr has missing components: {e}')
+            return
+        except requests.HTTPError as e:
+            LOG.error(f'HTTP error occurred: {e}')
+            return
+        except Exception as e:
+            LOG.error(f'Unexpected error: {e}')
+            return
+        else:
+            self._create_db_and_grant_privileges(root_dbinfo, hamgr_dbinfo, dbkey)
+            self._create_tables(hamgr_dbinfo)
+
+    def _get_password(self, prefix, key):
+        with self._consul.prefix(prefix):
+            try:
+                return self._consul.kv_get(key)
+            except requests.HTTPError as e:
+                if e.response.status_code == 404:
+                    LOG.info(f'Generating new password for {prefix}{key}')
+                    return _random_string()
+                raise
+
+
+def _random_string():
+    """
+    16 random numbers and letters, always starts with a letter.
+    """
+    secret_len = 16
+    secret_chars = string.ascii_letters + string.digits
+    return ''.join(
+        [random.SystemRandom().choice(string.ascii_letters)] + [random.SystemRandom().choice(secret_chars) for _ in
+                                                                range(secret_len - 1)])
+
+
+def parse_args():
+    parser = ArgumentParser(description='Initialize keystone for a region')
+    parser.add_argument('--config-url', default='http://localhost:8500',
+                        help='Address of the config node, default http://localhost:8500')
+    parser.add_argument('--config-token', help='Config access token')
+    parser.add_argument('--customer-id', required=True, help='The keystone customer id')
+    parser.add_argument('--region-id', required=True, help='The region id for which to bootstrap the keystone endpoint')
+    return parser.parse_args()
+
+
+def main():
+    mkdir_p(LOG_DIR)
+    args = parse_args()
+    consul = Consul(args.config_url, args.config_token)
+    config = HamgrConfig(consul, args.customer_id, args.region_id)
+
+    config.configure_keystone()
+    config.add_rabbit_users()
+    config.configure_db()
+
+
+if __name__ == '__main__':
+    sys.exit(main())
