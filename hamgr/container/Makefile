@@ -15,9 +15,9 @@ ARTIFACTS=$(BLDROOT)/artifacts
 SHARED=$(SRCROOT)/shared
 
 HAMGR_DIST = $(STAGE)/hamgr-sdist.tgz
-$(HAMGR_DIST): SETUP_ROOT = $(BLDROOT)
+$(HAMGR_DIST): SETUP_ROOT = $(SRCROOT)/hamgr
 
-DISTS = $(HAMGR_DIST) 
+DISTS = $(HAMGR_DIST)
 
 dist: $(DISTS)
 
@@ -37,10 +37,11 @@ $(DISTS):
 	cp -vf dist/* $@
 
 stage-with-py-build-container: dist
-	cp -rv $(SRCROOT)/hamgr/container/* $(STAGE)/ 
+	cp -rv $(SRCROOT)/hamgr/container/* $(STAGE)/
+	cp -v $(SRCROOT)/hamgr/upper-constraints.txt $(STAGE)/upper-constraints.txt
 	pip3 install pyyaml
-	cp -rv $(SHARED) $(STAGE)/ 
-	python3 $(Y2J) $(APP_METADATA_YAML) > $(APP_METADATA_JSON) 
+	cp -rv $(SHARED) $(STAGE)/
+	python3 $(Y2J) $(APP_METADATA_YAML) > $(APP_METADATA_JSON)
 
 stage:
 	$(SRCROOT)/hamgr/container/run-staging-in-container.sh

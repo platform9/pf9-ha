@@ -1,0 +1,250 @@
+#!/usr/bin/env python
+
+# Copyright (c) 2017 Platform9 systems. All rights reserved
+
+# pylint: disable=too-many-locals
+
+import logging
+import random
+import requests
+import string
+import sys
+import os
+import errno
+
+from argparse import ArgumentParser
+from firkinize.configstore.consul import Consul
+from firkinize.database.mysqldb import MySqlDatabase
+from hamgr.db import manage
+
+logging.basicConfig(level=logging.DEBUG)
+LOG = logging.getLogger(__name__)
+
+RABBIT_PERMISSIONS = {
+    'hamgr': {
+        'config': '^(pf9-changes)$',
+        'write': '^(pf9-changes)$',
+        'read': '^$',
+        'tags': 'administrator'
+    }
+}
+
+
+def mkdir_p(dir_path):
+    try:
+        os.makedirs(dir_path)
+    except OSError as ex:
+        if ex.errno != errno.EEXIST:
+            raise
+
+
+class HamgrConfig(object):
+
+    def __init__(self, consul, customer_uuid, region_uuid):
+        self._consul = consul
+        self._customer_uuid = customer_uuid
+        self._region_uuid = region_uuid
+
+        self._customer_prefix = f'customers/{self._customer_uuid}/'
+        self._region_prefix = f'{self._customer_prefix}regions/{self._region_uuid}/'
+        self._hamgr_prefix = f'{self._region_prefix}services/hamgr/'
+
+    def add_keystone_endpoint(self):
+        key = 'customers/%s/regions/%s/fqdn' % (self._customer_uuid,
+                                                self._region_uuid)
+        fqdn = self._consul.kv_get(key)
+        url = 'https://%s/hamgr' % fqdn
+        prefix = 'customers/%s/keystone/endpoints/%s/hamgr/' % (
+            self._customer_uuid, self._region_uuid)
+        updates = {
+            prefix + 'type': 'hamgr',
+            prefix + 'internal_url': url,
+            prefix + 'admin_url': url,
+            prefix + 'public_url': url
+        }
+        self._consul.kv_put_txn(updates)
+
+    def copy_keystone_uris(self):
+        hamgr_prefix = 'regions/%s/services/hamgr/keystone_uris/' % \
+                       self._region_uuid
+        updates = {}
+        with self._consul.prefix('customers/%s' % self._customer_uuid):
+            keystone_url = 'http://localhost:8080/keystone'
+            updates[os.path.join(hamgr_prefix, 'keystone')] = keystone_url
+            self._consul.kv_put_txn(updates)
+
+    def add_keystone_user(self, global_keystone_prefix, service_prefix, user):
+        """
+        Add configuration to both the hamgr and keystone spaces. Will not
+        overwrite existing user parameters. All in a single consul transaction.
+        """
+        # FIXME: The user appears twice because of confd's inability to look
+        # outside its prefix. consul-template will help with this. The keys in
+        # the keystone space should also contain the region name
+        # to distinguish the user from the one associated with hamgr in other
+        # regions, but it doesn't now.
+        updates = {}
+        with self._consul.prefix(service_prefix):
+            try:
+                password = self._consul.kv_get(f'keystone/password')
+                LOG.info('Using existing keystone password...')
+            except requests.HTTPError as e:
+                if e.response.status_code == 404:
+                    LOG.info('Generating new keystone password...')
+                    password = random_string()
+                else:
+                    raise
+
+        updates[f'{service_prefix}keystone/password'] = password
+        for prefix in [global_keystone_prefix, f'{service_prefix}keystone_user/']:
+            updates[prefix + 'email'] = user
+            updates[prefix + 'password'] = password
+            updates[prefix + 'project'] = 'services'
+            updates[prefix + 'role'] = 'admin'
+        self._consul.kv_put_txn(updates)
+        LOG.info(f'Added {user} user')
+
+    def add_rabbit_users(self):
+        """
+        Add configuration to both the hamgr and rabbit spaces
+        """
+        hamgr_amqp_prefix = f"{self._hamgr_prefix}amqp/"
+        rabbit_broker_hamgr_prefix = f"{self._region_prefix}rabbit_broker/users/hamgr/"
+
+        with self._consul.prefix(hamgr_amqp_prefix):
+            try:
+                password = self._consul.kv_get(f'password')
+                LOG.info(f'Using existing rabbit password for {self._hamgr_prefix}password')
+            except requests.HTTPError as e:
+                if e.response.status_code == 404:
+                    LOG.info(f'Generating new rabbit password for {self._hamgr_prefix}password')
+                    password = random_string()
+                else:
+                    raise
+        for prefix in [hamgr_amqp_prefix, rabbit_broker_hamgr_prefix]:
+            rabbit_config = {
+                f"{prefix}username": "hamgr",
+                f"{prefix}password": password,
+                f"{prefix}config": "^(pf9-changes)$",
+                f"{prefix}write": "^(pf9-changes)$",
+                f"{prefix}read": "^$",
+                f"{prefix}tags": "administrator"
+            }
+            self._consul.kv_put_txn(rabbit_config)
+
+    def add_db(self):
+        """
+        Create the database using the location and admin credentials associated
+        with the dbserver in hamgr's dbserver_key. Also, add a user and grant
+        permissions.
+        """
+        shortname = self._consul.kv_get('customers/%s/shortname' % \
+                                        self._customer_uuid)
+        LOG.info('Creating database for customer %s', shortname)
+        dbserver_key = self._consul.kv_get(f"{self._region_prefix}dbserver")
+        dbserver_prefix = f"{self._customer_prefix}dbservers/{dbserver_key}/"
+        dbserver = self._consul.kv_get_prefix(dbserver_prefix)
+        try:
+            host = dbserver[f'{dbserver_prefix}host']
+            port = dbserver[f'{dbserver_prefix}port']
+            admin_user = dbserver[f'{dbserver_prefix}admin_user']
+            admin_pass = dbserver[f'{dbserver_prefix}admin_pass']
+        except KeyError as e:
+            LOG.info('The dbserver_key specified for hamgr has missing '
+                     'components, key = %s: %s', dbserver_key, e)
+        dbkey = '%s/db/' % self._hamgr_prefix
+        try:
+            dbspec = self._consul.kv_get_prefix(dbkey)
+            LOG.info('Found exising database spec in %s: %s', dbkey,
+                     {k: v for (k, v) in dbspec.items() if k != 'password'})
+        except requests.HTTPError as e:
+            if e.response.status_code == 404:
+                LOG.info('No hamgr db spec found in %s, generating new...',
+                         dbkey)
+                dbspec = {}
+            else:
+                raise
+
+        # FIXME: region name
+        user = dbspec.get('%suser' % dbkey, 'hamgr')
+
+        # FIXME: The schema migration has ALTER statements that hardcode
+        # 'hamgr' as the database name.
+        name = dbspec.get('%sname' % dbkey, 'hamgr')
+        password = dbspec.get('%spassword' % dbkey, random_string())
+
+        db = MySqlDatabase(host, int(port), admin_user, admin_pass)
+        db_created = db.check_create_db(name)
+        grants_updated = db.check_add_grants(name, user, password)
+        final_dbinfo = {
+            'user': user,
+            'password': password,
+            'name': name,
+            'host': host,
+            'port': port
+        }
+        if db_created or grants_updated:
+            LOG.info('Database was updated, updating config store with '
+                     'values: %s',
+                     {k: v for (k, v) in final_dbinfo.items()
+                      if k != 'password'})
+            with self._consul.prefix(dbkey):
+                self._consul.kv_put_txn(final_dbinfo)
+        return final_dbinfo
+
+    @property
+    def customer_prefix(self):
+        return self._customer_prefix
+
+    @property
+    def hamgr_prefix(self):
+        return self._hamgr_prefix
+
+    @property
+    def region_prefix(self):
+        return self._region_prefix
+
+
+def random_string():
+    """
+    16 random numbers and letters, always starts with a letter.
+    """
+    secret_len = 16
+    secret_chars = string.ascii_letters + string.digits
+    return ''.join([random.SystemRandom().choice(string.ascii_letters)] +
+                   [random.SystemRandom().choice(secret_chars)
+                    for _ in range(secret_len - 1)])
+
+
+def parse_args():
+    parser = ArgumentParser(description='Initialize keystone for a region')
+    parser.add_argument('--config-url', default='http://localhost:8500',
+                        help='Address of the config node, default http://localhost:8500')
+    parser.add_argument('--config-token', help='Config access token')
+    parser.add_argument('--customer-id',
+                        help='The keystone customer id', required=True)
+    parser.add_argument('--region-id',
+                        help='The region id for which to bootstrap the keystone endpoint',
+                        required=True)
+    return parser.parse_args()
+
+
+def main():
+    mkdir_p('/var/log/pf9/hamgr/')
+    args = parse_args()
+    consul = Consul(args.config_url, args.config_token)
+    config = HamgrConfig(consul, args.customer_id, args.region_id)
+    config.add_keystone_endpoint()
+    config.add_keystone_user(global_keystone_prefix=f'{config.customer_prefix}keystone/users/hamgr/',
+                             service_prefix=config.hamgr_prefix,
+                             user="hamgr")
+    config.add_keystone_user(global_keystone_prefix=f'{config.customer_prefix}keystone/users/pf9-ha-slave/',
+                             service_prefix=f'{config.region_prefix}services/pf9-ha-slave/',
+                             user="pf9-ha-slave")
+    config.copy_keystone_uris()
+    config.add_rabbit_users()
+    dbinfo = config.add_db()
+
+
+if __name__ == '__main__':
+    sys.exit(main())
