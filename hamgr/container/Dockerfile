@@ -25,6 +25,8 @@ COPY bin /opt/pf9/hamgr/bin/
 COPY shared/ /usr/local/lib/python3.9/site-packages/shared
 COPY migrate.cfg /usr/local/lib/python3.9/site-packages/hamgr/db/migrate.cfg
 COPY hamgr-sdist.tgz \
+     requirements.txt \
+     upper-constraints.txt \
      /root/
 
 COPY init-region .
@@ -33,7 +35,7 @@ RUN chmod 755 init-region
 RUN pip install setuptools==57.1.0 \
                 pbr==3.1.1
 
-RUN pip install hamgr-sdist.tgz -c upper-constraints.txt
+RUN pip install hamgr-sdist.tgz -r requirements.txt -c upper-constraints.txt
 
 RUN mkdir -p /var/log/pf9/hamgr/
 RUN mkdir -p /etc/pf9/hamgr/
