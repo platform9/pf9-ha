@@ -35,12 +35,13 @@ from six.moves.configparser import ConfigParser
 
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
+
 def _get_arg_parser():
     parser = argparse.ArgumentParser(
         description="High Availability Manager for VirtualMachines")
     parser.add_argument('--config-file', dest='config_file',
                         default='/etc/pf9/hamgr/hamgr.conf')
-    parser.add_argument('--paste-ini', dest='paste_file')
+    parser.add_argument('--paste-ini', dest='paste_file', default='/etc/pf9/hamgr/hamgr-api-paste.ini')
     return parser.parse_args()
 
 
@@ -79,6 +80,7 @@ def start_server(conf, paste_ini):
         # the wsgi.server is blocking call, if comes here mean it failed
         # so we can clean up here
         LOG.exception('unhandled exception from server')
+
 
 if __name__ == '__main__':
     parser = _get_arg_parser()

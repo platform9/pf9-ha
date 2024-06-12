@@ -43,6 +43,9 @@ stage-with-py-build-container: dist
 	cp -rv $(SHARED) $(STAGE)/
 	python3 $(Y2J) $(APP_METADATA_YAML) > $(APP_METADATA_JSON)
 
+db_migrate_setup: stage-with-py-build-container
+	cp -v $(SRCROOT)/hamgr/bin/hamgr-manage.py $(STAGE)/dbmigrate.py
+
 stage:
 	$(SRCROOT)/hamgr/container/run-staging-in-container.sh
 

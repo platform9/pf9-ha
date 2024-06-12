@@ -21,9 +21,9 @@ RUN apk add mariadb \
 WORKDIR /root
 
 COPY etc/ /etc/
-COPY bin /opt/pf9/hamgr/bin/
 COPY shared/ /usr/local/lib/python3.9/site-packages/shared
 COPY migrate.cfg /usr/local/lib/python3.9/site-packages/hamgr/db/migrate.cfg
+COPY dbmigrate.py /usr/local/lib/python3.9/site-packages/hamgr/dbmigrate.py
 COPY hamgr-sdist.tgz \
      requirements.txt \
      upper-constraints.txt \
