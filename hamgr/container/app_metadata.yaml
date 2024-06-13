@@ -1,0 +1,29 @@
+---
+- name: hamgr
+  endpoints:
+  - name: hamgr
+    port: 9083
+    httpPath: "/hamgr"
+    rewritePath: "/"
+  - name: protected
+    port: 9083
+    httpPath: "/protected"
+    rewritePath: "/static"
+  - name: hamgr-internal
+    port: 9083
+  egresses:
+  - endpoint: broker
+    localPort: 5672
+  - endpoint: rabbitmq-mgmt
+    localPort: 15672
+  - endpoint: keystone-internal
+    localPort: 8080
+  - endpoint: sidekick-cmd
+    localPort: 3011
+  - endpoint: resmgr
+    localPort: 8083
+  memoryRequest: "190Mi"
+  memoryLimit: "190Mi"
+  logfiles:
+  - path: "/var/log/pf9/hamgr.log"
+  - path: "/var/log/pf9/hamgr/pf9-hamgr-out.log"

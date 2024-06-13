@@ -1,0 +1,13 @@
+[template]
+src = 'hamgr.conf'
+dest = '/etc/pf9/hamgr/hamgr.conf'
+owner = 'root'
+mode = '0644'
+keys = [
+    '/fqdn',
+    '/region_id',
+    '/services/hamgr/db/password',
+    '/services/hamgr/amqp/password',
+    '/services/hamgr/keystone/password',
+    '/services/masakari/db/password',
+]

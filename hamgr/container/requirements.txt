@@ -1,0 +1,18 @@
+pbr
+oslo.config
+SQLAlchemy==1.4.46
+python-novaclient
+python-keystoneclient
+keystoneauth1
+keystonemiddleware
+jinja2
+# pike release required version 0.12.2
+flask
+Paste
+PasteDeploy
+eventlet
+sqlalchemy-migrate
+mysqlclient==1.4.6
+enum34
+pika
+cryptography

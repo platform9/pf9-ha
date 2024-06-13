@@ -16,12 +16,17 @@ import json
 import logging
 
 import requests
+from six.moves.configparser import ConfigParser
 
 import shared.exceptions.ha_exceptions as exceptions
 from shared.constants import LOGGER_PREFIX
 
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
-_URL = 'http://localhost:8080/masakari/v1'
+
+conf = ConfigParser()
+conf.read(['/etc/pf9/hamgr/hamgr.conf'])
+
+_URL = conf.get("masakari", "masakari_endpoint")
 
 
 def get_failover_segment(token, name):
@@ -49,6 +54,7 @@ def get_all_failover_segments(token):
     resp.raise_for_status()
     return resp.json()['segments']
 
+
 def is_failover_segment_exist(token, segment_name):
     try:
         get_failover_segment(token, segment_name)
@@ -56,8 +62,9 @@ def is_failover_segment_exist(token, segment_name):
         return False
     return True
 
+
 def get_nodes_in_segment(token, name):
-    segment=None
+    segment = None
     try:
         segment = get_failover_segment(token, name)
     except exceptions.SegmentNotFound:
@@ -111,7 +118,7 @@ def delete_all_nodes_in_failover_segment(token, name):
         for node in nodes:
             if node.get('on_maintenance', None):
                 LOG.warning('host %s in segment %s is on maintenance',
-                         str(node['name']), str(name))
+                            str(node['name']), str(name))
             url = '/'.join([_URL, 'segments', node['failover_segment_id'],
                             'hosts', node['uuid']])
             LOG.info('Removing host from masakari segment %s: %s', str(name), str(url))
@@ -119,7 +126,7 @@ def delete_all_nodes_in_failover_segment(token, name):
             if resp.status_code not in [requests.codes.no_content,
                                         requests.codes.not_found]:
                 LOG.warning('unexpected status %s while deleting host %s',
-                          str(resp), str(node))
+                            str(resp), str(node))
                 resp.raise_for_status()
     except Exception:
         LOG.exception('error when deleting host from segment %s', name)
@@ -172,13 +179,14 @@ def create_failover_segment(token, name, hosts):
         if existing_segment['service_type'] != data['service_type'] or \
                 existing_segment['recovery_method'] != data['recovery_method'] or \
                 existing_segment['description'] != data['description']:
-            resp = requests.put(url + "/" + str(existing_segment['id']), headers=headers, data=json.dumps(dict(segment=data)))
+            resp = requests.put(url + "/" + str(existing_segment['id']), headers=headers,
+                                data=json.dumps(dict(segment=data)))
             resp.raise_for_status()
-            LOG.debug('Updated existing masakari segment %s with properties : %s',  name, str(data))
+            LOG.debug('Updated existing masakari segment %s with properties : %s', name, str(data))
 
         # now update hosts
         existing_hosts = get_nodes_in_segment(token, name)
-        existing_host_names = [x['name'] for x in existing_hosts ]
+        existing_host_names = [x['name'] for x in existing_hosts]
         common = set(existing_host_names).intersection(set(hosts))
         hosts_deleted = set(existing_host_names) - set(common)
         hosts_added = set(hosts) - set(common)
@@ -212,7 +220,7 @@ def create_notification(token, ntype, hostname, time, payload):
     elif resp.status_code == requests.codes.conflict and \
             resp.content.find(b'ignored as the host is already under maintenance'):
         LOG.warning('Masakari ignored the notification since host %s is already '
-                 'under maintenance', hostname)
+                    'under maintenance', hostname)
     else:
         LOG.error('Masakari rejected notification with error %s: %s',
                   resp.status_code, resp)
@@ -252,6 +260,7 @@ def get_notification_status(token, uuid):
     resp.raise_for_status()
     obj = resp.json()
     return obj['notification']['status']
+
 
 def is_host_on_maintenance(token, host_id, segment_name):
     # confirm the given segment_id eixist
@@ -307,9 +316,10 @@ def update_host_maintenance(token, host_id, segment_name, on_maintenance):
     LOG.debug('host %s in segment %s is updated with maintenance status : '
               '%s', host_id, segment_name, str(on_maintenance))
 
+
 def add_hosts_to_failover_segment(token, segment_name, host_ids):
     segment = None
-    existing_hosts=[]
+    existing_hosts = []
     try:
         segment = get_failover_segment(token, str(segment_name))
         existing_hosts = get_nodes_in_segment(token, str(segment_name))

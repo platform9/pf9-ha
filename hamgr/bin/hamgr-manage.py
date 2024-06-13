@@ -31,13 +31,17 @@ def _get_arg_parser():
     return parser.parse_args()
 
 
-def _version_control(conf):
+def _version_control(sql_connect_uri: str, repo: str):
     try:
-        version_control(conf.get("database", "sqlconnectURI"),
-                        conf.get("database", "repo"))
+        version_control(sql_connect_uri, repo)
     except DatabaseAlreadyControlledError:
         # Ignore the already controlled error
         pass
+
+
+def version_upgrade(sql_connect_uri: str, repo: str):
+    _version_control(sql_connect_uri, repo)
+    upgrade(sql_connect_uri, repo)
 
 
 if __name__ == '__main__':
@@ -45,9 +49,9 @@ if __name__ == '__main__':
     conf = ConfigParser()
     conf.readfp(open(parser.config_file))
     if parser.command == 'db_sync':
-        _version_control(conf)
-        upgrade(conf.get("database", "sqlconnectURI"),
-                conf.get("database", "repo"))
+        database_sql_connect_uri = conf.get("database", "sqlconnectURI")
+        database_repo = conf.get("database", "repo")
+        version_upgrade(database_sql_connect_uri, database_repo)
         exit(0)
     else:
         print('Unknown command')
