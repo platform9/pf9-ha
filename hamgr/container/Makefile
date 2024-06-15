@@ -26,7 +26,7 @@ APP_METADATA_YAML = $(SRCROOT)/hamgr/container/app_metadata.yaml
 APP_METADATA_JSON = $(STAGE)/app_metadata.json
 
 BUILD_ID := $(BUILD_NUMBER)
-CONTAINER_IMG ?= quay.io/platform9/pf9-hamgr
+CONTAINER_IMG ?= quay.io/platform9/pf9-ha
 IMAGE_TAG ?= $(or $(PF9_VERSION), "latest")-$(BUILD_ID)
 BRANCH_NAME ?= $(or $(TEAMCITY_BUILD_BRANCH), $(TEAMCITY_BUILD_BRANCH), $(shell git symbolic-ref --short HEAD))
 
