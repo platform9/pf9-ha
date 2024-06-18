@@ -14,5 +14,5 @@ eventlet
 sqlalchemy-migrate
 mysqlclient==1.4.6
 enum34
-pika
+pika==0.13.1
 cryptography
