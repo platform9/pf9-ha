@@ -28,6 +28,7 @@ LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 CONF = cfg.CONF
 
 DU_URL = "http://localhost:8158"
+HAMGR_URL = "http://localhost:9083"
 
 keystone_auth_grp = cfg.OptGroup(
     'keystone_authtoken',
@@ -106,7 +107,7 @@ class Reporter(object):
 class HaManagerReporter(Reporter):
 
     def __init__(self):
-        self.hamgr_url = '/'.join([DU_URL, 'hamgr', 'v1', 'ha'])
+        self.hamgr_url = '/'.join([HAMGR_URL, 'hamgr', 'v1', 'ha'])
         super(HaManagerReporter, self).__init__()
 
     def report_status(self, data):
