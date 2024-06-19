@@ -11,7 +11,7 @@ RUN apk add gcc
 RUN apk add g++
 RUN apk add dpkg
 RUN apk add musl-dev
-
+RUN apk add openssl
 RUN apk add mariadb \
      mariadb-client \
      --no-cache mariadb-dev \
