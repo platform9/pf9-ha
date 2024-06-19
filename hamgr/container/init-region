@@ -87,10 +87,9 @@ class HamgrConfig:
         rabbit_config = {
             'username': 'hamgr',
             'password': password,
-            'config': '^(pf9-changes)$',
-            'write': '^(pf9-changes)$',
-            'read': '^$',
-            'tags': 'administrator'
+            'config': '.*',
+            'write': '.*',
+            'read': '.*'
         }
         self._consul.kv_put_txn(
             {f'{prefix}{key}': value for prefix in [hamgr_amqp_prefix, rabbit_broker_hamgr_prefix] for key, value in
