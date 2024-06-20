@@ -107,7 +107,7 @@ class Reporter(object):
 class HaManagerReporter(Reporter):
 
     def __init__(self):
-        self.hamgr_url = '/'.join([HAMGR_URL, 'hamgr', 'v1', 'ha'])
+        self.hamgr_url = '/'.join([HAMGR_URL, 'v1', 'ha'])
         super(HaManagerReporter, self).__init__()
 
     def report_status(self, data):
