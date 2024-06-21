@@ -56,6 +56,7 @@ class NovaProvider(Provider):
         self._auth_url = config.get('keystone_middleware', 'auth_url')
         self._tenant = config.get('keystone_middleware', 'project_name')
         self._region = config.get('nova', 'region')
+        self._bbmaster_host = config.get('DEFAULT', 'bbmaster_host')
         self._resmgr_endpoint = config.get('DEFAULT', 'resmgr_endpoint')
 
         self._resmgr_client = ResmgrClient(self._resmgr_endpoint)
@@ -1716,7 +1717,7 @@ class NovaProvider(Provider):
                          str(start_time), str(datetime.now()))
                 break
 
-            app_info = self._resmgr_client.fetch_app_details(nodes, self._token['id'])
+            app_info = self._resmgr_client.fetch_app_details(nodes, self._token['id'], self._bbmaster_host)
 
             all_ok = True
             for node in nodes:
