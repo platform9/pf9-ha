@@ -64,6 +64,7 @@ class NovaProvider(Provider):
         self._amqp_user = config.get("amqp", "username")
         self._amqp_password = config.get("amqp", "password")
         self._amqp_host = config.get("amqp", "host")
+        self._amqp_mgmt_host = config.get("amqp", "mgmt_host")
         self._mdb_uri = config.get("masakari", "sqlconnectURI")
         self._db_uri = config.get("database", "sqlconnectURI")
         self._db_pwd = self._db_uri
@@ -432,7 +433,7 @@ class NovaProvider(Provider):
                     "pf9-ha-slave" not in host["roles"]):
                 req_url = 'http://{0}:{1}@{2}:{3}/api/queues/%2f/{4}-{5}' \
                     .format(self._amqp_user, self._amqp_password,
-                            self._amqp_host, AMQP_HTTP_PORT,
+                            self._amqp_mgmt_host, AMQP_HTTP_PORT,
                             AMQP_HOST_QUEUE_PREFIX, host["id"])
                 resp = requests.get(req_url)
                 if resp.status_code == requests.codes.ok:
@@ -1762,7 +1763,7 @@ class NovaProvider(Provider):
 
             # Explicitly delete rabbitmq queue for the host being deauthed
             req_url = 'http://{0}:{1}@{2}:{3}/api/queues/%2f/{4}-{5}' \
-                      .format(self._amqp_user, self._amqp_password, self._amqp_host,
+                      .format(self._amqp_user, self._amqp_password, self._amqp_mgmt_host,
                               AMQP_HTTP_PORT, AMQP_HOST_QUEUE_PREFIX, node)
             resp = requests.delete(req_url)
             if resp.status_code not in (requests.codes.no_content, requests.codes.not_found):
