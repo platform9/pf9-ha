@@ -49,6 +49,14 @@ PYTHON_EGG_CACHE=/tmp/python-eggs
 RETVAL=0
 uid=`id | cut -d\( -f1 | cut -d= -f2`
 
+# Ulimit settings
+ULIMIT_NOFILE=65536
+
+apply_prlimit() {
+    pid=$(cat $PIDFILE)
+    sudo prlimit --pid $pid --nofile=$ULIMIT_NOFILE
+}
+
 start_process() {
 
     # Only root can start the service
@@ -68,6 +76,7 @@ start_process() {
     echo $pid > $PIDFILE
     if [ "$RETVAL" -eq "0" ]; then
         echo "Started:" "$svcname"
+	apply_prlimit
         touch $LOCKFILE
     else
         echo "Failed to start:" "$svcname"
