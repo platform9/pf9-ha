@@ -36,7 +36,7 @@ def _get_auth_token(auth_url, tenant, user, password, region_name):
                        )
     sess = session.Session(auth=auth)
     raw = sess.get_token()
-    keystone = v3client.Client(session=sess, region_name=region_name)
+    keystone = v3client.Client(session=sess, region_name=region_name, interface='internal')
     mgr = TokenManager(keystone)
     data = mgr.get_token_data(raw)
     token = data['token']
