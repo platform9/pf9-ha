@@ -7,6 +7,7 @@ keys = [
     '/fqdn',
     '/region_id',
     '/services/hamgr/db/password',
+    '/services/hamgr/db/host',
     '/services/hamgr/amqp/password',
     '/services/hamgr/keystone/password',
     '/services/masakari/db/password',

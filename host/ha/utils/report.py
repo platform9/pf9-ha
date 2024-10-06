@@ -71,7 +71,7 @@ class Reporter(object):
                                project_domain_id='default',
                                user_domain_id='default'
                                )
-            sess = session.Session(auth=auth)
+            sess = session.Session(auth=auth, verify=False)
             id = sess.get_token()
             keystone = v3client.Client(session=sess, interface='public')
             mgr = TokenManager(keystone)
