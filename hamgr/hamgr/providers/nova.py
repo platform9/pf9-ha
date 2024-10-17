@@ -1218,7 +1218,7 @@ class NovaProvider(Provider):
                                         user_domain_id="default",
                                         project_domain_id="default")
         sess = session.Session(auth=auth)
-        nova = client.Client(2, session=sess, region_name=self._region)
+        nova = client.Client(2, session=sess, region_name=self._region, interface='internal')
         return nova
 
     def _get_all(self, nova_client):
