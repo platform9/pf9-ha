@@ -57,8 +57,8 @@ def start_server(conf, paste_ini):
         provider = provider_factory.ha_provider()
         LOG.debug('add task process_consul_encryption_configuration')
         periodic_task.add_task(provider.process_consul_encryption_configuration, 60, run_now=True)
-        LOG.debug('add task process_host_aggregate_changes')
-        periodic_task.add_task(provider.process_host_aggregate_changes, 60, run_now=True)
+        LOG.debug('add task process_availability_zone_changes')
+        periodic_task.add_task(provider.process_availability_zone_changes, 60, run_now=True)
         # dedicated task to handle host events
         LOG.debug('add task process_host_events')
         periodic_task.add_task(provider.process_host_events, 60, run_now=True)
