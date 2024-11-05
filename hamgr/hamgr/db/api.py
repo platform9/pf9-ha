@@ -553,14 +553,14 @@ def update_processing_event_with_notification(event_uuid, notification_uuid,
         return None
 
 
-def get_latest_consul_status(aggregate_id=None):
+def get_latest_consul_status(availability_zone=None):
     with dbsession() as session:
         try:
             records = []
             query = session.query(ConsulStatusInfo)
-            if aggregate_id is not None:
-                # the passed in aggregate_id maps to clusterName in hamgr db
-                query = query.filter_by(clusterName=str(aggregate_id))
+            if availability_zone is not None:
+                # the passed in availability_zone maps to clusterName in hamgr db
+                query = query.filter_by(clusterName=availability_zone)
                 query = query.order_by(ConsulStatusInfo.lastUpdate.desc())
                 records.append(query.first())
             else:

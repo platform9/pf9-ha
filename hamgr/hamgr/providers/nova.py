@@ -42,7 +42,7 @@ from shared.messages.consul_request import ConsulRefreshRequest
 from hamgr.common import key_helper as keyhelper
 from hamgr.resmgr_client import ResmgrClient
 from shared.constants import LOGGER_PREFIX
-
+from six.moves.configparser import ConfigParser
 
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
@@ -69,6 +69,11 @@ class NovaProvider(Provider):
         self._mdb_uri = config.get("masakari", "sqlconnectURI")
         self._db_uri = config.get("database", "sqlconnectURI")
         self._db_pwd = self._db_uri
+        self._hamgr_config = '/etc/pf9/hamgr/hamgr.conf'
+        parser = ConfigParser()
+        with open(self._hamgr_config) as fp: 
+            parser.readfp(fp)
+        self._du_name = parser.get('DEFAULT', 'customer_shortname')
         if self._db_uri:
             idx = self._db_uri.find('@')
             if idx > 0:
@@ -128,8 +133,8 @@ class NovaProvider(Provider):
         LOG.debug('event report threshold seconds is %s',
                  str(self._event_report_threshold_seconds))
         self.hosts_down_per_cluster = defaultdict(dict)
-        self.aggregate_task_lock = threading.Lock()
-        self.aggregate_task_running = False
+        self.availability_zone_task_lock = threading.Lock()
+        self.availability_zone_task_running = False
         self.host_down_dict_lock = threading.Lock()
         # thread lock
         self.events_processing_lock = threading.Lock()
@@ -159,6 +164,29 @@ class NovaProvider(Provider):
             else False
         return enable
 
+    def _get_active_azs(self, token):
+        headers = {"X-AUTH-TOKEN": self._token['id']}
+        url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-availability-zone/detail'
+        response = requests.get(url, headers=headers)
+        azInfo = response.json()
+        nova_active_azs = []
+        for az in azInfo['availabilityZoneInfo']:
+            if az['zoneName'] == 'internal':
+                 continue
+            nova_active_azs.append(az['zoneName'])
+        return nova_active_azs, azInfo
+   
+    def _get_nova_hosts(self, az):
+        headers = {"X-AUTH-TOKEN": self._token['id']}
+        url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-services'
+        response = requests.get(url, headers=headers)
+        data = response.json()
+        nova_hosts = []
+        for svc in data['services']:
+            if svc['zone'] == az:
+                nova_hosts.append(svc['host'])
+        return nova_hosts
+ 
     # thread is dedicated to handle recorded host events
     def process_host_events(self):
         # wait until current task complete
@@ -229,17 +257,18 @@ class NovaProvider(Provider):
                     continue
                 LOG.debug('event %s: found ha cluster with id %s : %s', event_uuid,
                           event.cluster_id, str(cluster))
-                nova_aggregate = self._get_aggregate(nova_client, cluster.name)
-                # if no such host aggregate, no need to handle it
-                if not nova_aggregate:
-                    LOG.warning('no nova host aggregate found with name %s for event %s',
+                nova_active_azs, azInfo = self._get_active_azs(self._token['id'])
+                # if no such availability zone, no need to handle it
+                if not cluster.name in nova_active_azs:
+                    LOG.warning('no availability zone found with name %s for event %s',
                                 str(cluster.name), str(event_uuid))
                     continue
-                # if host in the event not exist in host aggregate, no need to
+                # if host in the event not exist in availability zone, no need to
                 # handle the event
-                if host_name not in nova_aggregate.hosts:
-                    LOG.warning('host %s in event %s does not exist in nova aggregate %s',
-                                host_name, str(event_uuid), str(nova_aggregate.hosts))
+                nova_hosts = self._get_nova_hosts(cluster.name)
+                if host_name not in nova_hosts:
+                    LOG.warning('host %s in event %s does not exist in availability zone %s',
+                                host_name, str(event_uuid), str(nova_hosts))
                     db_api.update_processing_event_with_notification(
                         event_uuid, None, None,
                         constants.STATE_ABORTED,
@@ -376,7 +405,6 @@ class NovaProvider(Provider):
                 self.events_processing_running = False
         LOG.debug('host events processing task has finished at %s', str(datetime.utcnow()))
 
-
     def _report_event_to_masakari(self, event):
         if not event:
             return
@@ -429,7 +457,7 @@ class NovaProvider(Provider):
         self._token = self._get_v3_token()
         resmgr_hosts = self._resmgr_client.get_hosts_info(self._token['id'])
         for host in resmgr_hosts:
-            if (not self.aggregate_task_running and
+            if (not self.availability_zone_task_running and
                     not self.consul_role_rebalance_processing_running and
                     "pf9-ha-slave" not in host["roles"]):
                 req_url = 'http://{0}:{1}@{2}:{3}/api/queues/%2f/{4}-{5}' \
@@ -445,75 +473,77 @@ class NovaProvider(Provider):
                                     '%s on role deauth: %s', host["id"],
                                     resp.status_code)
 
-    def process_host_aggregate_changes(self):
+    def process_availability_zone_changes(self):
         try:
-            with self.aggregate_task_lock:
-                if self.aggregate_task_running:
-                    LOG.debug('Check host aggregates for changes task already running')
+            with self.availability_zone_task_lock:
+                if self.availability_zone_task_running:
+                    LOG.debug('Check host availability_zones for changes task already running')
                     return
-                self.aggregate_task_running = True
+                self.availability_zone_task_running = True
 
-            LOG.debug('host aggregate change processing task starts to run at %s', str(datetime.utcnow()))
+            LOG.debug('host availability_zone change processing task starts to run at %s', str(datetime.utcnow()))
 
             # ---------------------------------------------------------------
             # scenarios
-            #  1) nova aggregate exists   [ sync from nova aggregate to ha system ]
+            #  1) nova availability_zone exists   [ sync from nova availability_zone to ha system ]
             #     1.1) corresponding ha cluster exists
-            #        1.1.1) masakari (failover segment, hosts) does not match hosts from nova aggregate
-            #             X = {hosts in masakari} , Y = {host in nova aggregate}, Z = { common hosts in X and Y}
+            #        1.1.1) masakari (failover segment, hosts) does not match hosts from nova availability_zone
+            #             X = {hosts in masakari} , Y = {host in nova availability_zone}, Z = { common hosts in X and Y}
             #            1.1.1.1) X and Y have no common
-            #                 remove all masakari hosts, then add nova aggregate hosts to masakari
+            #                 remove all masakari hosts, then add nova availability_zone hosts to masakari
             #            1.1.1.2) X and Y have some in common
             #                 remove additional hosts (X-Z) from masakari, add additional host (Y-Z) to masakari
             #                 this also works for
             #                   - Y is subset of X : just add additional hosts to masakari
             #                   - X is subset of Y : just remove additional hosts from masakari
-            #        1.1.2) masakari (failover segment, hosts) matches hosts from nova aggregate
+            #        1.1.2) masakari (failover segment, hosts) matches hosts from nova availability_zone
             #           no action needed
             #    1.2) corresponding ha cluster does not exist
             #        need to create a disabled ha cluster , and add masakari failover segment and hosts
-            #  2) nova aggregate does not exists  [ build nova aggregates from ha system ]
-            #     [ not sure whether this is valid scenario, because create nova aggregates needs to know
+            #  2) nova availability_zone does not exists  [ build nova availability_zones from ha system ]
+            #     [ not sure whether this is valid scenario, because create nova availability_zones needs to know
             #      availability zone infomation , especially when there is no availability zone . ]
             # ----------------------------------------------------------
-            # first reconcile hosts between nova aggregates and masakari
+            # first reconcile hosts between nova availability_zones and masakari
             # to make sure real world settings on nova are synced to
             # masakari for vm evacuation management
             # ----------------------------------------------------------
-            # find out all host aggregates from nova
+            # find out all host availability_zones from nova
 
             self._token = self._get_v3_token()
             nova_client = self._get_nova_client()
-            nova_active_aggres = nova_client.aggregates.list()
-            LOG.debug('active nova aggregates : %s',str([x.id for x in nova_active_aggres]))
+            nova_active_azs, azInfo = self._get_active_azs(self._token['id'])
+            LOG.debug('active nova availability_zones : %s', nova_active_azs)
             hamgr_all_clusters = db_api.get_all_clusters()
             LOG.debug('all vmha clusters : %s', str(hamgr_all_clusters))
 
-            # because hosts in nova aggregate reflect the real world settings for HA, so need to reconcile hosts in
-            # each aggregate from nova to hamgr and masakari
-            # for each active nova aggregate
-            #  if there is corresponding ha cluster, then update hosts in masakari with hosts from this nova aggregate
+            # because hosts in availability zone reflect the real world settings for HA, so need to reconcile hosts in
+            # each availability zone from nova to hamgr and masakari
+            # for each active availability zone
+            #  if there is corresponding ha cluster, then update hosts in masakari with hosts from this availability zone
             #  else create ha cluster in hamgr , and in masakari , but put the cluster in disabled state
-            for active_agg in nova_active_aggres:
-                nova_agg_id = active_agg.id
-                nova_agg_name = active_agg.name
-                nova_agg_hosts = active_agg.hosts
-                # is there a ha cluster for this id ?
-                hamgr_clusters_for_agg = [x for x in hamgr_all_clusters if x.name == str(nova_agg_id)]
-                if not hamgr_clusters_for_agg:
-                    LOG.debug('there is no matched vmha cluster with name matches to nova aggregate id %s',
-                              str(nova_agg_id))
+            
+            for az in azInfo['availabilityZoneInfo']:
+                az_name = az['zoneName']
+                if az['zoneName'] == 'internal':
                     continue
-                elif len(hamgr_clusters_for_agg) > 1:
-                    LOG.warning('there are more than 1 vmha clusters for nova aggregate id %s : %s',
-                                str(nova_agg_id), str(hamgr_clusters_for_agg))
-                LOG.info('%s host ids from nova aggregate id %s name %s: %s', str(len(nova_agg_hosts)),
-                         str(nova_agg_id), str(nova_agg_name), str(nova_agg_hosts))
+                az_hosts = self._get_nova_hosts(az_name)
+                # is there a ha cluster for az_name ?
+                hamgr_clusters_for_az = [x for x in hamgr_all_clusters if x.name == az_name]
+                if not hamgr_clusters_for_az:
+                    LOG.debug('there is no matched vmha cluster with name matches to availability zone name %s',
+                              az_name)
+                    continue
+                elif len(hamgr_clusters_for_az) > 1:
+                    LOG.warning('there are more than 1 vmha clusters for availability zone %s : %s',
+                                az_name, str(hamgr_clusters_for_az))
+                LOG.info('%s host ids from availability zone %s: %s', str(len(az_hosts)),
+                         str(az_name), str(az_hosts))
 
-                # we only support one-to-one mapping between vmha cluster to nova aggregate
-                current_cluster = hamgr_clusters_for_agg[0]
-                LOG.info('pick the first matched vmha cluster %s (id: %s) for aggregate id %s',
-                         current_cluster.name, current_cluster.id, str(nova_agg_id))
+                # we only support one-to-one mapping between vmha cluster to availability zone
+                current_cluster = hamgr_clusters_for_az[0]
+                LOG.info('pick the first matched vmha cluster %s for availability zone name %s',
+                         current_cluster.name, az_name)
 
                 # reconcile hosts to hamgr and masakari
                 cluster_name = current_cluster.name
@@ -521,25 +551,25 @@ class NovaProvider(Provider):
                 cluster_status = current_cluster.status
                 cluster_task_state = current_cluster.task_state
 
-                # ideally the hosts from masakari is the same as hosts in nova aggregates
-                # if more hosts in nova aggregate, means they exist in nova aggregate but not in masakari
-                # if more hosts in masakari, means some of they are removed from nova aggregate
+                # ideally the hosts from masakari is the same as hosts in availability zones
+                # if more hosts in availability zone, means they exist in availability zone but not in masakari
+                # if more hosts in masakari, means some of they are removed from availability zone
 
                 masakari_hosts = []
 
-                # remove host found in masakari segment but not in nova aggregate
+                # remove host found in masakari segment but not in availability zone
                 if masakari.is_failover_segment_exist(self._token, str(cluster_name)):
                     masakari_hosts = masakari.get_nodes_in_segment(self._token, str(cluster_name))
                 masakari_hids = [x['name'] for x in masakari_hosts]
-                common_ids = set(nova_agg_hosts).intersection(set(masakari_hids))
+                common_ids = set(az_hosts).intersection(set(masakari_hids))
                 masakari_delta_ids = set(masakari_hids) - set(common_ids)
-                LOG.debug('cluster name  %s, masakari hids : %s, nova agg id %s name %s hids %s, common ids %s, '
+                LOG.debug('cluster name  %s, masakari hids : %s, az name %s hids %s, common ids %s, '
                           'masakari additional hids %s, size:%s', str(cluster_name), str(masakari_hids),
-                          str(nova_agg_id), str(nova_agg_name), str(nova_agg_hosts), str(common_ids),
+                          str(az_name), str(az_hosts), str(common_ids),
                           str(masakari_delta_ids), str(len(masakari_delta_ids)))
                 if len(masakari_delta_ids) > 0:
-                    LOG.info('found hosts removed from nova aggregate id %s name %s : %s', str(nova_agg_id),
-                             str(nova_agg_name), str(masakari_delta_ids))
+                    LOG.info('found hosts removed from availability zone name %s : %s',
+                             str(az_name), str(masakari_delta_ids))
                     # need to remove those additional hosts found in masakari
                     if masakari.is_failover_segment_under_recovery(self._token, str(cluster_name)):
                         LOG.info('will retry to remove hosts %s from masakari segment %s, '
@@ -561,18 +591,18 @@ class NovaProvider(Provider):
 
                 masakari_hosts = []
 
-                # add hosts found in nova aggregate but not in masakari segment
+                # add hosts found in availability zone but not in masakari segment
                 if masakari.is_failover_segment_exist(self._token, cluster_name):
                     masakari_hosts = masakari.get_nodes_in_segment(self._token, cluster_name)
                 masakari_hids = [x['name'] for x in masakari_hosts]
-                common_ids = set(nova_agg_hosts).intersection(set(masakari_hids))
-                nova_delta_ids = set(nova_agg_hosts) - set(common_ids)
+                common_ids = set(az_hosts).intersection(set(masakari_hids))
+                nova_delta_ids = set(az_hosts) - set(common_ids)
                 if len(nova_delta_ids) > 0:
                     #Check if the host is already a part of Masakari Database before adding it to avoid any conflicts
                     db_api.connect_masakari(masakari,self._mdb_uri)
                     result = db_api.get_hosts_by_name(nova_delta_ids)
 
-                    LOG.info('found new hosts added into nova aggregate %s : %s', nova_agg_id, str(nova_delta_ids))
+                    LOG.info('found new hosts added into availability zone %s : %s', az_name, str(nova_delta_ids))
                     # need to add those additional hosts into masakari
                     if masakari.is_failover_segment_under_recovery(self._token, cluster_name):
                         LOG.info('will retry to add hosts %s to masakari segment %s, '
@@ -582,9 +612,9 @@ class NovaProvider(Provider):
                         # host is already a part of other segment so not adding to avoid conflicts
                         LOG.info('Not adding hosts as its already a part of masakari segment %s ', result)
                     else:
-                        # hosts already in nova aggregate so only need to add to masakari
-                        LOG.info('add new hosts %s found in nova aggregate %s to masakari segment %s',
-                                 str(nova_delta_ids), nova_agg_name, cluster_name)
+                        # hosts already in availability zone so only need to add to masakari
+                        LOG.info('add new hosts %s found in availability zone %s to masakari segment %s',
+                                 str(nova_delta_ids), az_name, cluster_name)
                         masakari.add_hosts_to_failover_segment(self._token,
                                                                cluster_name,
                                                                nova_delta_ids)
@@ -613,24 +643,23 @@ class NovaProvider(Provider):
                 if (not cluster_enabled) and \
                         (cluster_status in [constants.HA_STATE_DISABLED, constants.HA_STATE_ERROR]) and \
                         (cluster_task_state in [constants.TASK_COMPLETED, constants.TASK_ERROR_REMOVING]):
-                    # if nova aggregate exist but vmha cluster is disabled, try to remove pf9-ha-slave
+                    # if availability zone exist but vmha cluster is disabled, try to remove pf9-ha-slave
                     # in case previous action(disable vmha, or hostagent failed) failed to remove the pf9-ha-slave
-                    # this will make sure pf9-ha-slave not left on hosts when vmha disabled for a nova aggregate
+                    # this will make sure pf9-ha-slave not left on hosts when vmha disabled for a availability zone
                     try:
                         LOG.info('cluster (name %s, status %s, task state %s) is not enabled, '
                                  'trying to remove pf9-ha-slave role from hosts',
                                  str(cluster_name), str(cluster_status), str(cluster_task_state))
-                        self._deauth(nova_agg_hosts)
+                        self._deauth(az_hosts)
                     except Exception:
                         LOG.warning('remove pf9-ha-slave on hosts %s failed, will retry later',
-                                    str(nova_agg_hosts))
+                                    str(az_hosts))
                     continue
 
                 LOG.debug('cluster %s is enabled, now checking slave role', cluster_name)
-                aggregate_id = cluster_name
+                availability_zone = az_name
                 segment_name = str(cluster_name)
-                aggregate = self._get_aggregate(nova_client, aggregate_id)
-                aggregate_host_ids = set(aggregate.hosts)
+                availability_zone_host_ids = set(az_hosts)
                 new_active_host_ids = set()
                 new_inactive_host_ids = set()
                 existing_active_host_ids = set()
@@ -642,11 +671,11 @@ class NovaProvider(Provider):
                     masakari_host_ids = set([node['name'] for node in nodes])
 
                     LOG.debug("hosts records from nova : %s",
-                              ','.join(list(aggregate_host_ids)))
+                              ','.join(list(availability_zone_host_ids)))
                     LOG.debug("hosts records from masakari : %s",
                               ','.join(list(masakari_host_ids)))
 
-                    for host in aggregate_host_ids:
+                    for host in availability_zone_host_ids:
                         if self._is_nova_service_active(host, nova_client=nova_client):
                             nova_active_host_ids.add(host)
 
@@ -664,7 +693,7 @@ class NovaProvider(Provider):
                                 LOG.info('Ignoring down host %s as it is not part'
                                          ' of the cluster', host)
 
-                    removed_host_ids = masakari_host_ids - aggregate_host_ids
+                    removed_host_ids = masakari_host_ids - availability_zone_host_ids
 
                     LOG.info('Found existing active hosts : %s ', str(existing_active_host_ids))
                     LOG.info('Found existing inactive hosts : %s ', str(existing_inactive_host_ids))
@@ -717,22 +746,22 @@ class NovaProvider(Provider):
                             LOG.info("assign ha-slave role for hosts which is missing pf9-ha-slave: %s", txt_ids)
                             # hosts are not changed but just missing pf9-ha-slave, it is ok to just re-assign roles
                             # TODO: only assign to hosts in role_missed_host_ids??
-                            #self._assign_roles(nova_client, aggregate_id, nova_active_host_ids)
+                            #self._assign_roles(nova_client, availability_zone, nova_active_host_ids)
                             self._add_ha_slave_if_not_exist(cluster_name, role_missed_host_ids, 'server',
                                                             masakari_host_ids)
                             LOG.debug("ha-slave roles are assigned to : %s", txt_ids)
                         elif len(ip_mismatch_host_ids) > 0:
-                            LOG.info('updating join ips for aggregate %s, hosts %s',
-                                     str(aggregate_id), ip_mismatch_host_ids)
-                            self._auth(aggregate_id, cluster_ip_lookup, cluster_ip_lookup, cluster_details,
+                            LOG.info('updating join ips for availability_zone %s, hosts %s',
+                                     str(availability_zone), ip_mismatch_host_ids)
+                            self._auth(availability_zone, cluster_ip_lookup, cluster_ip_lookup, cluster_details,
                                        self._token, ip_mismatch_host_ids)
                         else:
                             LOG.info("all hosts already have pf9-ha-slave role")
 
                     if len(new_active_host_ids) > 0:
                         # need to put pf-ha-slave role on them
-                        LOG.info('new active hosts are added into aggregate %s but not in masakari : %s ',
-                                 str(aggregate_id),
+                        LOG.info('new active hosts are added into availability_zone %s but not in masakari : %s ',
+                                 str(availability_zone),
                                  str(new_active_host_ids))
                         # same here, since we don't know the consul roles on existing hosts, so just
                         # make these hosts as consul server, and trigger a role rebalance request
@@ -744,14 +773,14 @@ class NovaProvider(Provider):
 
                     if len(new_inactive_host_ids) > 0:
                         # need to wait for them become active so can put pf9-ha-slave role on them
-                        LOG.info('new inactive hosts are added into aggregate %s but '
+                        LOG.info('new inactive hosts are added into availability_zone %s but '
                                  'not in masakari : %s, wait for hosts to become active',
                                  segment_name,
                                  str(new_inactive_host_ids))
 
                     if len(removed_host_ids) > 0:
-                        LOG.info('hosts are removed from nova aggregate %s : %s, now remove pf9-ha-slave role',
-                                 aggregate_id, str(removed_host_ids))
+                        LOG.info('hosts are removed from nova availability_zone %s : %s, now remove pf9-ha-slave role',
+                                 availability_zone, str(removed_host_ids))
                         self._remove_ha_slave_if_exist(cluster_name, removed_host_ids,
                             list( set(existing_active_host_ids).difference(set(removed_host_ids)) ))
                         LOG.info('try to rebalance consul roles after removing hosts: %s', str(removed_host_ids))
@@ -765,20 +794,20 @@ class NovaProvider(Provider):
                 except ha_exceptions.ClusterBusy:
                     pass
                 except ha_exceptions.InsufficientHosts:
-                    LOG.warning('Detected number of aggregate %s hosts is insufficient', aggregate_id)
+                    LOG.warning('Detected number of availability_zone %s hosts is insufficient', availability_zone)
                 except ha_exceptions.SegmentNotFound:
                     LOG.warning('Masakari segment for cluster: %s was not found', current_cluster.name)
                 except ha_exceptions.HostPartOfCluster:
                     LOG.error("Not enabling cluster as cluster hosts are part of another cluster")
                 except Exception:
-                    LOG.exception('Exception while processing aggregate %s', aggregate_id)
+                    LOG.exception('Exception while processing availability_zone %s', availability_zone)
         except Exception as e:
-            LOG.exception('unhandled exception in host aggregate change processing task : %s', str(e))
+            LOG.exception('unhandled exception in host availability_zone change processing task : %s', str(e))
         finally:
-            with self.aggregate_task_lock:
-                LOG.debug('Aggregate changes task completed')
-                self.aggregate_task_running = False
-        LOG.debug('host aggregate change processing task has finished at %s', str(datetime.utcnow()))
+            with self.availability_zone_task_lock:
+                LOG.debug('Availability Zone changes task completed')
+                self.availability_zone_task_running = False
+        LOG.debug('host availability zone change processing task has finished at %s', str(datetime.utcnow()))
 
     def _toggle_masakari_hosts_maintenance_status(self, segment_name="", host_ids=[], ignore_status_in_nova=False, on_maintenance=False):
         try:
@@ -810,27 +839,27 @@ class NovaProvider(Provider):
                 })
             else:
                 # find all active ha clusters
-                nova_aggres = nova_client.aggregates.list()
+                nova_active_azs, azInfo = self._get_active_azs(self._token['id'])
                 hamgr_clusters = db_api.get_all_clusters()
-                for agg in nova_aggres:
-                    # make sure vmha group for this aggregate actually exists
-                    matched_clusters = [x for x in hamgr_clusters if x.name == str(agg.id)]
+                for az in nova_active_azs:
+                    # make sure vmha group for this availability_zone actually exists
+                    matched_clusters = [x for x in hamgr_clusters if x.name == az['zoneName']]
                     if not matched_clusters:
-                        LOG.warning('vmha cluster for host aggregate %s does not exist or disabled, '
-                                    'will not toggle hosts maintenance status', str(agg.id))
+                        LOG.warning('vmha cluster for host availability_zone %s does not exist or disabled, '
+                                    'will not toggle hosts maintenance status', az['zoneName'])
                         continue
 
                     # make sure masakari failover segment exists
-                    if not masakari.is_failover_segment_exist(self._token, str(agg.id)):
-                        LOG.error('vmha cluster for host aggregate %s exists, but masakari segment does not exist, '
-                                  'will not toggle hosts maintenance status', str(agg.id))
+                    if not masakari.is_failover_segment_exist(self._token, az['zoneName']):
+                        LOG.error('vmha cluster for host availability zone %s exists, but masakari segment does not exist, '
+                                  'will not toggle hosts maintenance status', az['zoneName'])
                         continue
 
-                    masakari_hosts = masakari.get_nodes_in_segment(self._token, str(agg.id))
+                    masakari_hosts = masakari.get_nodes_in_segment(self._token, az['zoneName'])
                     valid_hosts = [x['name'] for x in masakari_hosts]
 
-                    # if not pass in aggregate id but just host ids, then use those host id to figure which
-                    # aggregate they belong to, or just ignore host ids and check for every aggregates
+                    # if not pass in availability_zone id but just host ids, then use those host id to figure which
+                    # availability_zone they belong to, or just ignore host ids and check for every availability_zones
                     if host_ids and len(host_ids) > 0 :
                         common = list(set(valid_hosts).intersection(set(host_ids)))
                         if len(common) > 0:
@@ -885,22 +914,20 @@ class NovaProvider(Provider):
     def _cleanup_vmha_and_masakari(self):
         """
         this method is used to remove any additional vmha clusters and
-        masakari segments which there is no mapping nova host aggregates
+        masakari segments which there is no mapping nova host availability_zones
         :return: none
         """
         self._token = self._get_v3_token()
-        nova_client = self._get_nova_client()
-        nova_active_aggres = nova_client.aggregates.list()
-        nova_aggres_ids = [str(x.id) for x in nova_active_aggres]
-        LOG.debug('ids of host aggregates found : %s', str(nova_aggres_ids))
+        nova_active_azs, azInfo = self._get_active_azs(self._token['id'])
+        LOG.debug('names of host availability_zones found : %s', nova_active_azs)
         hamgr_all_clusters = db_api.get_all_clusters()
         hamgr_cluster_names = [x.name for x in hamgr_all_clusters]
         LOG.debug('names of vmha clusters found : %s', str(hamgr_cluster_names))
         masakari_active_segments = masakari.get_all_failover_segments(self._token)
         masakari_segment_names = [x['name'] for x in masakari_active_segments]
         LOG.debug('names of masakari segments found : %s', str(masakari_segment_names))
-        common_between_nova_and_hamgr = list(set(nova_aggres_ids).intersection(set(hamgr_cluster_names)))
-        LOG.debug('common set between host aggregates and vmha cluster : %s', str(common_between_nova_and_hamgr))
+        common_between_nova_and_hamgr = list(set(nova_active_azs).intersection(set(hamgr_cluster_names)))
+        LOG.debug('common set between host availability_zones and vmha cluster : %s', str(common_between_nova_and_hamgr))
         hamgr_clusters_to_remove = list(set(hamgr_cluster_names).difference(common_between_nova_and_hamgr))
         LOG.debug('additional vmha clusters for removal : %s', str(hamgr_clusters_to_remove))
 
@@ -912,8 +939,8 @@ class NovaProvider(Provider):
             except Exception as exp:
                 LOG.warning('failed to remove additional vmha cluster with name %s : %s', cluster_name, str(exp))
 
-        common_between_nova_and_masakari = list(set(nova_aggres_ids).intersection(set(masakari_segment_names)))
-        LOG.debug('common set between host aggregates and masakari segments : %s', str(common_between_nova_and_masakari))
+        common_between_nova_and_masakari = list(set(nova_active_azs).intersection(set(masakari_segment_names)))
+        LOG.debug('common set between host availability_zones and masakari segments : %s', str(common_between_nova_and_masakari))
         masakari_segments_to_remove = list(set(masakari_segment_names).difference(set(common_between_nova_and_masakari)))
         LOG.debug('additional masakari segments for removal : %s', str(masakari_segments_to_remove))
         # try to remove additional masakari cluster if it was not removed during vmha cluster removal
@@ -1008,15 +1035,15 @@ class NovaProvider(Provider):
             target_cluster_id = None
             target_cluster_name = None
             for cluster in clusters:
-                aggregate_id = cluster.name
-                aggregate = self._get_aggregate(nova_client, aggregate_id)
-                hosts = set(aggregate.hosts)
+                availability_zone = cluster.name
+                availability_zone = self._get_availability_zone(nova_client, availability_zone)
+                hosts = set(availability_zone.hosts)
                 if str(reportedBy) in hosts:
                     target_cluster_id = cluster.id
                     target_cluster_name = cluster.name
                     break
             if not target_cluster_id:
-                LOG.debug('no host aggregates with id %s', target_cluster_name)
+                LOG.debug('no host availability_zones with id %s', target_cluster_name)
                 return
 
             LOG.debug('add new consul status from report %s', str(report))
@@ -1125,9 +1152,15 @@ class NovaProvider(Provider):
             LOG.info('authorize pf9-ha-slave during adding new hosts: %s ', str(role_missed_host_ids))
             hypervisors = nova_client.hypervisors.list()
             #all_hosts = list(set(host_ids_for_adding).union(set(peer_host_ids)))
-            # Need join ips for offline hosts in aggregate as well
-            aggregate = self._get_aggregate(nova_client, cluster_name)
-            cluster_hosts = set(aggregate.hosts)
+            # Need join ips for offline hosts in availability_zone as well
+            _ , azInfo = self._get_active_azs(self._token['id'])
+            az_hosts = []
+            for az in azInfo['availabilityZoneInfo']:
+                if az['zoneName'] == cluster_name:
+                    for x in az['hosts'].keys():
+                        az_hosts.append(x)
+                    break
+            cluster_hosts = set(az_hosts)
             hosts_info = self._resmgr_client.fetch_hosts_details(cluster_hosts, self._token['id'])
 
             ip_lookup, cluster_ip_lookup, nodes_details = self._get_ips_for_hosts_v2(hypervisors,
@@ -1152,9 +1185,15 @@ class NovaProvider(Provider):
         nova_client = self._get_nova_client()
         hypervisors = nova_client.hypervisors.list()
         self._token = self._get_v3_token()
-        # Need join ips for offline hosts in aggregate as well
-        aggregate = self._get_aggregate(nova_client, cluster_name)
-        cluster_hosts = set(aggregate.hosts)
+        # Need join ips for offline hosts in availability_zone as well
+        _ , azInfo = self._get_active_azs(self._token['id'])
+        az_hosts = []
+        for az in azInfo['availabilityZoneInfo']:
+            if az['zoneName'] == cluster_name:
+                for x in az['hosts'].keys():
+                    az_hosts.append(x)
+                break
+        cluster_hosts = set(az_hosts)
         #all_hosts = list(set(host_ids).union(set(peer_host_ids)))
         all_hosts = list(set(host_ids).union(set(cluster_hosts)))
         hosts_info = self._resmgr_client.fetch_hosts_details(all_hosts, self._token['id'])
@@ -1221,24 +1260,12 @@ class NovaProvider(Provider):
         nova = client.Client(2, session=sess, region_name=self._region, interface='internal')
         return nova
 
-    def _get_all(self, nova_client):
-        aggregates = nova_client.aggregates.list()
-        result = []
-        for aggr in aggregates:
-            obj = self._get_one(nova_client, aggr.id)
-            if obj:
-                result.append(obj)
-            else:
-                LOG.warning('no hamgr cluster db record for aggregate id %s', str(aggr.id))
-        return result
-
-    def _get_one(self, nova_client, aggregate_id):
-        _ = self._get_aggregate(nova_client, aggregate_id)
-        # host aggregate id is the 'name' field in hamgr cluster table
-        name = str(aggregate_id)
+    def _get_az_ha_status(self, availability_zone):
+        # availability_zone is the 'name' field in hamgr cluster table
+        name = availability_zone
         cluster = db_api.get_cluster(name)
         if cluster is None:
-            LOG.warning('no hamgr cluster record for host aggregate id %s', str(aggregate_id))
+            LOG.warning('no hamgr cluster record for availability zone %s', availability_zone)
             return {}
         enabled = cluster.enabled if cluster is not None else False
         if enabled is True:
@@ -1246,21 +1273,26 @@ class NovaProvider(Provider):
                 cluster.task_state
         else:
             task_state = cluster.task_state
-        return dict(id=aggregate_id, enabled=enabled, task_state=task_state)
+        return dict(name=availability_zone, enabled=enabled, task_state=task_state)
+  
+    def _get_ha_status(self):
+        self._token = self._get_v3_token()
+        nova_active_azs, _ = self._get_active_azs(self._token['id'])
+        result = []
+        for az in nova_active_azs:
+            obj = self._get_az_ha_status(az)
+            if obj:
+                result.append(obj)
+            else:
+               LOG.warning('no hamgr cluster db record for availability zone %s', az) 
+        return result  
 
-    def get(self, aggregate_id):
-        nova_client = self._get_nova_client()
-        if aggregate_id is not None:
-            obj = self._get_one(nova_client, aggregate_id)
+    def get(self, availability_zone):
+        if availability_zone is not None:
+            obj = self._get_az_ha_status(availability_zone)
             return [obj] if obj else []
         else:
-            return self._get_all(nova_client)
-
-    def _get_aggregate(self, nova_client, aggregate_id):
-        try:
-            return nova_client.aggregates.get(aggregate_id)
-        except exceptions.NotFound:
-            raise ha_exceptions.AggregateNotFound(aggregate_id)
+            return self._get_ha_status()
 
     def _check_if_host_in_other_cluster(self, hosts):
         clusters = db_api.get_all_active_clusters()
@@ -1268,8 +1300,8 @@ class NovaProvider(Provider):
         valid_hosts = set()
         nova_client = self._get_nova_client()
         for cluster in clusters:
-            aggregate = self._get_aggregate(nova_client, cluster.name)
-            cluster_hosts = set(aggregate.hosts)
+            availability_zone = self._get_availability_zone(nova_client, cluster.name)
+            cluster_hosts = set(availability_zone.hosts)
             for host in hosts:
                 if host in cluster_hosts:
                     invalid_hosts.add(host)
@@ -1368,13 +1400,13 @@ class NovaProvider(Provider):
         LOG.debug('customized role configuration : %s', str(customize_cfg))
         return customize_cfg
 
-    def _auth(self, aggregate_id, ip_lookup, cluster_ip_lookup, nodes_details, token, nodes, role=None):
+    def _auth(self, availability_zone, ip_lookup, cluster_ip_lookup, nodes_details, token, nodes, role=None):
         valid_ips = [x for x in cluster_ip_lookup.values() if x != '']
         ips = ','.join([str(v) for v in sorted(valid_ips)])
         LOG.info('ips for consul members to join : %s', ips)
         for node in nodes:
             start_time = datetime.now()
-            data = self._customize_pf9_ha_slave_config(aggregate_id, ips, ip_lookup[node], cluster_ip_lookup[node], nodes_details)
+            data = self._customize_pf9_ha_slave_config(availability_zone, ips, ip_lookup[node], cluster_ip_lookup[node], nodes_details)
             if role:
                 data['bootstrap_expect'] = 3 if role == 'server' else 0
                 LOG.info('Authorizing pf9-ha-slave role on node %s using IP %s',
@@ -1410,12 +1442,12 @@ class NovaProvider(Provider):
             raise ha_exceptions.ClusterIpNotFound(host_id)
         return str(json_resp['cluster_ip'])
 
-    def _get_ips_for_hosts_v3(self, aggregate_id):
-        cluster_name = str(aggregate_id)
+    def _get_ips_for_hosts_v3(self, availability_zone):
+        cluster_name = str(availability_zone)
         # get hosts ids from masakari for current cluster
         hosts = masakari.get_nodes_in_segment(self._token, str(cluster_name))
         host_ids = [x['name'] for x in hosts]
-        LOG.debug('checking configs for %s hosts in aggregate %s : %s',
+        LOG.debug('checking configs for %s hosts in availability_zone %s : %s',
                   str(len(host_ids)), cluster_name, str(host_ids))
         nova_client = self._get_nova_client()
         hypervisors = nova_client.hypervisors.list()
@@ -1471,7 +1503,7 @@ class NovaProvider(Provider):
         self._token = self._get_v3_token()
         hosts = masakari.get_nodes_in_segment(self._token, str(cluster_name))
         host_ids = [x['name'] for x in hosts]
-        LOG.debug('checking configs for %s hosts in aggregate %s : %s',
+        LOG.debug('checking configs for %s hosts in availability_zone %s : %s',
                   str(len(host_ids)), cluster_name, str(host_ids))
         nova_client = self._get_nova_client()
         hypervisors = nova_client.hypervisors.list()
@@ -1486,7 +1518,7 @@ class NovaProvider(Provider):
         join_ips = ','.join([str(v) for v in sorted(valid_ips)])
         return join_ips, cluster_ip_lookup, cluster_details
 
-    def _assign_roles(self, nova_client, aggregate_id, hosts):
+    def _assign_roles(self, nova_client, availability_zone, hosts):
         hosts = sorted(hosts)
         # First 4 hosts act as servers, at minimum
         servers = hosts[0:4]
@@ -1497,16 +1529,15 @@ class NovaProvider(Provider):
 
         self._token = self._get_v3_token()
         hypervisors = nova_client.hypervisors.list()
-        # need join ips for offline hosts in aggregate as well
-        aggregate = self._get_aggregate(nova_client, aggregate_id)
-        cluster_hosts = set(aggregate.hosts)
+        # need join ips for offline hosts in availability_zone as well
+        cluster_hosts = set(hosts) 
         hosts_info = self._resmgr_client.fetch_hosts_details(cluster_hosts, self._token['id'])
         ip_lookup, cluster_ip_lookup, nodes_details = self._get_ips_for_hosts_v2(hypervisors,
                                                                                  cluster_hosts,
                                                                                  hosts_info)
         LOG.info('authorize pf9-ha-slave during assign roles')
-        self._auth(aggregate_id, ip_lookup, cluster_ip_lookup, nodes_details, self._token, servers, 'server')
-        self._auth(aggregate_id, ip_lookup, cluster_ip_lookup, nodes_details, self._token, agents, 'agent')
+        self._auth(availability_zone, ip_lookup, cluster_ip_lookup, nodes_details, self._token, servers, 'server')
+        self._auth(availability_zone, ip_lookup, cluster_ip_lookup, nodes_details, self._token, agents, 'agent')
 
     def __perf_meter(self, method, time_start):
         time_end = datetime.utcnow()
@@ -1514,31 +1545,29 @@ class NovaProvider(Provider):
                   'end : %s)', str(method), str(time_end - time_start),
                   str(time_start), str(time_end))
 
-    def _enable(self, aggregate_id, hosts=None,
+    def _enable(self, availability_zone, hosts=None,
                 next_state=constants.TASK_COMPLETED):
         """Enable HA
 
-        :params aggregate_id: Aggregate ID on which HA is being enabled
-        :params hosts: Hosts under the aggregate on which HA is to be enabled
+        :params availability_zone: Availability Zone on which HA is being enabled
+        :params hosts: Hosts under the availability zone on which HA is to be enabled
                        This option should only be used when enabling HA on few
-                       hosts under an aggregate. By default, HA is enabled on
-                       all hosts under a host aggregate.
+                       hosts under an availability zone. By default, HA is enabled on
+                       all hosts under a availability zone.
         :params next_state: state in which the cluster should be if enable
                             completes. This is used in case of cluster is
                             migrating i.e. enable operation is being performed
                             as part of a cluster migration operation.
         """
         nova_client = self._get_nova_client()
-        str_aggregate_id = str(aggregate_id)
         cluster = None
         cluster_id = None
         try:
-            cluster = db_api.get_cluster(str_aggregate_id)
+            cluster = db_api.get_cluster(availability_zone)
         except ha_exceptions.ClusterNotFound:
             pass
         except Exception:
-            LOG.exception('error when get cluster %s from db',
-                          str(str_aggregate_id))
+            LOG.exception('error when get cluster %s from db', availability_zone)
             raise
 
         if cluster:
@@ -1549,16 +1578,17 @@ class NovaProvider(Provider):
                     LOG.info('Enabling HA has part of cluster migration')
                 else:
                     LOG.warning('Cluster %s is running task %s, cannot enable',
-                             str_aggregate_id, cluster.task_state)
-                    raise ha_exceptions.ClusterBusy(str_aggregate_id,
+                               availability_zone, cluster.task_state)
+                    raise ha_exceptions.ClusterBusy(availability_zone,
                                                     cluster.task_state)
-
+        
+        #PCD-217 moved to az level hence below check is not needed
         # make sure no host exists in multiple host aggregation
-        aggregate = self._get_aggregate(nova_client, aggregate_id)
-        if not hosts:
-            hosts = aggregate.hosts
-            # validate only when enabling HA on all aggregate hosts
-            self._validate_hosts(hosts)
+        #availability_zone = self._get_availability_zone(nova_client, availability_zone)
+        #if not hosts:
+        #    hosts = availability_zone.hosts
+            # validate only when enabling HA on all availability_zone hosts
+        #     self._validate_hosts(hosts)
 
         # observed that hosts sometimes need longer time to get to converged state
         # so here don't validate hosts, let the _handle_enable_request processor retry
@@ -1566,14 +1596,14 @@ class NovaProvider(Provider):
         # this will avoid the REST API return 409
         try:
             LOG.debug('create ha cluster for enabling request')
-            cluster = db_api.create_cluster_if_needed(str_aggregate_id,
+            cluster = db_api.create_cluster_if_needed(availability_zone,
                                                       constants.TASK_CREATING)
             if cluster.task_state != constants.TASK_CREATING:
-                db_api.update_cluster_task_state(cluster.id, constants.TASK_CREATING)
+                db_api.update_cluster_task_state(availability_zone, constants.TASK_CREATING)
             # set the status to 'request-enable'
-            db_api.update_request_status(cluster.id, constants.HA_STATE_REQUEST_ENABLE)
+            db_api.update_request_status(availability_zone, constants.HA_STATE_REQUEST_ENABLE)
             # publish status
-            self._notify_status(constants.HA_STATE_REQUEST_ENABLE, "cluster", cluster.id)
+            self._notify_status(constants.HA_STATE_REQUEST_ENABLE, "cluster", availability_zone)
         except Exception as e:
             if cluster_id:
                 db_api.update_cluster_task_state(cluster_id, next_state)
@@ -1584,19 +1614,25 @@ class NovaProvider(Provider):
         if not request:
             return
         nova_client = self._get_nova_client()
-        str_aggregate_id = request.name
+        str_availability_zone = request.name
         cluster_id = request.id
         cluster_name = str(request.name)
         time_begin = datetime.utcnow()
         self.__perf_meter('db_api.get_cluster', time_begin),
         time_begin = datetime.utcnow()
-        aggregate = self._get_aggregate(nova_client, str_aggregate_id)
-        self.__perf_meter('_get_aggregate', time_begin)
+        _ , azInfo = self._get_active_azs(self._token['id'])
+        az_hosts = []
+        for az in azInfo['availabilityZoneInfo']:
+            if az['zoneName'] == str_availability_zone:
+                for x in az['hosts'].keys():
+                    az_hosts.append(x)
+                break
+        self.__perf_meter('_get_availability_zone', time_begin)
         if not hosts:
-            hosts = aggregate.hosts
+            hosts = az_hosts
         else:
-            LOG.info('Enabling HA on some of the hosts %s of the %s aggregate',
-                     str(hosts), str_aggregate_id)
+            LOG.info('Enabling HA on some of the hosts %s of the %s availability_zone',
+                     str(hosts), str_availability_zone)
         try:
             # observed that hosts sometimes need longer time to get to converged state
             # if this happens, _validate_hosts will throw exceptions, then the request will
@@ -1647,7 +1683,7 @@ class NovaProvider(Provider):
             # 2. Push roles
             time_begin = datetime.utcnow()
             LOG.info('assign roles for hosts during handling enabling request')
-            self._assign_roles(nova_client, str_aggregate_id, hosts)
+            self._assign_roles(nova_client, str_availability_zone, hosts)
             self.__perf_meter('_assign_roles', time_begin)
 
             # 3. Create masakari fail-over segment
@@ -1773,11 +1809,11 @@ class NovaProvider(Provider):
         return resp
 
 
-    def _disable(self, aggregate_id, synchronize=False,
+    def _disable(self, availability_zone, synchronize=False,
                  next_state=constants.TASK_COMPLETED):
         """Disable HA
 
-        :params aggregate_id: Host aggregate ID on which HA is being disabled
+        :params availability_zone: Host availability_zone ID on which HA is being disabled
         :params synchronize: when set to True, function blocks till ha-slave
                              role is removed from all the hosts
         :params next_state: state in which the cluster should be if disable
@@ -1787,10 +1823,10 @@ class NovaProvider(Provider):
                             is an error during the disable operation cluster
                             will be put in "error removing" state
         """
-        str_aggregate_id = str(aggregate_id)
-        cluster = db_api.get_cluster(str_aggregate_id)
+        str_availability_zone = str(availability_zone)
+        cluster = db_api.get_cluster(str_availability_zone)
         if not cluster:
-            LOG.warning('no cluster with id for disable %s', str_aggregate_id)
+            LOG.warning('no cluster with id for disable %s', str_availability_zone)
             return
 
         if cluster.task_state not in [constants.TASK_COMPLETED,
@@ -1812,7 +1848,7 @@ class NovaProvider(Provider):
             db_api.update_request_status(cluster.id, constants.HA_STATE_REQUEST_DISABLE)
             self._notify_status(constants.HA_STATE_REQUEST_DISABLE, "cluster", cluster.id)
         except Exception as e:
-            LOG.error('unhandled exceptions when disable cluster with name %s : %s ', str_aggregate_id, str(e))
+            LOG.error('unhandled exceptions when disable cluster with name %s : %s ', str_availability_zone, str(e))
 
     def process_ha_enable_disable_requests(self):
         with self.ha_status_processing_lock:
@@ -1849,7 +1885,7 @@ class NovaProvider(Provider):
             hosts = None
             try:
                 if cluster:
-                    # If aggregate has changed, we need to remove role from
+                    # If availability_zone has changed, we need to remove role from
                     # previous segment's nodes
                     nodes = masakari.get_nodes_in_segment(self._token,
                                                           cluster_name)
@@ -1857,9 +1893,14 @@ class NovaProvider(Provider):
                 else:
                     # If cluster was not even created, but we are disabling HA
                     # to rollback enablement
-                    nova_client = self._get_nova_client()
-                    aggregate = self._get_aggregate(nova_client, cluster_name)
-                    hosts = set(aggregate.hosts)
+                    _ , azIno = self._get_active_azs(self._token['id'])
+                    az_hosts = []
+                    for az in azInfo['availabilityZoneInfo']:
+                        if az['zoneName'] == 'internal':
+                            continue
+                        for x in az['hosts'].keys():
+                            az_hosts.append(x)
+                    hosts = set(az_hosts)
             except ha_exceptions.SegmentNotFound:
                 LOG.warning('Masakari segment for cluster: %s was not found, '
                          'skipping deauth', cluster_name)
@@ -1889,15 +1930,15 @@ class NovaProvider(Provider):
                 self._deauth(hosts)
                 LOG.info('Waiting for role deauth to converge for cluster %s', cluster_name)
                 self._wait_for_role_to_ok_v2(hosts)
-                LOG.info('De-authorize process complete for aggregate %s hosts', cluster_name)
+                LOG.info('De-authorize process complete for availability_zone %s hosts', cluster_name)
             else:
-                LOG.info('no hosts found in aggregate for deauth %s', cluster_name)
+                LOG.info('no hosts found in availability_zone for deauth %s', cluster_name)
             LOG.info('Deleting failover segment %s from masakari', cluster_name)
             masakari.delete_failover_segment(self._token, cluster_name)
             # change status from 'disabling' to 'disabled'
             db_api.update_request_status(cluster.id, constants.HA_STATE_DISABLED)
             self._notify_status(constants.HA_STATE_DISABLED, "cluster", cluster.id)
-            LOG.info('Successfully processed disable request for aggregate %s', cluster_name)
+            LOG.info('Successfully processed disable request for availability_zone %s', cluster_name)
         except Exception:
             if cluster:
                 LOG.exception('Disable HA request failed for cluster %s', cluster_name)
@@ -1911,35 +1952,34 @@ class NovaProvider(Provider):
                 db_api.update_cluster(cluster.id, False)
                 db_api.update_cluster_task_state(cluster.id, next_state)
 
-    def put(self, aggregate_id, method):
-        LOG.info('process %s request for aggregate id %s', method, str(aggregate_id))
+    def put(self, availability_zone, method):
+        LOG.info('process %s request for Availability zone %s', method, availability_zone)
         if method == 'enable':
-            self._enable(aggregate_id)
+            self._enable(availability_zone)
         else:
-            self._disable(aggregate_id)
+            self._disable(availability_zone)
 
     def _get_cluster_for_host(self, host_id, nova_client=None):
         if not nova_client:
             nova_client = self._get_nova_client()
         clusters = db_api.get_all_active_clusters()
         for cluster in clusters:
-            aggregate_id = cluster.name
-            aggregate = self._get_aggregate(nova_client, aggregate_id)
-            if host_id in aggregate.hosts:
+            availability_zone = cluster.name
+            availability_zone = self._get_availability_zone(nova_client, availability_zone)
+            if host_id in availability_zone.hosts:
                 return cluster
         raise ha_exceptions.HostNotFound(host=host_id)
 
     def _remove_host_from_cluster(self, cluster, host, nova_client=None):
-        LOG.info('Removing host %s from aggregate %s', host, cluster.name)
+        LOG.info('Removing host %s from availability_zone %s', host, cluster.name)
         if not nova_client:
             nova_client = self._get_nova_client()
-        aggregate_id = cluster.name
-        aggregate = self._get_aggregate(nova_client, aggregate_id)
-        current_host_ids = set(aggregate.hosts)
+        az_hosts = self._get_nova_hosts(cluster.name)
+        current_host_ids = set(az_hosts)
 
         try:
             self._token = self._get_v3_token()
-            nodes = masakari.get_nodes_in_segment(self._token, aggregate_id)
+            nodes = masakari.get_nodes_in_segment(self._token, availability_zone)
             db_node_ids = set([node['name'] for node in nodes])
             for current_host in current_host_ids:
                 if not self._is_nova_service_active(current_host,
@@ -1959,9 +1999,9 @@ class NovaProvider(Provider):
                 host_list = current_host_ids - \
                             set(self.hosts_down_per_cluster[cluster.id].keys())
                 # Task state will be managed by this function
-                self._disable(aggregate_id, synchronize=True,
+                self._disable(availability_zone, synchronize=True,
                               next_state=constants.TASK_MIGRATING)
-                self._enable(aggregate_id, hosts=list(host_list),
+                self._enable(availability_zone, hosts=list(host_list),
                              next_state=constants.TASK_MIGRATING)
                 self.hosts_down_per_cluster.pop(cluster.id)
             else:
@@ -2013,6 +2053,7 @@ class NovaProvider(Provider):
         host_name = event_details['host_id']
         try:
             nova_client = self._get_nova_client()
+            self._token = self._get_v3_token()
             LOG.debug('prepare to write event, host %s, event %s ,  details %s',
                       host_name, event_type, event_details)
             # find the cluster id from given host id
@@ -2021,9 +2062,15 @@ class NovaProvider(Provider):
                 target_cluster_id = None
                 target_cluster_name = None
                 for cluster in clusters:
-                    aggregate_id = cluster.name
-                    aggregate = self._get_aggregate(nova_client, aggregate_id)
-                    hosts = set(aggregate.hosts)
+                    availability_zone = cluster.name
+                    _ , azInfo = self._get_active_azs(self._token['id'])
+                    az_hosts = []
+                    for az in azInfo['availabilityZoneInfo']:
+                        if az['zoneName'] == availability_zone:
+                            for x in az['hosts'].keys():
+                                az_hosts.append(x)
+                            break
+                    hosts = set(az_hosts)
                     if str(host_name) in hosts:
                         target_cluster_id = cluster.id
                         target_cluster_name = cluster.name
@@ -2112,7 +2159,7 @@ class NovaProvider(Provider):
                                  event_type, event_uuid, host_name, self._event_report_threshold_seconds, str(ids))
                 else:
                     LOG.warning('ignore reporting event %s for host %s , '
-                             'as it is not found in any active nova aggregates : %s',
+                             'as it is not found in any active nova availability_zones : %s',
                              event_type, host_name, str(event_details))
             else:
                 LOG.warning('ignore reporting event, no active clusters found for event %s for host %s',
@@ -2255,7 +2302,7 @@ class NovaProvider(Provider):
         obj = ClusterEvent(action, target, identifier)
         get_notification_manager(self._config).send_notification(obj)
 
-    def get_aggregate_info_for_cluster(self, cluster_id_or_name):
+    def get_availability_zone_info_for_cluster(self, cluster_id_or_name):
         try:
             if not isinstance(cluster_id_or_name, str) and \
                     not isinstance(cluster_id_or_name, int):
@@ -2271,14 +2318,14 @@ class NovaProvider(Provider):
                 targets = [cluster for cluster in clusters if cluster.id == cluster_id_or_name]
 
             if len(targets) > 0:
-                aggregate_id = targets[0].name
-                aggregate = self._get_aggregate(nova_client, aggregate_id)
-                LOG.debug('host aggregate details for cluster %s : %s',
-                          str(cluster_id_or_name), str(aggregate))
-                return aggregate
+                availability_zone = targets[0].name
+                availability_zone = self._get_availability_zone(nova_client, availability_zone)
+                LOG.debug('host availability_zone details for cluster %s : %s',
+                          str(cluster_id_or_name), str(availability_zone))
+                return availability_zone
             return None
         except:
-            LOG.exception('unhandled exception when get aggregate info '
+            LOG.exception('unhandled exception when get availability_zone info '
                           'for cluster %s', str(cluster_id_or_name))
         return None
 
@@ -2304,15 +2351,15 @@ class NovaProvider(Provider):
                 # when there are no unhandled consul role rebalance requests, try to detect whether
                 # there is a need to generate the role rebalance request to correct any over rebalanced
                 # scenarios (issue found from ticket https://platform9.zendesk.com/agent/tickets/1252718)
-                nova_client = self._get_nova_client()
-                nova_active_aggres = nova_client.aggregates.list()
+                self._token = self._get_v3_token()
+                nova_active_azs, azInfo = self._get_active_azs(self._token['id'])
                 hamgr_all_clusters = db_api.get_all_clusters()
-                for active_agg in nova_active_aggres:
-                    nova_agg_id = active_agg.id
-                    hamgr_clusters_for_agg = [x for x in hamgr_all_clusters if x.name == str(nova_agg_id)]
-                    if len(hamgr_clusters_for_agg) < 1:
+                for az in azInfo['availabilityZoneInfo']:
+                    az_name = az['zoneName']
+                    hamgr_clusters_for_az = [x for x in hamgr_all_clusters if x.name == az_name]
+                    if len(hamgr_clusters_for_az) < 1:
                         continue
-                    current_cluster = hamgr_clusters_for_agg[0]
+                    current_cluster = hamgr_clusters_for_az[0]
                     cluster_name = current_cluster.name
                     cluster_enabled = current_cluster.enabled
                     if not cluster_enabled:
@@ -2555,7 +2602,7 @@ class NovaProvider(Provider):
                 # get hosts ids from masakari for current cluster
                 hosts = masakari.get_nodes_in_segment(self._token, str(cluster_name))
                 host_ids = [x['name'] for x in hosts]
-                LOG.debug('checking configs for %s hosts in aggregate %s : %s',
+                LOG.debug('checking configs for %s hosts in availability_zone %s : %s',
                           str(len(host_ids)), cluster_name, str(host_ids))
                 hypervisors = nova_client.hypervisors.list()
                 hosts_info = self._resmgr_client.fetch_hosts_details(host_ids, self._token['id'])
@@ -2598,16 +2645,16 @@ class NovaProvider(Provider):
                         need_refresh |= (existing_ca_file_content != ca_cert_content)
 
                         if need_refresh:
-                            LOG.info('gossip key for host %s in aggregate %s needs refresh ? %s',
+                            LOG.info('gossip key for host %s in availability_zone %s needs refresh ? %s',
                                      host_id, cluster_name, str(existing_encrypt != gossip_key))
-                            LOG.info('svc key for host %s in aggregate %s needs refresh ? %s',
+                            LOG.info('svc key for host %s in availability_zone %s needs refresh ? %s',
                                      host_id, cluster_name, str(existing_key_file_content != svc_key_content))
-                            LOG.info('svc cert for host %s in aggregate %s needs refresh ? %s',
+                            LOG.info('svc cert for host %s in availability_zone %s needs refresh ? %s',
                                      host_id, cluster_name, str(existing_cert_file_content != svc_cert_content))
-                            LOG.info('ca cert for host %s in aggregate %s needs refresh ? %s',
+                            LOG.info('ca cert for host %s in availability_zone %s needs refresh ? %s',
                                      host_id, cluster_name, str(existing_ca_file_content != ca_cert_content))
 
-                            LOG.info('config for host %s in aggregate %s will be refreshed', str(host_id), cluster_name)
+                            LOG.info('config for host %s in availability_zone %s will be refreshed', str(host_id), cluster_name)
                             valid_ips = [x for x in cluster_ip_lookup.values() if x != '']
                             join_ips = ','.join([str(v) for v in sorted(valid_ips)])
                             join_nodes = {}
@@ -2628,7 +2675,7 @@ class NovaProvider(Provider):
                                 LOG.info('Successfully updated cert settings for cluster %s for host %s',
                                          cluster_name, host_id)
                         else:
-                            LOG.debug('key or cert config refresh is not needed for host %s in aggregate %s',
+                            LOG.debug('key or cert config refresh is not needed for host %s in availability_zone %s',
                                       host_id, cluster_name)
                     except Exception as xes:
                         LOG.exception('unhandled exception in process_consul_encryption_configuration: %s', str(xes))
@@ -2639,7 +2686,7 @@ class NovaProvider(Provider):
                 self.consul_encryption_processing_running = False
         LOG.debug('consul encryption configuration processing task has finished at %s', str(datetime.utcnow()))
 
-    def get_common_hosts_configs(self, aggregate_id):
+    def get_common_hosts_configs(self, availability_zone):
         # the result object to be returned
         common_configs = {
             "shared_nfs" : []
@@ -2651,23 +2698,23 @@ class NovaProvider(Provider):
             self._token = self._get_v3_token()
             nova_client = self._get_nova_client()
 
-            cluster_exists = db_api.get_cluster(str(aggregate_id), raise_exception=False)
-            LOG.debug('found clusters %s : %s', str(aggregate_id), str(cluster_exists))
+            cluster_exists = db_api.get_cluster(str(availability_zone), raise_exception=False)
+            LOG.debug('found clusters %s : %s', str(availability_zone), str(cluster_exists))
             enabled = False
             if cluster_exists:
                 enabled = cluster_exists.enabled
 
             if not enabled:
-                # first get all hosts in this aggregate from nova
-                details = nova_client.aggregates.get_details(aggregate_id)
-                LOG.debug('host aggregate details : %s', str(details.__dict__))
+                # first get all hosts in this availability_zone from nova
+                details = nova_client.availability_zones.get_details(availability_zone)
+                LOG.debug('host availability_zone details : %s', str(details.__dict__))
                 host_ids = details.hosts
             else:
                 # get hosts from masakari
-                hosts = masakari.get_nodes_in_segment(self._token, str(aggregate_id))
+                hosts = masakari.get_nodes_in_segment(self._token, str(availability_zone))
                 host_ids = [x['name'] for x in hosts]
                 LOG.debug('details of hosts from masakari : %s' , str(host_ids))
-            LOG.debug('host ids found that associated with aggregate %s : %s', str(aggregate_id), str(host_ids))
+            LOG.debug('host ids found that associated with availability_zone %s : %s', str(availability_zone), str(host_ids))
 
             # call resmgr for each host to get configs
             headers = {'X-Auth-Token': self._token['id'], 'Content-Type': 'application/json'}
@@ -2721,13 +2768,13 @@ class NovaProvider(Provider):
         LOG.debug('hosts without nfs : %s', str(without_nfs))
         LOG.debug('hosts with nfs : %s', str(with_nfs))
         # raise exception with those scenarios
-        # - no hosts found for given aggregate
+        # - no hosts found for given availability_zone
         # - unable to get settings from resmgr (mounted_nfs, instances_path)
         # - all hosts without shared nfs or matched instances_path
         # - only some hosts with shared nfs and match instances_path
         error = None
         if len(host_ids) <= 0:
-            error = "no hosts found for aggregate %s " % (str(aggregate_id))
+            error = "no hosts found for availability_zone %s " % (str(availability_zone))
         else:
             # when rest call to resmgr failed
             if len(without_nfs) == 0 and len(with_nfs) == 0:
@@ -2760,7 +2807,7 @@ class NovaProvider(Provider):
 
         LOG.debug('mounted nfs set of all hosts %s: %s', str(host_ids), str(common_nfs_set))
         common_configs['shared_nfs'] = list(common_nfs_set)
-        LOG.debug('common configs for hosts in aggregate %s : %s', str(aggregate_id), str(common_configs))
+        LOG.debug('common configs for hosts in availability_zone %s : %s', str(availability_zone), str(common_configs))
         return common_configs
 
     def _get_common_nfs_set(self, common_set, set_for_check):
@@ -2832,25 +2879,25 @@ class NovaProvider(Provider):
 
         return results
 
-    def set_consul_agent_role(self, aggregate_id, host_id, agent_role):
+    def set_consul_agent_role(self, availability_zone, host_id, agent_role):
         LOG.debug('request consul agent on host %s to run in role %s',
                   host_id, agent_role)
         nova_client = self._get_nova_client()
-        cluster_name = str(aggregate_id)
-        # 1 aggregate needs to be existed, if not, throw AggregateNotFound
-        aggregate = self._get_aggregate(nova_client, aggregate_id)
-        LOG.debug('found host aggregate %s : %s', cluster_name, str(aggregate))
+        cluster_name = str(availability_zone)
+        # 1 availability_zone needs to be existed, if not, throw AggregateNotFound
+        availability_zone = self._get_availability_zone(nova_client, availability_zone)
+        LOG.debug('found host availability_zone %s : %s', cluster_name, str(availability_zone))
         # 2 cluster need to be enabled, if not, throw ClusterNotFound
-        cluster = db_api.get_cluster(str(aggregate_id),
+        cluster = db_api.get_cluster(str(availability_zone),
                                       read_deleted=False,
                                       raise_exception=True)
         if cluster.status != constants.HA_STATE_ENABLED:
             LOG.warning('Ignoring set_consul_agent_role as cluster %s status is not enabled currently.',
                         cluster_name)
             return
-        LOG.debug('found cluster %s : %s', str(aggregate_id), str(cluster))
-        # 3 host needs to be in the aggregate
-        host_ids = aggregate.hosts
+        LOG.debug('found cluster %s : %s', str(availability_zone), str(cluster))
+        # 3 host needs to be in the availability_zone
+        host_ids = availability_zone.hosts
         if str(host_id) not in set(host_ids):
             LOG.warning('host %s not in cluster %s : %s', host_id,
                         cluster_name, str(host_ids))
@@ -2899,7 +2946,7 @@ class NovaProvider(Provider):
                       str(agent_role))
             return
         # create reblance request
-        self._report_consul_rebalance(cluster_name=str(aggregate_id),
+        self._report_consul_rebalance(cluster_name=str(availability_zone),
                                       event_type=constants.EVENT_CONSUL_CHANGE,
                                       candidates= [{
                                           'host': host_id,

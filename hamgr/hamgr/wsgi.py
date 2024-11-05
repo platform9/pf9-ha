@@ -41,21 +41,21 @@ def get_all():
     return jsonify(status=status)
 
 
-@app.route('/v1/ha/<int:aggregate_id>', methods=['GET'])
+@app.route('/v1/ha/<availability_zone>', methods=['GET'])
 @error_handler
-def get_status(aggregate_id):
+def get_status(availability_zone):
     try:
         provider = get_provider()
-        status = provider.get(aggregate_id)
+        status = provider.get(availability_zone)
         return jsonify(status=status)
-    except exceptions.AggregateNotFound:
-        LOG.error('Aggregate %s was not found', aggregate_id)
+    except exceptions.AvailabilityZoneNotFound:
+        LOG.error('Availability zone %s was not found', availability_zone)
         return jsonify(dict(success=False)), 404, CONTENT_TYPE_HEADER
 
 
-@app.route('/v1/ha/<int:aggregate_id>/<action>', methods=['PUT'])
+@app.route('/v1/ha/<availability_zone>/<action>', methods=['PUT'])
 @error_handler
-def update_status(aggregate_id, action):
+def update_status(availability_zone, action):
     if not isinstance(action, str):
         return jsonify(dict(error='Not Found')), 400, CONTENT_TYPE_HEADER
     action = action.lower()
@@ -63,13 +63,13 @@ def update_status(aggregate_id, action):
         return jsonify(dict(error='Invalid action')), 400, CONTENT_TYPE_HEADER
     try:
         provider = get_provider()
-        provider.put(aggregate_id, action)
+        provider.put(availability_zone, action)
         return jsonify(dict(success=True)), 200, CONTENT_TYPE_HEADER
     except exceptions.InsufficientHosts as ex:
         LOG.error('Bad request: %s', ex)
         return jsonify(dict(error=str(ex))), 400, CONTENT_TYPE_HEADER
-    except exceptions.AggregateNotFound:
-        LOG.error('Aggregate %s was not found', aggregate_id)
+    except exceptions.AvailabilityZoneNotFound:
+        LOG.error('Availability Zone %s was not found', availability_zone)
         return jsonify(dict(success=False)), 404, CONTENT_TYPE_HEADER
     except (exceptions.HostOffline, exceptions.InvalidHostRoleStatus,
             exceptions.InvalidHypervisorRoleStatus) as ex:
@@ -116,15 +116,15 @@ def get_all_consul_status():
     status = ha_provider.refresh_consul_status()
     return jsonify(status)
 
-@app.route('/v1/consul/<int:aggregate_id>', methods=['GET'])
+@app.route('/v1/consul/<availability_zone>', methods=['GET'])
 @error_handler
-def get_consul_status(aggregate_id=None):
+def get_consul_status(availability_zone=None):
     ha_provider = provider_factory.ha_provider()
     db_provider = provider_factory.db_provider()
-    records = db_provider.get_latest_consul_status(aggregate_id)
+    records = db_provider.get_latest_consul_status(availability_zone)
     results = []
     staled = False
-    LOG.debug('latest consul status for aggregate %s : %s', str(aggregate_id), str(records))
+    LOG.debug('latest consul status for availability zone %s : %s', availability_zone, str(records))
     for record in records:
         if record is None:
             continue
@@ -137,29 +137,27 @@ def get_consul_status(aggregate_id=None):
         #  - 'last update'
 
         # get zone name by cluster id
-        LOG.debug('find host aggregate for record : %s', str(record))
-        aggregate = ha_provider.get_aggregate_info_for_cluster(int(record.clusterId))
-        if not aggregate:
-            LOG.debug('no host aggregate found with id : %s', str(record.clusterId))
+        LOG.debug('find availability zone for record : %s', str(record))
+        az = ha_provider.get_availability_zone_info_for_cluster(record.clusterName)
+        if not az:
+            LOG.debug('no availability zone found with name : %s', record.clusterName)
             continue
-        LOG.debug('host aggregate found : %s', str(aggregate))
-        aggregate_name = aggregate.name
-        aggregate_zone = aggregate.availability_zone
-        aggregate_host_ids = aggregate.hosts
+        LOG.debug('availability zone found : %s', az)
+        availability_zone_host_ids = availability_zone.hosts
 
         leader = record.leader
         # need to remove the prefix u int string json , otherwise loads will fail
         members = json.loads(str(record.members).replace('u\'', '\'').replace('\'','\"'))
-        for host_id in aggregate_host_ids:
+        for host_id in availability_zone_host_ids:
             matches = [x for x in members if x['Name'] == host_id]
             if len(matches) <= 0:
                 continue
             member = matches[0]
             if not member:
-                LOG.warning('host %s exists in aggregate %s but does not '
+                LOG.warning('host %s exists in availability zone %s but does not '
                          'in consul members report : %s',
                          str(host_id),
-                         str(aggregate_id),
+                         str(availability_zone),
                          str(members))
                 continue
 
@@ -173,8 +171,7 @@ def get_consul_status(aggregate_id=None):
                 is_leader = (leader == ('%s:%s' % (member['Addr'], member['Tags']['port'])))
 
             result = {
-                'aggregateName': aggregate_name,
-                'zoneName': aggregate_zone,
+                'zoneName': availability_zone,
                 'hostId': host_id,
                 'hostStatus': host_status,
                 'consulRole': host_role,
@@ -190,7 +187,7 @@ def get_consul_status(aggregate_id=None):
     if len([x for x in results if x]) <= 0 or staled:
         LOG.info('no consul status records found in db or they staled, now get real time status by RPC')
         realtime_status = ha_provider.refresh_consul_status()
-        target_aggregate = None
+        target_availability_zone = None
         if realtime_status :
             agg_ids = realtime_status.keys()
 
@@ -201,7 +198,7 @@ def get_consul_status(aggregate_id=None):
                     LOG.info('no host aggregate found with id %s', str(agg_id))
                     continue
 
-                if aggregate_id and aggregate_id == agg_id:
+                if availability_zone and availability_zone == agg_id:
                     target_aggregate = aggregate
                 aggregate_name = aggregate.name
                 aggregate_zone = aggregate.availability_zone
@@ -214,8 +211,7 @@ def get_consul_status(aggregate_id=None):
                         # only server role will have port 8300 in Tags
                         is_leader = (realtime_status[agg_id]['leader'] == ('%s:%s' % (member['Addr'], member['Tags']['port'])))
                     # convert the data to output schema
-                    results.append({'aggregateName': aggregate_name,
-                                    'zoneName': aggregate_zone,
+                    results.append({'availabilityZoneName': availability_zone,
                                     'hostId': host_id,
                                     'hostStatus': host_status,
                                     'consulRole': host_role,
@@ -224,28 +220,28 @@ def get_consul_status(aggregate_id=None):
                                                                     '%Y-%m-%d %H:%M:%S')})
         else:
             LOG.info('real time consul status not found')
-        if aggregate_id and target_aggregate:
-            results = [x for x in results if x['aggregateName'] == str(target_aggregate.name)]
+        if availability_zone and target_availability_zone:
+            results = [x for x in results if x['availabilityZoneName'] == str(target_availability_zone.name)]
 
     return jsonify(results)
 
 
-@app.route('/v1/config/<int:aggregate_id>', methods=['GET'])
+@app.route('/v1/config/<availability_zone>', methods=['GET'])
 @error_handler
-def get_hosts_configs(aggregate_id):
+def get_hosts_configs(availability_zone):
     """
     return the reported hosts configs from resmgr,
-    :param aggregate_id: the host aggregate name
+    :param availability_zone: the availability zone name
     :return:
     """
     try:
         ha_provider = provider_factory.ha_provider()
         # scenario 1 - called before /enable API is called
         # to determine whether there is shared nfs server
-        # use nova to get list of hosts for given aggregate id
+        # use nova to get list of hosts for given availability zone
         # scenario 2 - called after the /enable API is called
         # use masakari to get list of host
-        config = ha_provider.get_common_hosts_configs(aggregate_id)
+        config = ha_provider.get_common_hosts_configs(availability_zone)
         return jsonify(config)
     except exceptions.NoCommonSharedNfsException as e1:
         return jsonify(dict(success=False, error=str(e1))), 500, CONTENT_TYPE_HEADER
@@ -266,26 +262,26 @@ def get_vmha_clusters():
     return jsonify(results)
 
 
-@app.route('/v1/cluster/<int:aggregate_id>', methods=['GET'])
+@app.route('/v1/cluster/<availability_zone>', methods=['GET'])
 @error_handler
-def get_vmha_cluster_by_id(aggregate_id):
+def get_vmha_cluster_by_name(availability_zone):
     """
     get vmha cluster info for given name
-    :param aggregate_id: the host aggregate id
+    :param availability_zone: the availability zone name
     :return:
     info about the given active vmha cluster
     """
     ha_provider = provider_factory.ha_provider()
-    results = ha_provider.get_active_clusters(id=aggregate_id)
+    results = ha_provider.get_active_clusters(name=availability_zone)
     return jsonify(results)
 
 
-@app.route('/v1/consul/<int:aggregate_id>/agent/<uuid:host_uuid>/role/<role>', methods=['PUT'])
+@app.route('/v1/consul/<availability_zone>/agent/<uuid:host_uuid>/role/<role>', methods=['PUT'])
 @error_handler
-def set_consul_role(aggregate_id, host_uuid, role):
+def set_consul_role(availability_zone, host_uuid, role):
     """
     set the consul cluster role (master or slave) for a host in given cluster.
-    :param aggregate_id:  the id of ha cluster
+    :param availability_zone:  the name of ha cluster
     :param host_id: the uuid of host in ha cluster
     :param role: the consul agent role, 'server' or 'client'
     :return:
@@ -295,19 +291,19 @@ def set_consul_role(aggregate_id, host_uuid, role):
         return jsonify(dict(error='Invalid role')), 400, CONTENT_TYPE_HEADER
     ha_provider = provider_factory.ha_provider()
     try:
-        ha_provider.set_consul_agent_role(aggregate_id, host_id, role)
+        ha_provider.set_consul_agent_role(availability_zone, host_id, role)
         return jsonify(dict(success=True)), 200, CONTENT_TYPE_HEADER
-    except exceptions.AggregateNotFound:
-        LOG.error('Aggregate %s was not found', str(aggregate_id))
+    except exceptions.AvailabilityZoneNotFound:
+        LOG.error('Availability zone %s was not found', availability_zone)
         return jsonify(dict(success=False)), 412, CONTENT_TYPE_HEADER
     except exceptions.ClusterNotFound:
-        LOG.error('Cluster %s was not found', str(aggregate_id))
+        LOG.error('Cluster %s was not found', availability_zone)
         return jsonify(dict(success=False)), 412, CONTENT_TYPE_HEADER
     except exceptions.HostNotFound:
         LOG.error("Host %s was not found", host_id)
         return jsonify(dict(success=False)), 412, CONTENT_TYPE_HEADER
     except exceptions.HostNotInCluster:
-        LOG.error("Host %s is not in cluster %s", host_id, str(aggregate_id))
+        LOG.error("Host %s is not in cluster %s", host_id, availability_zone)
         return jsonify(dict(success=False)), 412, CONTENT_TYPE_HEADER
     except exceptions.RoleSettingsNotFound:
         LOG.error("Host %s does not have required role settings", host_id)

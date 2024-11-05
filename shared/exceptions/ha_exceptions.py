@@ -13,10 +13,10 @@
 # limitations under the License.
 
 
-class AggregateNotFound(Exception):
-    def __init__(self, aggregate):
-        message = 'Aggregate %s not found' % aggregate
-        super(AggregateNotFound, self).__init__(message)
+class AvailabilityZoneNotFound(Exception):
+    def __init__(self, availability_zone):
+        message = 'Availability Zone %s not found' % availability_zone
+        super(AvailabilityZoneNotFound, self).__init__(message)
 
 
 class ClusterExists(Exception):

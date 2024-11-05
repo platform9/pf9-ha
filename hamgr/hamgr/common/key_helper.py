@@ -67,7 +67,7 @@ def clean_openssl_index_db():
 
 def get_consul_gossip_encryption_key(cluster_name="", seed=""):
     # the key is composed with starting magic code 'pf9-dc'
-    # and the cluster name (host aggregate id), if longer
+    # and the cluster name (availability zone name), if longer
     # than require 16 bytes, then trim it, when shorter ,
     # append 0 until length is 16
     str_name = "-" + str(cluster_name)

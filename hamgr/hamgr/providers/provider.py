@@ -21,19 +21,19 @@ class Provider(object):
 
     """Interface to HA manager provider."""
     @abstractmethod
-    def get(self, aggregate_id):
-        """Get the HA config status for given aggregate
+    def get(self, availability_zone):
+        """Get the HA config status for given availability_zone
 
-        :param aggregate_id: If none, returns all
+        :param availability_zone: If none, returns all
         :return: 'enabled'/'disabled'/'not-applicable'
         """
         pass
 
     @abstractmethod
-    def put(self, aggregate_id, method):
-        """Enable/disable HA for an aggregate
+    def put(self, availability_zone, method):
+        """Enable/disable HA for an availability_zone
 
-        :param aggregate_id:
+        :param availability_zone:
         :param method: enable/disable
         :return:
         """
