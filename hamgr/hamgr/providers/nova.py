@@ -544,7 +544,9 @@ class NovaProvider(Provider):
                 current_cluster = hamgr_clusters_for_az[0]
                 LOG.info('pick the first matched vmha cluster %s for availability zone name %s',
                          current_cluster.name, az_name)
-
+                if current_cluster.status == 'request-enable': 
+                   LOG.info('VMHA is not yet enabled for availability zone: %s not precessing it', current_cluster.name)                                 
+                   continue  
                 # reconcile hosts to hamgr and masakari
                 cluster_name = current_cluster.name
                 cluster_enabled = current_cluster.enabled
@@ -1273,7 +1275,7 @@ class NovaProvider(Provider):
                 cluster.task_state
         else:
             task_state = cluster.task_state
-        return dict(name=availability_zone, enabled=enabled, task_state=task_state)
+        return dict(name=availability_zone, request_status=cluster.status, enabled=enabled, task_state=task_state)
   
     def _get_ha_status(self):
         self._token = self._get_v3_token()
@@ -1616,22 +1618,8 @@ class NovaProvider(Provider):
         nova_client = self._get_nova_client()
         str_availability_zone = request.name
         cluster_id = request.id
-        cluster_name = str(request.name)
-        time_begin = datetime.utcnow()
-        self.__perf_meter('db_api.get_cluster', time_begin),
-        time_begin = datetime.utcnow()
-        _ , azInfo = self._get_active_azs(self._token['id'])
-        az_hosts = []
-        for az in azInfo['availabilityZoneInfo']:
-            if az['zoneName'] == str_availability_zone:
-                for x in az['hosts'].keys():
-                    az_hosts.append(x)
-                break
-        self.__perf_meter('_get_availability_zone', time_begin)
-        if not hosts:
-            hosts = az_hosts
-        else:
-            LOG.info('Enabling HA on some of the hosts %s of the %s availability_zone',
+        cluster_name = str(request.name)  
+        LOG.info('Enabling HA on some of the hosts %s of the %s availability_zone',
                      str(hosts), str_availability_zone)
         try:
             # observed that hosts sometimes need longer time to get to converged state
@@ -1864,7 +1852,20 @@ class NovaProvider(Provider):
                     if request.status == constants.HA_STATE_REQUEST_ENABLE:
                         # cleanup before enable request is processed to avoid masakari conflict
                         self._cleanup_vmha_and_masakari()
-                        self._handle_enable_request(request)
+                        with self.ha_status_processing_lock:
+                            str_availability_zone = request.name
+                            _ , azInfo = self._get_active_azs(self._token['id'])
+                            az_hosts = []
+                            for az in azInfo['availabilityZoneInfo']:
+                                if az['zoneName'] == str_availability_zone:
+                                    for x in az['hosts'].keys():
+                                        az_hosts.append(x)
+                                    break
+                            if len(az_hosts) < 4:
+                                LOG.info('less than 4 hosts in availability zone %s waiting till it has >=4 hosts', str_availability_zone)
+                                self.ha_status_processing_running = False
+                                return
+                        self._handle_enable_request(request, hosts=az_hosts)
                     if request.status == constants.HA_STATE_REQUEST_DISABLE:
                         self._handle_disable_request(request)
                         # cleanup after disable request is processed to keep things synced
@@ -2960,4 +2961,3 @@ class NovaProvider(Provider):
 def get_provider(config):
     db_api.init(config)
     return NovaProvider(config)
-
