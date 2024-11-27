@@ -165,7 +165,7 @@ class NovaProvider(Provider):
         return enable
 
     def _get_active_azs(self, token):
-        headers = {"X-AUTH-TOKEN": self._token['id']}
+        headers = {"X-AUTH-TOKEN": token}
         url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-availability-zone/detail'
         response = requests.get(url, headers=headers)
         azInfo = response.json()
@@ -176,8 +176,8 @@ class NovaProvider(Provider):
             nova_active_azs.append(az['zoneName'])
         return nova_active_azs, azInfo
    
-    def _get_nova_hosts(self, az):
-        headers = {"X-AUTH-TOKEN": self._token['id']}
+    def _get_nova_hosts(self, token, az):
+        headers = {"X-AUTH-TOKEN": token}
         url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-services'
         response = requests.get(url, headers=headers)
         data = response.json()
@@ -265,7 +265,7 @@ class NovaProvider(Provider):
                     continue
                 # if host in the event not exist in availability zone, no need to
                 # handle the event
-                nova_hosts = self._get_nova_hosts(cluster.name)
+                nova_hosts = self._get_nova_hosts(self._token['id'], cluster.name)
                 if host_name not in nova_hosts:
                     LOG.warning('host %s in event %s does not exist in availability zone %s',
                                 host_name, str(event_uuid), str(nova_hosts))
@@ -527,7 +527,7 @@ class NovaProvider(Provider):
                 az_name = az['zoneName']
                 if az['zoneName'] == 'internal':
                     continue
-                az_hosts = self._get_nova_hosts(az_name)
+                az_hosts = self._get_nova_hosts(self._token['id'], az_name)
                 # is there a ha cluster for az_name ?
                 hamgr_clusters_for_az = [x for x in hamgr_all_clusters if x.name == az_name]
                 if not hamgr_clusters_for_az:
@@ -1974,7 +1974,8 @@ class NovaProvider(Provider):
         LOG.info('Removing host %s from availability_zone %s', host, cluster.name)
         if not nova_client:
             nova_client = self._get_nova_client()
-        az_hosts = self._get_nova_hosts(cluster.name)
+        self._token = self._get_v3_token()
+        az_hosts = self._get_nova_hosts(self._token['id'], cluster.name)
         current_host_ids = set(az_hosts)
 
         try:
