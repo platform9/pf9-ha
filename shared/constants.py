@@ -59,13 +59,14 @@ RPC_TASK_STATE_FINISHED = 'finished'
 # Blank i.e. NULL task state means that the task was completed. Hence the
 # valid task states are only creating, deleting, updating and error-removing.
 
+TASK_WAITING = 'waiting'
 TASK_CREATING = 'creating'
 TASK_REMOVING = 'removing'
 TASK_MIGRATING = 'migrating'
 TASK_COMPLETED = None
 TASK_ERROR_REMOVING = 'error-removing'
-VALID_TASK_STATES = [TASK_CREATING, TASK_MIGRATING, TASK_REMOVING,
-                     TASK_COMPLETED, TASK_ERROR_REMOVING]
+VALID_TASK_STATES = [TASK_WAITING, TASK_CREATING, TASK_MIGRATING, 
+                     TASK_REMOVING, TASK_COMPLETED, TASK_ERROR_REMOVING]
 
 CONSUL_ROLE_SERVER = 'server'
 CONSUL_ROLE_CLIENT = 'client'
