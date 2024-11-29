@@ -1275,7 +1275,7 @@ class NovaProvider(Provider):
                 cluster.task_state
         else:
             task_state = cluster.task_state
-        return dict(name=availability_zone, request_status=cluster.status, enabled=enabled, task_state=task_state)
+        return dict(name=availability_zone, enabled=enabled, task_state=task_state)
   
     def _get_ha_status(self):
         self._token = self._get_v3_token()
@@ -1598,10 +1598,8 @@ class NovaProvider(Provider):
         # this will avoid the REST API return 409
         try:
             LOG.debug('create ha cluster for enabling request')
-            cluster = db_api.create_cluster_if_needed(availability_zone,
-                                                      constants.TASK_CREATING)
-            if cluster.task_state != constants.TASK_CREATING:
-                db_api.update_cluster_task_state(availability_zone, constants.TASK_CREATING)
+            cluster = db_api.create_cluster_if_needed(availability_zone, constants.TASK_WAITING)
+            db_api.update_cluster_task_state(availability_zone, constants.TASK_WAITING)
             # set the status to 'request-enable'
             db_api.update_request_status(availability_zone, constants.HA_STATE_REQUEST_ENABLE)
             # publish status
@@ -1661,7 +1659,10 @@ class NovaProvider(Provider):
                 else:
                     LOG.debug('svc key and cert for cluster name %s are good for now', cluster_name)
 
-            # 1. mark request as 'enabling' in status
+            # 1. update task_state to 'creating' and mark request as 'enabling' in status
+            cluster = db_api.get_cluster(cluster_id)
+            if cluster.task_state != constants.TASK_CREATING:
+                db_api.update_cluster_task_state(str_availability_zone, constants.TASK_CREATING)
             LOG.info('updating status of cluster %s to %s', str(cluster_id), constants.HA_STATE_ENABLING)
             time_begin = datetime.utcnow()
             db_api.update_request_status(cluster_id, constants.HA_STATE_ENABLING)
@@ -1817,7 +1818,7 @@ class NovaProvider(Provider):
             LOG.warning('no cluster with id for disable %s', str_availability_zone)
             return
 
-        if cluster.task_state not in [constants.TASK_COMPLETED,
+        if cluster.task_state not in [constants.TASK_COMPLETED, constants.TASK_WAITING,
                                       constants.TASK_ERROR_REMOVING]:
             if cluster.task_state == constants.TASK_MIGRATING and \
                     next_state == constants.TASK_MIGRATING:
