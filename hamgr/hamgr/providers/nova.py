@@ -1847,6 +1847,7 @@ class NovaProvider(Provider):
             self.ha_status_processing_running = True
         LOG.debug('HA status processing task starts to run at %s', str(datetime.utcnow()))
         try:
+            self._token = self._get_v3_token()
             requests = db_api.get_all_unhandled_enable_or_disable_requests()
             if requests:
                 for request in requests:
