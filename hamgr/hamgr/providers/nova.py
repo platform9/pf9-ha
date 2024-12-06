@@ -166,6 +166,7 @@ class NovaProvider(Provider):
 
     def _get_active_azs(self, token):
         headers = {"X-AUTH-TOKEN": token}
+        LOG.info('**** calling nova-api with token : %s', token)
         url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-availability-zone/detail'
         response = requests.get(url, headers=headers)
         azInfo = response.json()

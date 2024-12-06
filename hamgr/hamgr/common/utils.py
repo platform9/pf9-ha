@@ -61,9 +61,12 @@ def _need_refresh(token):
 def get_token(auth_url, tenant, user, password, old_token, region_name):
 
     token = old_token
-
+    if token is None:                                                     
+        LOG.info('*** in get_token. old token is none')              
+    else:                       
+        LOG.info('*** in get_token. Old_token is : %s ****', old_token['id'])    
     if not old_token or _need_refresh(old_token):
         LOG.debug('Refreshing token...')
         token = _get_auth_token(auth_url, tenant, user, password, region_name)
-
+    LOG.info('**** in get_token. new token is : %s ***', token['id'])
     return token
