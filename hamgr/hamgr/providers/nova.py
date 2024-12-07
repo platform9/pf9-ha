@@ -165,26 +165,29 @@ class NovaProvider(Provider):
         return enable
 
     def _get_active_azs(self, token):
+        nova_active_azs = []
+        azInfo = {}
         headers = {"X-AUTH-TOKEN": token}
         url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-availability-zone/detail'
         response = requests.get(url, headers=headers)
-        azInfo = response.json()
-        nova_active_azs = []
-        for az in azInfo['availabilityZoneInfo']:
-            if az['zoneName'] == 'internal':
-                 continue
-            nova_active_azs.append(az['zoneName'])
+        if response.status_code == 200:
+            azInfo = response.json()
+            for az in azInfo['availabilityZoneInfo']:
+                if az['zoneName'] == 'internal':
+                    continue
+                nova_active_azs.append(az['zoneName'])
         return nova_active_azs, azInfo
    
     def _get_nova_hosts(self, token, az):
+        nova_hosts = []
         headers = {"X-AUTH-TOKEN": token}
         url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-services'
         response = requests.get(url, headers=headers)
-        data = response.json()
-        nova_hosts = []
-        for svc in data['services']:
-            if svc['zone'] == az:
-                nova_hosts.append(svc['host'])
+        if response.status_code == 200:
+            data = response.json()
+            for svc in data['services']:
+                if svc['zone'] == az:
+                    nova_hosts.append(svc['host'])
         return nova_hosts
  
     # thread is dedicated to handle recorded host events
@@ -258,6 +261,9 @@ class NovaProvider(Provider):
                 LOG.debug('event %s: found ha cluster with id %s : %s', event_uuid,
                           event.cluster_id, str(cluster))
                 nova_active_azs, azInfo = self._get_active_azs(self._token['id'])
+                if not nova_active_azs:
+                    LOG.error('Error getting availability zone info, will retry')
+                    return
                 # if no such availability zone, no need to handle it
                 if not cluster.name in nova_active_azs:
                     LOG.warning('no availability zone found with name %s for event %s',
@@ -266,6 +272,9 @@ class NovaProvider(Provider):
                 # if host in the event not exist in availability zone, no need to
                 # handle the event
                 nova_hosts = self._get_nova_hosts(self._token['id'], cluster.name)
+                if not nova_hosts:
+                    LOG.error('Error getting hosts in availability zone %s, will retry', cluster.name)
+                    return
                 if host_name not in nova_hosts:
                     LOG.warning('host %s in event %s does not exist in availability zone %s',
                                 host_name, str(event_uuid), str(nova_hosts))
@@ -513,6 +522,9 @@ class NovaProvider(Provider):
             self._token = self._get_v3_token()
             nova_client = self._get_nova_client()
             nova_active_azs, azInfo = self._get_active_azs(self._token['id'])
+            if not nova_active_azs:
+                LOG.error('Error getting availability zone info, will retry')
+                return
             LOG.debug('active nova availability_zones : %s', nova_active_azs)
             hamgr_all_clusters = db_api.get_all_clusters()
             LOG.debug('all vmha clusters : %s', str(hamgr_all_clusters))
@@ -528,6 +540,9 @@ class NovaProvider(Provider):
                 if az['zoneName'] == 'internal':
                     continue
                 az_hosts = self._get_nova_hosts(self._token['id'], az_name)
+                if not az_hosts:
+                    LOG.error('Error getting hosts in availability zone %s, will retry', az_name)
+                    return
                 # is there a ha cluster for az_name ?
                 hamgr_clusters_for_az = [x for x in hamgr_all_clusters if x.name == az_name]
                 if not hamgr_clusters_for_az:
@@ -842,6 +857,9 @@ class NovaProvider(Provider):
             else:
                 # find all active ha clusters
                 nova_active_azs, azInfo = self._get_active_azs(self._token['id'])
+                if not nova_active_azs:
+                    LOG.error('Error getting availability zone info, will retry')
+                    return
                 hamgr_clusters = db_api.get_all_clusters()
                 for az in nova_active_azs:
                     # make sure vmha group for this availability_zone actually exists
@@ -921,6 +939,9 @@ class NovaProvider(Provider):
         """
         self._token = self._get_v3_token()
         nova_active_azs, azInfo = self._get_active_azs(self._token['id'])
+        if not nova_active_azs:
+            LOG.error('Error getting availability zone info, will retry')
+            return
         LOG.debug('names of host availability_zones found : %s', nova_active_azs)
         hamgr_all_clusters = db_api.get_all_clusters()
         hamgr_cluster_names = [x.name for x in hamgr_all_clusters]
@@ -1156,6 +1177,9 @@ class NovaProvider(Provider):
             #all_hosts = list(set(host_ids_for_adding).union(set(peer_host_ids)))
             # Need join ips for offline hosts in availability_zone as well
             _ , azInfo = self._get_active_azs(self._token['id'])
+            if not azInfo:
+                LOG.error('Error getting availability zone info, will retry')
+                return
             az_hosts = []
             for az in azInfo['availabilityZoneInfo']:
                 if az['zoneName'] == cluster_name:
@@ -1189,6 +1213,9 @@ class NovaProvider(Provider):
         self._token = self._get_v3_token()
         # Need join ips for offline hosts in availability_zone as well
         _ , azInfo = self._get_active_azs(self._token['id'])
+        if not azInfo:
+            LOG.error('Error getting availability zone info, will retry')
+            return
         az_hosts = []
         for az in azInfo['availabilityZoneInfo']:
             if az['zoneName'] == cluster_name:
@@ -1280,6 +1307,9 @@ class NovaProvider(Provider):
     def _get_ha_status(self):
         self._token = self._get_v3_token()
         nova_active_azs, _ = self._get_active_azs(self._token['id'])
+        if not nova_active_azs:
+            LOG.error('Error getting availability zone info, will retry')
+            return
         result = []
         for az in nova_active_azs:
             obj = self._get_az_ha_status(az)
@@ -1857,6 +1887,12 @@ class NovaProvider(Provider):
                         with self.ha_status_processing_lock:
                             str_availability_zone = request.name
                             _ , azInfo = self._get_active_azs(self._token['id'])
+                            if not azInfo:
+                                # azInfo can be null if no AZ is created or 
+                                #an error connecting to nova-api (invalid token, nova-api not available..etc)
+                                LOG.info('No AZ created or error getting availability zone info, will retry')
+                                self.ha_status_processing_running = False
+                                return
                             az_hosts = []
                             for az in azInfo['availabilityZoneInfo']:
                                 if az['zoneName'] == str_availability_zone:
@@ -1896,7 +1932,10 @@ class NovaProvider(Provider):
                 else:
                     # If cluster was not even created, but we are disabling HA
                     # to rollback enablement
-                    _ , azIno = self._get_active_azs(self._token['id'])
+                    _ , azInfo = self._get_active_azs(self._token['id'])
+                    if not azInfo:
+                        LOG.error('Error getting availability zone info, will retry')
+                        return
                     az_hosts = []
                     for az in azInfo['availabilityZoneInfo']:
                         if az['zoneName'] == 'internal':
@@ -1979,6 +2018,9 @@ class NovaProvider(Provider):
             nova_client = self._get_nova_client()
         self._token = self._get_v3_token()
         az_hosts = self._get_nova_hosts(self._token['id'], cluster.name)
+        if not az_hosts:
+            LOG.error('Error getting hosts in availability zone %s, will retry', cluster.name)
+            return
         current_host_ids = set(az_hosts)
 
         try:
@@ -2068,6 +2110,9 @@ class NovaProvider(Provider):
                 for cluster in clusters:
                     availability_zone = cluster.name
                     _ , azInfo = self._get_active_azs(self._token['id'])
+                    if not azInfo:
+                        LOG.error('Error getting availability zone info, will retry')
+                        return
                     az_hosts = []
                     for az in azInfo['availabilityZoneInfo']:
                         if az['zoneName'] == availability_zone:
@@ -2357,6 +2402,9 @@ class NovaProvider(Provider):
                 # scenarios (issue found from ticket https://platform9.zendesk.com/agent/tickets/1252718)
                 self._token = self._get_v3_token()
                 nova_active_azs, azInfo = self._get_active_azs(self._token['id'])
+                if not nova_active_azs:
+                    LOG.error('Error getting availability zone info, will retry')
+                    return
                 hamgr_all_clusters = db_api.get_all_clusters()
                 for az in azInfo['availabilityZoneInfo']:
                     az_name = az['zoneName']
