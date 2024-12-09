@@ -49,12 +49,12 @@ def _need_refresh(token):
 
     # ToDo(pratik): check if token is valid by querying keystone
 
-    str_exp_time = token['expires_at']
-    token_time = time.strptime(str_exp_time, '%Y-%m-%dT%H:%M:%S.%fZ')
+    str_issue_time = token['issued_at']
+    token_time = time.strptime(str_issue_time, '%Y-%m-%dT%H:%M:%S.%fZ')
     current_time = time.gmtime()
 
-    # If the Token's expiry is in 300 secs or less, it needs refresh
-    return True if time.mktime(token_time) - time.mktime(current_time) < 300.0\
+    # If the Token is issued before 1 hr or more, it needs refresh
+    return True if time.mktime(current_time) - time.mktime(token_time) > 3600.0\
         else False
 
 
