@@ -54,7 +54,7 @@ def _need_refresh(token):
     current_time = time.gmtime()
 
     # If the Token is issued before 1 hr or more, it needs refresh
-    return True if time.mktime(current_time) - time.mktime(token_time) > 21600.0\
+    return True if time.mktime(current_time) - time.mktime(token_time) > 10800.0\
         else False
 
 
