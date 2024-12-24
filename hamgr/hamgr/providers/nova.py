@@ -1891,8 +1891,7 @@ class NovaProvider(Provider):
                                 # azInfo can be null if no AZ is created or 
                                 #an error connecting to nova-api (invalid token, nova-api not available..etc)
                                 LOG.info('No AZ created or error getting availability zone info, will retry')
-                                self.ha_status_processing_running = False
-                                return
+                                continue
                             az_hosts = []
                             for az in azInfo['availabilityZoneInfo']:
                                 if az['zoneName'] == str_availability_zone:
@@ -1901,8 +1900,7 @@ class NovaProvider(Provider):
                                     break
                             if len(az_hosts) < 4:
                                 LOG.info('less than 4 hosts in availability zone %s waiting till it has >=4 hosts', str_availability_zone)
-                                self.ha_status_processing_running = False
-                                return
+                                continue
                         self._handle_enable_request(request, hosts=az_hosts)
                     if request.status == constants.HA_STATE_REQUEST_DISABLE:
                         self._handle_disable_request(request)
