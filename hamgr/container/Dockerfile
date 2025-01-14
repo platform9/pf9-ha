@@ -27,6 +27,7 @@ COPY dbmigrate.py /usr/local/lib/python3.9/site-packages/hamgr/dbmigrate.py
 COPY hamgr-sdist.tgz \
      requirements.txt \
      /root/
+COPY liveness_probe.py /root/
 
 COPY init-region .
 RUN chmod 755 init-region
