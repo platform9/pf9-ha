@@ -3,6 +3,8 @@ oslo.config
 SQLAlchemy
 python-novaclient
 python-keystoneclient
+python-cinderclient
+python-openstackclient
 keystoneauth1
 keystonemiddleware
 jinja2

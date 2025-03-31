@@ -33,6 +33,38 @@ def get_provider():
     return provider_factory.ha_provider()
 
 
+def get_providers_for_host(host_id, event_type):
+    """Get the appropriate providers for a host based on the services it runs.
+    
+    A host can run both cinder and nova services, so we need to return all
+    applicable providers.
+    
+    :param host_id: Host ID
+    :param event_type: Event type (host-up or host-down)
+    :return: List of applicable providers for the host
+    """
+    providers = []
+    
+    # Check if this host runs cinder services
+    cinder_provider = provider_factory.cinder_provider()
+    cinder_provider._token = cinder_provider._get_v3_token()
+    cinder_hosts = cinder_provider._get_cinder_hosts()
+    
+    if host_id in cinder_hosts:
+        LOG.info('Host %s runs cinder volume services', host_id)
+        providers.append(cinder_provider)
+    
+    # Check if this host runs nova services
+    nova_provider = provider_factory.ha_provider()
+    nova_provider._token = nova_provider._get_v3_token()
+    
+    # We'll always include the nova provider as it's the default
+    LOG.info('Adding nova provider for host %s', host_id)
+    providers.append(nova_provider)
+    
+    return providers
+
+
 @app.route('/v1/ha', methods=['GET'])
 @error_handler
 def get_all():
@@ -94,17 +126,34 @@ def update_host_status(host_uuid):
     postby = event_details['event'].get('reportedBy', '')
     LOG.info('received event %s for host %s from host %s : %s',
              str(event), host_id, str(postby), str(event_details))
-    provider = get_provider()
-    if event and event == 'host-down':
-        masakari_notified = provider.host_down(event_details)
-    elif event and event == 'host-up':
-        masakari_notified = provider.host_up(event_details)
-    else:
-        LOG.warning('Invalid request')
-        return jsonify(dict(success=False)), 422, CONTENT_TYPE_HEADER
-    LOG.info('received %s event for host %s has been processed, result : %s',
-             event, host_id, str(masakari_notified))
-    if masakari_notified:
+    
+    # Get all applicable providers for this host
+    providers = get_providers_for_host(host_id, event)
+    
+    # Track if any provider successfully processed the event
+    success = False
+    
+    # Process the event with all applicable providers
+    for provider in providers:
+        try:
+            if event and event == 'host-down':
+                provider_success = provider.host_down(event_details)
+            elif event and event == 'host-up':
+                provider_success = provider.host_up(event_details)
+            else:
+                LOG.warning('Invalid request')
+                return jsonify(dict(success=False)), 422, CONTENT_TYPE_HEADER
+                
+            LOG.info('Provider %s processed %s event for host %s, result: %s',
+                     provider.__class__.__name__, event, host_id, str(provider_success))
+            
+            # If any provider succeeds, consider the operation successful
+            success = success or provider_success
+        except Exception as e:
+            LOG.exception('Provider %s failed to process %s event for host %s: %s',
+                         provider.__class__.__name__, event, host_id, str(e))
+    
+    if success:
         return jsonify(dict(success=True)), 200, CONTENT_TYPE_HEADER
     return jsonify(dict(success=False)), 403, CONTENT_TYPE_HEADER
 

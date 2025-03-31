@@ -124,6 +124,22 @@ class ConsulRoleRebalanceRecord(Base):
     last_updated = Column('last_updated', DateTime)
     last_error = Column('last_error', Text)
 
+
+class CinderEventsProcessing(Base):
+    __tablename__ = 'cinder_events_processing'
+    __table_args__ = {'mysql_engine': 'InnoDB'}
+    __mapper_args__ = {'always_refresh': True}
+
+    id = Column(Integer, primary_key=True)
+    event_uuid = Column(Text)
+    event_type = Column(Text)
+    event_time = Column(DateTime)
+    host_name = Column(Text)
+    notification_status = Column(Text)
+    notification_updated = Column(DateTime)
+    error_state = Column(Text)
+
+
 class Hosts(Base):
     __tablename__ = 'hosts'
     __table_args__ = {'mysql_engine': 'InnoDB'}
@@ -718,3 +734,114 @@ def update_consul_role_rebalance(uuid,
             LOG.error('DB error when getting consul role rebalance record  %s : %s', uuid, se)
         return None
 
+
+# create cinder processing event, return event created to caller
+def create_cinder_processing_event(event_uuid, event_type, host_name, notification_status='', error_state=''):
+    """Create a new cinder processing event.
+
+    :param event_uuid: UUID of the event
+    :param event_type: Type of the event (host-up or host-down)
+    :param host_name: Name of the host
+    :param notification_status: Status of the notification
+    :param error_state: Error state if any
+    :return: Created event object
+    """
+    with dbsession() as session:
+        event = CinderEventsProcessing()
+        event.event_uuid = event_uuid
+        event.event_type = event_type
+        event.event_time = datetime.datetime.utcnow()
+        event.host_name = host_name
+        event.notification_status = notification_status
+        event.error_state = error_state
+        session.add(event)
+        session.commit()
+        return event
+
+
+# get all unhandled cinder events
+def get_all_unhandled_cinder_processing_events():
+    """Get all unhandled cinder processing events.
+
+    :return: List of unhandled cinder events
+    """
+    with dbsession() as session:
+        query = session.query(CinderEventsProcessing)
+        query = query.filter(or_(
+            CinderEventsProcessing.notification_status == '',
+            CinderEventsProcessing.notification_status == constants.STATE_NEW,
+            CinderEventsProcessing.notification_status == constants.STATE_RUNNING
+        ))
+        return query.all()
+
+
+# query cinder event by id
+def get_cinder_processing_event_by_id(event_uuid):
+    """Get cinder processing event by UUID.
+
+    :param event_uuid: UUID of the event
+    :return: Event object if found, None otherwise
+    """
+    with dbsession() as session:
+        query = session.query(CinderEventsProcessing)
+        query = query.filter(CinderEventsProcessing.event_uuid == event_uuid)
+        return query.first()
+
+
+# get cinder processing events with given time range
+def get_cinder_processing_events_between_times(event_type,
+                                        host_name,
+                                        start_time,
+                                        end_time,
+                                        unhandled_only=True):
+    """Get cinder processing events between given time range.
+
+    :param event_type: Type of the event
+    :param host_name: Name of the host
+    :param start_time: Start time
+    :param end_time: End time
+    :param unhandled_only: Whether to get only unhandled events
+    :return: List of events
+    """
+    with dbsession() as session:
+        query = session.query(CinderEventsProcessing)
+        query = query.filter(CinderEventsProcessing.event_type == event_type)
+        query = query.filter(CinderEventsProcessing.host_name == host_name)
+        query = query.filter(CinderEventsProcessing.event_time >= start_time)
+        query = query.filter(CinderEventsProcessing.event_time <= end_time)
+        if unhandled_only:
+            query = query.filter(or_(
+                CinderEventsProcessing.notification_status == '',
+                CinderEventsProcessing.notification_status == constants.STATE_NEW,
+                CinderEventsProcessing.notification_status == constants.STATE_RUNNING
+            ))
+        return query.all()
+
+
+# update cinder event status
+def update_cinder_processing_event(event_uuid, notification_uuid,
+                                 notification_created,
+                                 notification_status,
+                                 error_state=''):
+    """Update cinder processing event status.
+
+    :param event_uuid: UUID of the event
+    :param notification_uuid: UUID of the notification
+    :param notification_created: When notification was created
+    :param notification_status: Status of the notification
+    :param error_state: Error state if any
+    :return: Updated event object
+    """
+    with dbsession() as session:
+        query = session.query(CinderEventsProcessing)
+        query = query.filter(CinderEventsProcessing.event_uuid == event_uuid)
+        event = query.first()
+        if event:
+            event.notification_status = notification_status
+            event.notification_updated = datetime.datetime.utcnow()
+            if error_state:
+                event.error_state = error_state
+            session.add(event)
+            session.commit()
+            return event
+        return None

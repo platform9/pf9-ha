@@ -11,4 +11,5 @@ keys = [
     '/services/hamgr/amqp/password',
     '/services/hamgr/keystone/password',
     '/services/masakari/db/password',
+    '/services/cinder/db/password',
 ]
