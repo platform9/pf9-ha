@@ -226,38 +226,18 @@ class CinderProvider(Provider):
             LOG.exception(f"Error getting backend pools: {str(e)}")
             return []
     
-    def _find_pool_for_migration(self, backend_name, pool_names):
-        # Extract the backend name and configuration from the pool name
+    def _find_pool_for_migration(self, backend_name, backend_config, pool_names):
+        LOG.info(f"Looking for pools with backend '{backend_name}' and config '{backend_config}'")
+        
+        # Find pools that match both the backend name and configuration
         # Format is typically: <uuid>@<backend_config>#<backend_name>
-        if '@' not in backend_name or '#' not in backend_name:
-            LOG.error(f"Backend name {backend_name} does not match expected format <uuid>@<backend_config>#<backend_name>")
-            return None
-            
-        # Extract backend parts
-        backend_parts = backend_name.split('#')
-        actual_backend_name = backend_parts[1] if len(backend_parts) > 1 else None
+        matching_pools = [pool for pool in pool_names 
+                         if '#' in pool and '@' in pool 
+                         and pool.split('#')[1] == backend_name 
+                         and pool.split('@')[1].split('#')[0] == backend_config 
+                         and pool != f"{backend_config}#{backend_name}"]
         
-        config_parts = backend_name.split('@')
-        backend_config = config_parts[1].split('#')[0] if len(config_parts) > 1 else None
-        
-        if not actual_backend_name or not backend_config:
-            LOG.error(f"Could not extract backend name or config from {backend_name}")
-            return None
-        
-        LOG.info(f"Looking for pools with backend '{actual_backend_name}' and config '{backend_config}'")
-        
-        # First filter: match pools with the same backend name (after #)
-        same_backend_pools = [pool for pool in pool_names 
-                            if '#' in pool and pool.split('#')[1] == actual_backend_name 
-                            and pool != backend_name]
-        
-        LOG.info(f"Found {len(same_backend_pools)} pools with backend name '{actual_backend_name}'")
-        
-        # Second filter: among those, match pools with the same backend configuration
-        matching_pools = [pool for pool in same_backend_pools 
-                         if '@' in pool and pool.split('@')[1].split('#')[0] == backend_config]
-        
-        LOG.info(f"Found {len(matching_pools)} pools with backend '{actual_backend_name}' and config '{backend_config}'")
+        LOG.info(f"Found {len(matching_pools)} pools with backend '{backend_name}' and config '{backend_config}'")
         
         if not matching_pools:
             LOG.error(f"No suitable pools found for migration from {backend_name}")
@@ -292,8 +272,16 @@ class CinderProvider(Provider):
             # Get the list of backend pools
             pool_names = self._get_backend_pools()
             
+            # Extract the backend configuration from the source host format
+            if '@' in source_host_format and '#' in source_host_format:
+                source_config = source_host_format.split('@')[1].split('#')[0]
+                LOG.info(f"Extracted backend configuration '{source_config}' from source host format")
+            else:
+                LOG.error(f"Could not extract backend configuration from source host format: {source_host_format}")
+                return False
+            
             # Find a pool to migrate to
-            target_pool = self._find_pool_for_migration(backend_name, pool_names)
+            target_pool = self._find_pool_for_migration(backend_name, source_config, pool_names)
             
             # Define source and target formats based on pool availability
             if source_host_format and target_pool:
