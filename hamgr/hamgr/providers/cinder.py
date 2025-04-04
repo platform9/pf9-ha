@@ -3,6 +3,7 @@
 
 import json
 import logging
+import random
 import subprocess
 import threading
 import time
@@ -232,8 +233,9 @@ class CinderProvider(Provider):
             LOG.error(f"No pools found with backend name {backend_name}")
             return None
             
-        target_pool = matching_pools[0]
-        LOG.info(f"Selected migration target pool: {target_pool}")
+        # Select a random pool from the matching pools to distribute volumes
+        target_pool = random.choice(matching_pools)
+        LOG.info(f"Selected random migration target pool: {target_pool} from {len(matching_pools)} available pools")
         return target_pool
     
     def _migrate_volumes(self, cinder_host, backend_name, new_host):
