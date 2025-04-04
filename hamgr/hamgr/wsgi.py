@@ -45,7 +45,6 @@ def get_providers_for_host(host_id, event_type):
     """
     providers = []
     
-    # Check if this host runs cinder services
     cinder_provider = provider_factory.cinder_provider()
     cinder_provider._token = cinder_provider._get_v3_token()
     cinder_hosts = cinder_provider._get_cinder_hosts()
@@ -54,11 +53,9 @@ def get_providers_for_host(host_id, event_type):
         LOG.info('Host %s runs cinder volume services', host_id)
         providers.append(cinder_provider)
     
-    # Check if this host runs nova services
     nova_provider = provider_factory.ha_provider()
     nova_provider._token = nova_provider._get_v3_token()
     
-    # We'll always include the nova provider as it's the default
     LOG.info('Adding nova provider for host %s', host_id)
     providers.append(nova_provider)
     
@@ -130,8 +127,8 @@ def update_host_status(host_uuid):
     # Get all applicable providers for this host
     providers = get_providers_for_host(host_id, event)
     
-    # Track if any provider successfully processed the event
-    success = False
+    # Track if all providers successfully processed the event
+    success = True
     
     # Process the event with all applicable providers
     for provider in providers:
@@ -147,8 +144,8 @@ def update_host_status(host_uuid):
             LOG.info('Provider %s processed %s event for host %s, result: %s',
                      provider.__class__.__name__, event, host_id, str(provider_success))
             
-            # If any provider succeeds, consider the operation successful
-            success = success or provider_success
+            # Success is true only if all providers succeed
+            success = success and provider_success
         except Exception as e:
             LOG.exception('Provider %s failed to process %s event for host %s: %s',
                          provider.__class__.__name__, event, host_id, str(e))
