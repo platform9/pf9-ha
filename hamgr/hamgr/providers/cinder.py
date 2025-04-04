@@ -227,15 +227,45 @@ class CinderProvider(Provider):
             return []
     
     def _find_pool_for_migration(self, backend_name, pool_names):
-        matching_pools = [pool for pool in pool_names if backend_name in pool]
+        # Extract the backend name and configuration from the pool name
+        # Format is typically: <uuid>@<backend_config>#<backend_name>
+        if '@' not in backend_name or '#' not in backend_name:
+            LOG.error(f"Backend name {backend_name} does not match expected format <uuid>@<backend_config>#<backend_name>")
+            return None
+            
+        # Extract backend parts
+        backend_parts = backend_name.split('#')
+        actual_backend_name = backend_parts[1] if len(backend_parts) > 1 else None
+        
+        config_parts = backend_name.split('@')
+        backend_config = config_parts[1].split('#')[0] if len(config_parts) > 1 else None
+        
+        if not actual_backend_name or not backend_config:
+            LOG.error(f"Could not extract backend name or config from {backend_name}")
+            return None
+        
+        LOG.info(f"Looking for pools with backend '{actual_backend_name}' and config '{backend_config}'")
+        
+        # First filter: match pools with the same backend name (after #)
+        same_backend_pools = [pool for pool in pool_names 
+                            if '#' in pool and pool.split('#')[1] == actual_backend_name 
+                            and pool != backend_name]
+        
+        LOG.info(f"Found {len(same_backend_pools)} pools with backend name '{actual_backend_name}'")
+        
+        # Second filter: among those, match pools with the same backend configuration
+        matching_pools = [pool for pool in same_backend_pools 
+                         if '@' in pool and pool.split('@')[1].split('#')[0] == backend_config]
+        
+        LOG.info(f"Found {len(matching_pools)} pools with backend '{actual_backend_name}' and config '{backend_config}'")
         
         if not matching_pools:
-            LOG.error(f"No pools found with backend name {backend_name}")
+            LOG.error(f"No suitable pools found for migration from {backend_name}")
             return None
             
         # Select a random pool from the matching pools to distribute volumes
         target_pool = random.choice(matching_pools)
-        LOG.info(f"Selected random migration target pool: {target_pool} from {len(matching_pools)} available pools")
+        LOG.info(f"Selected migration target pool: {target_pool} from {len(matching_pools)} available pools")
         return target_pool
     
     def _migrate_volumes(self, cinder_host, backend_name, new_host):
