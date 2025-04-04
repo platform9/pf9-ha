@@ -775,48 +775,6 @@ def get_all_unhandled_cinder_processing_events():
         return query.all()
 
 
-# query cinder event by id
-def get_cinder_processing_event_by_id(event_uuid):
-    """Get cinder processing event by UUID.
-
-    :param event_uuid: UUID of the event
-    :return: Event object if found, None otherwise
-    """
-    with dbsession() as session:
-        query = session.query(CinderEventsProcessing)
-        query = query.filter(CinderEventsProcessing.event_uuid == event_uuid)
-        return query.first()
-
-
-# get cinder processing events with given time range
-def get_cinder_processing_events_between_times(event_type,
-                                        host_name,
-                                        start_time,
-                                        end_time,
-                                        unhandled_only=True):
-    """Get cinder processing events between given time range.
-
-    :param event_type: Type of the event
-    :param host_name: Name of the host
-    :param start_time: Start time
-    :param end_time: End time
-    :param unhandled_only: Whether to get only unhandled events
-    :return: List of events
-    """
-    with dbsession() as session:
-        query = session.query(CinderEventsProcessing)
-        query = query.filter(CinderEventsProcessing.event_type == event_type)
-        query = query.filter(CinderEventsProcessing.host_name == host_name)
-        query = query.filter(CinderEventsProcessing.event_time >= start_time)
-        query = query.filter(CinderEventsProcessing.event_time <= end_time)
-        if unhandled_only:
-            query = query.filter(or_(
-                CinderEventsProcessing.notification_status == '',
-                CinderEventsProcessing.notification_status == constants.STATE_NEW,
-                CinderEventsProcessing.notification_status == constants.STATE_RUNNING
-            ))
-        return query.all()
-
 
 # update cinder event status
 def update_cinder_processing_event(event_uuid, notification_uuid,
