@@ -39,14 +39,16 @@ def setup_root_logger():
     logger = logging.getLogger(ROOT_LOGGER)
     logger.setLevel(LOG_LEVEL)
     formatter = logging.Formatter('%(asctime)s %(name)s %(levelname)s %(message)s')
-    handler = logging.handlers.RotatingFileHandler(LOG_FILE,
-                                                   mode='a',
-                                                   maxBytes=LOG_MAX_BYTES,
-                                                   backupCount=LOG_BACKUP_COUNT)
-    handler.setLevel(logging.DEBUG)
-    handler.setFormatter(formatter)
+    
+    # Clear existing handlers
     for hdl in logger.handlers:
         logger.removeHandler(hdl)
-    logger.addHandler(handler)
-    logger.info('root logger created : name - %s , level - %s', ROOT_LOGGER, LOG_LEVEL)
+    
+    # Only add a StreamHandler to write logs to stdout
+    stdout_handler = logging.StreamHandler()
+    stdout_handler.setLevel(logging.DEBUG)
+    stdout_handler.setFormatter(formatter)
+    logger.addHandler(stdout_handler)
+    
+    logger.info('root logger created : name - %s , level - %s, stdout only', ROOT_LOGGER, LOG_LEVEL)
     return logger
