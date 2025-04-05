@@ -16,25 +16,27 @@ import logging
 from hamgr import app
 from flask import g
 from shared.constants import LOGGER_PREFIX
+from hamgr.providers import get_provider_for_service
 
 from six.moves.configparser import ConfigParser
 
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 
-def ha_provider():
+def ha_provider(service_type='nova'):
     with app.app_context():
-        provider = getattr(g, '_ha_provider', None)
+        provider_key = f'_ha_{service_type}_provider'
+        provider = getattr(g, provider_key, None)
         if provider is None:
-            # TODO: Make this part of config
-            provider_name = 'nova'
-            pkg = __import__('hamgr.providers.%s' % provider_name)
             conf = ConfigParser()
             conf.read(['/etc/pf9/hamgr/hamgr.conf'])
-            module = getattr(pkg.providers, provider_name)
-            provider = module.get_provider(conf)
-            g._ha_provider = provider
+            provider = get_provider_for_service(conf, service_type)
+            setattr(g, provider_key, provider)
         return provider
+
+
+def cinder_provider():
+    return ha_provider(service_type='cinder')
 
 
 def db_provider():

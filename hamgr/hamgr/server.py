@@ -72,6 +72,19 @@ def start_server(conf, paste_ini):
         LOG.debug("add task process_queue_for_unauthed_hosts")
         periodic_task.add_task(provider.process_queue_for_unauthed_hosts, 600,
                                run_now=True)
+        
+        # Initialize cinder provider and add cinder event processing task
+        LOG.debug('Initializing cinder provider')
+        try:
+            cinder_provider = provider_factory.cinder_provider()
+            if cinder_provider:
+                LOG.debug('Successfully initialized cinder provider, adding task process_cinder_host_events')
+                periodic_task.add_task(cinder_provider.process_cinder_host_events, 60, run_now=True)
+            else:
+                LOG.error('Failed to initialize cinder provider, cinder HA will not be available')
+        except Exception as e:
+            LOG.exception('Error initializing cinder provider: %s', str(e))
+        
         LOG.debug('start wsgi server')
         wsgi_app = loadapp('config:%s' % paste_file, 'main')
         wsgi.server(listen(('', conf.getint("DEFAULT", "listen_port"))),
