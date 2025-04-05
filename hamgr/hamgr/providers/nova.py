@@ -1326,36 +1326,12 @@ class NovaProvider(Provider):
         else:
             return self._get_ha_status()
 
-    def _check_if_host_in_other_cluster(self, hosts):
-        clusters = db_api.get_all_active_clusters()
-        invalid_hosts = set()
-        valid_hosts = set()
-        nova_client = self._get_nova_client()
-        for cluster in clusters:
-            availability_zone = self._get_availability_zone(nova_client, cluster.name)
-            cluster_hosts = set(availability_zone.hosts)
-            for host in hosts:
-                if host in cluster_hosts:
-                    invalid_hosts.add(host)
-                else:
-                    valid_hosts.add(host)
-        LOG.debug("Valid Hosts: %s", str(valid_hosts))
-        LOG.debug("Invalid Hosts: %s", str(invalid_hosts))
-        if invalid_hosts:
-            LOG.error("Host(s) %s are part of another cluster",
-                      str(invalid_hosts))
-            raise ha_exceptions.HostPartOfCluster(str(invalid_hosts))
-
     def _validate_hosts(self, hosts, check_cluster=True, check_host_insufficient=True):
         # Since the consul needs 3 to 5 servers for bootstrapping, it is safe
         # to enable HA only if 4 hosts are present. So that even if 1 host goes
         # down after cluster is created, we can reconfigure it.
         if check_host_insufficient and len(hosts) < 4:
             raise ha_exceptions.InsufficientHosts()
-
-        LOG.debug("check host in other cluster : %s", str(check_cluster))
-        if check_cluster is True:
-            self._check_if_host_in_other_cluster(hosts)
 
         # Check host state and role status in resmgr before proceeding
         # make one call to resmgr , not for each host
