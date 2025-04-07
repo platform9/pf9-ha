@@ -185,7 +185,7 @@ class CinderProvider(Provider):
                 
                 services_project = None
                 for project in keystone.projects.list():
-                    if project.name == 'service':
+                    if project.name == 'services':
                         services_project = project.id
                         break
                 
