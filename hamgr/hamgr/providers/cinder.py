@@ -78,7 +78,7 @@ class CinderProvider(Provider):
             project_domain_id='default'
         )
         sess = session.Session(auth=auth)
-        return cinder_client.Client('3', session=sess, region_name=self._region)
+        return cinder_client.Client('3', session=sess, region_name=self._region, interface='internal')
 
     def _get_cinder_hosts(self):
         cinder_hosts = []
