@@ -146,24 +146,22 @@ class CinderProvider(Provider):
             LOG.exception(f"Error finding other hosts with backend {backend_name}: {str(e)}")
             return []
 
-    def _get_volumes_for_migration(self, cinder_host, backend_name):
+    def _get_volumes_for_migration(self, cinder_host):
         try:
             client = self._get_cinder_client()
             
-            host_filters = [
-                f"{cinder_host}@{backend_name}",
-                f"{cinder_host}@{backend_name}#{backend_name}",
-                f"{cinder_host}#{backend_name}"
-            ]
+            search_opts = {'all_tenants': True}
+            all_volumes = client.volumes.list(detailed=True, search_opts=search_opts)
             
-            all_volumes = []
-            for host_filter in host_filters:
-                search_opts = {'host': host_filter, 'all_tenants': True}
-                LOG.debug(f"Searching for volumes with options: {search_opts}")
-                volumes = client.volumes.list(detailed=True, search_opts=search_opts)
-                if volumes:
-                    LOG.info(f"Found {len(volumes)} volumes with host filter: {host_filter}")
-                    all_volumes.extend(volumes)
+            # Filter volumes that match our cinder_host
+            host_volumes = []
+            for vol in all_volumes:
+                if hasattr(vol, 'os-vol-host-attr:host') and cinder_host in vol._info['os-vol-host-attr:host']:
+                    host_volumes.append(vol)
+                    LOG.debug(f"Found volume {vol.id} on host {vol._info['os-vol-host-attr:host']}")
+            
+            LOG.debug(f"Found {len(host_volumes)} volumes on host {cinder_host}")
+            all_volumes = host_volumes
             
             unique_volumes = {}
             for vol in all_volumes:
@@ -187,32 +185,33 @@ class CinderProvider(Provider):
                 
                 services_project = None
                 for project in keystone.projects.list():
-                    if project.name == 'service':
+                    if project.name == 'services':
                         services_project = project.id
                         break
                 
                 if services_project:
-                    for host_filter in host_filters:
-                        service_opts = {
-                            'host': host_filter, 
-                            'all_tenants': True,
-                            'project_id': services_project
-                        }
-                        LOG.debug(f"Searching for glance volumes in services project: {service_opts}")
-                        service_volumes = client.volumes.list(detailed=True, search_opts=service_opts)
-                        
-                        existing_ids = [v.id for v in all_volumes]
-                        for vol in service_volumes:
-                            if vol.id not in existing_ids:
-                                all_volumes.append(vol)
-                                LOG.info(f"Found glance volume: {vol.id} in services project")
+                    # Get all volumes in the services project
+                    service_opts = {
+                        'all_tenants': True,
+                        'project_id': services_project
+                    }
+                    LOG.debug(f"Searching for glance volumes in services project: {service_opts}")
+                    service_volumes = client.volumes.list(detailed=True, search_opts=service_opts)
+                    
+                    # Filter volumes that match our cinder_host
+                    existing_ids = [v.id for v in all_volumes]
+                    for vol in service_volumes:
+                        if (hasattr(vol, 'os-vol-host-attr:host') and 
+                            cinder_host in vol._info['os-vol-host-attr:host'] and 
+                            vol.id not in existing_ids):
+                            all_volumes.append(vol)
+                            LOG.info(f"Found glance volume: {vol.id} on host {vol._info['os-vol-host-attr:host']} in services project")
             except Exception as e:
                 LOG.exception(f"Error searching for volumes in services project: {str(e)}")
             
-            LOG.info(f"Found total of {len(all_volumes)} volumes on host {cinder_host} with backend {backend_name}")
             return all_volumes
         except Exception as e:
-            LOG.exception(f"Error getting volumes on host {cinder_host} with backend {backend_name}: {str(e)}")
+            LOG.exception(f"Error getting volumes on host {cinder_host}: {str(e)}")
             return []
 
     def _get_backend_pools(self):
@@ -231,11 +230,10 @@ class CinderProvider(Provider):
         
         # Find pools that match both the backend name and configuration
         # Format is typically: <uuid>@<backend_config>#<backend_name>
-        matching_pools = [pool for pool in pool_names 
-                         if '#' in pool and '@' in pool 
-                         and pool.split('#')[1] == backend_name 
-                         and pool.split('@')[1].split('#')[0] == backend_config 
-                         and pool != f"{backend_config}#{backend_name}"]
+        matching_pools = [pool for pool in pool_names
+                         if '#' in pool and '@' in pool
+                         and pool.split('#')[1] == backend_config
+                         and pool.split('@')[1].split('#')[0] == backend_name]
         
         LOG.info(f"Found {len(matching_pools)} pools with backend '{backend_name}' and config '{backend_config}'")
         
@@ -252,7 +250,7 @@ class CinderProvider(Provider):
         try:
             LOG.info(f"Migrating volumes from {cinder_host}@{backend_name} to {new_host}@{backend_name}")
             
-            volumes = self._get_volumes_for_migration(cinder_host, backend_name)
+            volumes = self._get_volumes_for_migration(cinder_host)
             if not volumes:
                 LOG.info(f"No volumes found to migrate from {cinder_host}@{backend_name}")
                 return True
@@ -274,7 +272,7 @@ class CinderProvider(Provider):
             
             # Extract the backend configuration from the source host format
             if '@' in source_host_format and '#' in source_host_format:
-                source_config = source_host_format.split('@')[1].split('#')[0]
+                source_config = source_host_format.split('@')[1].split('#')[1]
                 LOG.info(f"Extracted backend configuration '{source_config}' from source host format")
             else:
                 LOG.error(f"Could not extract backend configuration from source host format: {source_host_format}")
@@ -532,7 +530,7 @@ class CinderProvider(Provider):
                         LOG.info(f"Found {len(other_hosts)} other hosts with backend {backend_name}: {', '.join(other_hosts)}")
                         
                         # Get volumes across all projects for cross-AZ attachments and glance backend
-                        volumes = self._get_volumes_for_migration(host_name, backend_name)
+                        volumes = self._get_volumes_for_migration(host_name)
                         if not volumes:
                             LOG.info(f"No volumes found on {host_name}@{backend_name}, skipping migration for this backend")
                             continue
