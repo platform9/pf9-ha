@@ -943,24 +943,24 @@ class NovaProvider(Provider):
             LOG.error('Error getting availability zone info, will retry')
             return
         LOG.debug('names of host availability_zones found : %s', nova_active_azs)
-        hamgr_all_clusters = db_api.get_all_clusters()
-        hamgr_cluster_names = [x.name for x in hamgr_all_clusters]
+       # hamgr_all_clusters = db_api.get_all_clusters()
+       # hamgr_cluster_names = [x.name for x in hamgr_all_clusters]
         LOG.debug('names of vmha clusters found : %s', str(hamgr_cluster_names))
         masakari_active_segments = masakari.get_all_failover_segments(self._token)
         masakari_segment_names = [x['name'] for x in masakari_active_segments]
         LOG.debug('names of masakari segments found : %s', str(masakari_segment_names))
-        common_between_nova_and_hamgr = list(set(nova_active_azs).intersection(set(hamgr_cluster_names)))
-        LOG.debug('common set between host availability_zones and vmha cluster : %s', str(common_between_nova_and_hamgr))
-        hamgr_clusters_to_remove = list(set(hamgr_cluster_names).difference(common_between_nova_and_hamgr))
-        LOG.debug('additional vmha clusters for removal : %s', str(hamgr_clusters_to_remove))
+       # common_between_nova_and_hamgr = list(set(nova_active_azs).intersection(set(hamgr_cluster_names)))
+       # LOG.debug('common set between host availability_zones and vmha cluster : %s', str(common_between_nova_and_hamgr))
+       # hamgr_clusters_to_remove = list(set(hamgr_cluster_names).difference(common_between_nova_and_hamgr))
+       # LOG.debug('additional vmha clusters for removal : %s', str(hamgr_clusters_to_remove))
 
-        # try to remove additional ha clusters
-        for cluster_name in hamgr_clusters_to_remove:
-            try:
-                LOG.debug('disable additional vmha cluster : %s', cluster_name)
-                self._disable(cluster_name, synchronize=True)
-            except Exception as exp:
-                LOG.warning('failed to remove additional vmha cluster with name %s : %s', cluster_name, str(exp))
+       # try to remove additional ha clusters
+       #for cluster_name in hamgr_clusters_to_remove:
+       #     try:
+       #         LOG.debug('disable additional vmha cluster : %s', cluster_name)
+       #         self._disable(cluster_name, synchronize=True)
+       #     except Exception as exp:
+       #         LOG.warning('failed to remove additional vmha cluster with name %s : %s', cluster_name, str(exp))
 
         common_between_nova_and_masakari = list(set(nova_active_azs).intersection(set(masakari_segment_names)))
         LOG.debug('common set between host availability_zones and masakari segments : %s', str(common_between_nova_and_masakari))
