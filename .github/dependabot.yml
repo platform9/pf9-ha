@@ -1,0 +1,32 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    target-branch: "private/sarika/sast-scan"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "sarika-p9"
+    labels:
+      - "security"
+
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    target-branch: "private/sarika/sast-scan"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "sarika-p9"
+    labels:
+      - "security"
+
+  - package-ecosystem: "github-actions"
+    directory: "/.github/workflows"
+    schedule:
+      interval: "daily"
+    target-branch: "private/sarika/sast-scan"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "sarika-p9"

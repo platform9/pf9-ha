@@ -1,0 +1,31 @@
+name: Trivy Security Scan
+
+on:
+  push:
+    branches: [ private/sarika/sast-scan ]
+  pull_request:
+    branches: [ private/sarika/sast-scan ]
+  schedule:
+    - cron: '0 0 * * 0' # Runs every Sunday at midnight UTC (weekly)
+
+jobs:
+  security_scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Install Trivy
+        run: |
+          sudo apt update
+          sudo apt install wget -y
+          wget -O- https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo tee /etc/apt/trusted.gpg.d/trivy.asc
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt update
+          sudo apt install -y trivy
+
+      - name: Scan Code Dependencies
+        run: trivy fs --scanners vuln,config .
+
+      # - name: Scan Docker Image (optional)
+      #   run: trivy image your-docker-image:latest || true

@@ -1,0 +1,156 @@
+name: Python Security & Linting
+
+on:
+  push:
+    branches: [ private/sarika/sast-scan ]
+  pull_request:
+    branches: [ private/sarika/sast-scan ]
+  schedule:
+    - cron: '0 0 * * 0'  # Every Monday at 12 PM UTC
+
+jobs:
+  setup:
+    name: Shared Setup
+    runs-on: ubuntu-latest
+    outputs:
+      python-version: '3.10'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+  bandit_scan:
+    name: Bandit Security Scan (Full)
+    runs-on: ubuntu-latest
+    outputs:
+      bandit-high-found: ${{ steps.scan.outputs.bandit_high_found }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Bandit
+        run: pip install bandit jq
+
+      - name: Run Full Bandit Scan
+        id: scan
+        run: |
+          echo "🚨 Running full Bandit scan..."
+          mkdir -p tmp
+          bandit -r . -f json -o tmp/bandit_output.json || true
+          cat tmp/bandit_output.json || echo "{}"
+          count=$(jq '.results | map(select(.issue_severity == "HIGH")) | length' tmp/bandit_output.json || echo 0)
+          echo "bandit_high_found=$([[ $count -gt 0 ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+
+      - name: Upload Bandit Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-json
+          path: tmp/bandit_output.json
+
+  auto-pr:
+    name: Create Pull Request if High Vulnerabilities Found
+    needs: [bandit_scan]
+    if: needs.bandit_scan.outputs.bandit-high-found == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Download Bandit Report
+        uses: actions/download-artifact@v4
+        with:
+          name: bandit-json
+          path: tmp
+
+      - name: Generate PR Body with High Severity Bandit Results
+        run: |
+          echo "# 🚨 Bandit Full Scan Report" > tmp/pr-body.md
+          if [[ -f tmp/bandit_output.json ]]; then
+            jq -r '.results[] 
+              | select(.issue_severity == "HIGH")
+              | "* File: \(.filename)\n  • Line: \(.line_number)\n  • Severity: \(.issue_severity)\n  • Confidence: \(.issue_confidence)\n  • Issue: \(.issue_text)\n"' tmp/bandit_output.json >> tmp/pr-body.md
+          else
+            echo "❌ Bandit report not found or scan failed." >> tmp/pr-body.md
+          fi
+
+      - name: Commit Bandit Alert Log (Optional)
+        run: |
+          jq -r '.results[] 
+            | select(.issue_severity == "HIGH")
+            | "* File: \(.filename)\n  • Line: \(.line_number)\n  • Severity: \(.issue_severity)\n  • Confidence: \(.issue_confidence)\n  • Issue: \(.issue_text)\n"' tmp/bandit_output.json > .bandit-alert.log || true
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add -f .bandit-alert.log || true
+          git commit -m "chore: bandit security alert log" || true
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
+        with:
+          commit-message: "chore: issues detected by Bandit (all severities)"
+          title: "chore: auto PR for Bandit scan"
+          body-path: tmp/pr-body.md
+          branch: "auto/bandit-security-scan"
+          base: "atherton"
+          delete-branch: true
+
+  semgrep_scan:
+    name: Semgrep SAST Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Run Semgrep (default rules)
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: "p/ci"
+
+  codeql_scan:
+    name: CodeQL Static Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: python
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v2
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+
+  ruff_lint:
+    name: Ruff Major Lint Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Ruff
+        run: pip install ruff
+
+      - name: Run Ruff Check (E, F, I)
+        run: |
+          echo "🧹 Running Ruff for major lint issues..."
+          ruff check . --select E,F,I --exit-zero > ruff_output.txt
+          cat ruff_output.txt
