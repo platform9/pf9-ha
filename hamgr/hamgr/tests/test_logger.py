@@ -24,41 +24,24 @@ FILE = "log.txt"
 
 
 class LogConfigTest(unittest.TestCase):
-    def _clean(self):
-        if os.path.exists(FILE):
-            logs = glob.glob("%s*" % FILE)
-            for log in logs:
-                os.remove(log)
-
     def setUp(self):
-        self._clean()
         conf = ConfigParser()
         conf.add_section("log")
-        conf.set("log", "location", FILE)
-        conf.set("log", "rotate_counts", '5')
-        conf.set("log", "rotate_size", '1024')
         conf.set("log", "level", "DEBUG")
         global LOG
         LOG = logger.setup_root_logger(conf=conf)
 
     def tearDown(self):
-        self._clean()
         pass
 
-    def test_logfile_created(self):
-        LOG.debug('in testing')
-        self.assertTrue(os.path.exists(FILE),
-                        'log file %s does not exist' % FILE)
-
-    def test_logfile_rotated(self):
-        for i in range(20000):
-            LOG.debug('This is test log line %d' % i)
-
-        self.assertTrue(os.path.exists(FILE))
-        logs = glob.glob("%s*" % FILE)
-        self.assertIsNotNone(logs)
-        self.assertTrue(len(logs) >= 1)
-        for log in logs:
-            size=os.path.getsize(log)
-            LOG.debug('size of file %s : %s', log, str(size))
-            self.assertTrue(size <= 1024)
+    def test_stdout_handler_added(self):
+        # Verify that a StreamHandler is added to the logger
+        handlers = LOG.handlers
+        stream_handlers = [h for h in handlers if isinstance(h, logger.logging.StreamHandler)]
+        self.assertTrue(len(stream_handlers) > 0, 'No StreamHandler found in logger handlers')
+        
+    def test_no_file_handlers(self):
+        # Verify that there are no file handlers
+        handlers = LOG.handlers
+        file_handlers = [h for h in handlers if isinstance(h, logger.logging.handlers.RotatingFileHandler)]
+        self.assertEqual(len(file_handlers), 0, 'Found file handlers when only stdout should be used')
