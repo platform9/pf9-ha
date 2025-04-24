@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Python dependencies (weekly updates)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    target-branch: "soc2"
+    open-pull-requests-limit: 5
+    labels:
+      - "security"
+
+  - package-ecosystem: "pip"
+    directory: "/hamgr"
+    schedule:
+      interval: "weekly"
+    target-branch: "soc2"
+    open-pull-requests-limit: 5
+    labels:
+      - "security"

@@ -1,0 +1,298 @@
+name: Python Security & Linting
+'on':
+  push:
+    branches:
+      - soc2
+  pull_request:
+    branches:
+      - soc2
+jobs:
+  setup:
+    name: Shared Setup
+    runs-on: ubuntu-latest
+    outputs:
+      python-version: '3.10'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Export Python Version
+        run: echo "python-version=3.10" >> $GITHUB_OUTPUT
+  bandit_scan:
+    name: Bandit Security Scan (Full)
+    needs: setup
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    outputs:
+      bandit-high-found: ${{ steps.scan.outputs.bandit_high_found }}
+      exit_with_failure: ${{ steps.scan.outputs.exit_with_failure }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '${{ needs.setup.outputs.python-version }}'
+      - name: Install Bandit
+        run: pip install bandit jq
+      - name: Run Full Bandit Scan
+        id: scan
+        run: |
+            echo "🚨 Running full Bandit scan..."
+            mkdir -p tmp
+            bandit -r . --severity-level medium -f json -o tmp/bandit_output.json || true
+            echo -e "\n🔍 Human-readable Bandit output:\n"
+            bandit -r . --severity-level medium || true
+            cat tmp/bandit_output.json || echo "{}"
+            count=$(jq '.results | map(select(.issue_severity == "HIGH")) | length' tmp/bandit_output.json || echo 0)
+
+            if [[ "$count" -gt 0 ]]; then
+            echo "bandit_high_found=true" >> "$GITHUB_OUTPUT"
+            echo "❌ High severity issues found."
+            echo "exit_with_failure=true" >> "$GITHUB_OUTPUT"
+            else
+            echo "bandit_high_found=false" >> "$GITHUB_OUTPUT"
+            echo "exit_with_failure=false" >> "$GITHUB_OUTPUT"
+            fi
+        # run: "echo \"\U0001F6A8 Running full Bandit scan...\"\nmkdir -p tmp\nbandit -r . --severity-level medium -f json -o tmp/bandit_output.json || true\necho -e \"\\n\U0001F50D Human-readable Bandit output:\\n\"\nbandit -r . --severity-level medium || true\ncat tmp/bandit_output.json || echo \"{}\"\ncount=$(jq '.results | map(select(.issue_severity == \"HIGH\")) | length' tmp/bandit_output.json || echo 0)\necho \"bandit_high_found=$([[ $count -gt 0 ]] && echo true || echo false)\" >> $GITHUB_OUTPUT\n"
+      - name: Upload Bandit Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-json
+          path: tmp/bandit_output.json
+
+      - name: Fail Job If Vulnerabilities Found
+        if: ${{ steps.scan.outputs.exit_with_failure == 'true' }}
+        run: exit 1
+  auto-pr:
+    name: Create Pull Request if High Vulnerabilities Found
+    needs:
+        - bandit_scan
+    if: ${{ needs.bandit_scan.outputs.bandit-high-found == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+        contents: write
+        pull-requests: write
+    steps:
+        - name: Checkout Code
+          uses: actions/checkout@v3
+
+        - name: Download Bandit Report
+          uses: actions/download-artifact@v4
+          with:
+            name: bandit-json
+            path: tmp
+
+        - name: Generate PR Body with High Severity Bandit Results
+          run: |
+            echo "# 🚨 Bandit Scan Report" > tmp/pr-body.md
+            if [[ -f tmp/bandit_output.json ]]; then
+            jq -r '.results[]
+                | select(.issue_severity == "HIGH")
+                | "* File: \(.filename)\n  • Line: \(.line_number)\n  • Severity: \(.issue_severity)\n  • Confidence: \(.issue_confidence)\n  • Issue: \(.issue_text)\n"' \
+                tmp/bandit_output.json >> tmp/pr-body.md
+            else
+            echo "❌ Bandit report not found or scan failed." >> tmp/pr-body.md
+            fi
+
+        - name: Commit Bandit Alert Log (Optional)
+          run: |
+            if [[ -f tmp/bandit_output.json ]]; then
+            jq -r '.results[]
+                | select(.issue_severity == "HIGH")
+                | "### 🚨 High Severity Issue\n```\nFile: \(.filename)\nLine: \(.line_number)\nSeverity: \(.issue_severity)\nConfidence: \(.issue_confidence)\nIssue: \(.issue_text)\n```\n"' \
+                tmp/bandit_output.json > .bandit-alert.log || true
+
+            git config user.name github-actions
+            git config user.email github-actions@github.com
+            git add -f .bandit-alert.log || true
+            git commit -m "chore: bandit security alert log" || true
+            fi
+
+        - name: Create Pull Request
+          uses: peter-evans/create-pull-request@v5
+          with:
+            commit-message: 'chore: issues detected by Bandit (all severities)'
+            title: 'chore: auto PR for Bandit scan'
+            body-path: tmp/pr-body.md
+            branch: auto/bandit-security-scan
+            base: soc2
+            delete-branch: true
+        
+  ruff-lint-and-pr:
+    name: Ruff Lint & Auto PR
+    needs: setup
+    runs-on: ubuntu-latest
+    permissions:
+        contents: write
+        pull-requests: write
+
+    steps:
+        - name: Checkout code
+          uses: actions/checkout@v3
+
+        - name: Set up Python
+          uses: actions/setup-python@v4
+          with:
+            python-version: ${{ needs.setup.outputs.python-version }}
+
+        - name: Install Ruff
+          run: pip install ruff
+
+        - name: Run Ruff
+          id: ruff
+          run: |
+            echo "🔍 Running Ruff Lint..."
+            ruff check . --select E,F,I > ruff_output.txt || true
+            cat ruff_output.txt
+            if [ -s ruff_output.txt ]; then
+            echo "ruff_issues=true" >> "$GITHUB_OUTPUT"
+            else
+            echo "ruff_issues=false" >> "$GITHUB_OUTPUT"
+            fi
+
+        - name: Create PR if Issues Found
+          if: ${{ steps.ruff.outputs.ruff_issues == 'true' }}
+          uses: peter-evans/create-pull-request@v5
+          with:
+            commit-message: 'chore: fix ruff lint issues'
+            title: 'chore: Ruff Lint Issues Found'
+            body: |
+                ## ⚠️ Ruff Lint Issues Found
+                See `.ruff_output.txt` for full details.
+                branch: auto/ruff-lint-issues
+                base: atherton
+                add-paths: |
+                ruff_output.txt
+
+        - name: Fail job if issues found
+          if: ${{ steps.ruff.outputs.ruff_issues == 'true' }}
+          run: |
+            echo "❌ Ruff lint issues found — failing job."
+            exit 1
+
+#   trivy_security_scan:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout Code
+#         uses: actions/checkout@v3
+#       - name: Install Trivy
+#         run: >
+#           sudo apt update
+
+#           sudo apt install wget -y
+
+#           wget -O- https://aquasecurity.github.io/trivy-repo/deb/public.key |
+#           sudo tee /etc/apt/trusted.gpg.d/trivy.asc
+
+#           echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release
+#           -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+
+#           sudo apt update
+#           sudo apt install -y trivy
+#       - name: Scan Code Dependencies
+#         run: 'trivy fs --scanners vuln,config --exit-code 1 --severity HIGH,CRITICAL .'
+
+  trivy_security_scan_and_pr:
+    name: Trivy Security Scan & Auto PR
+    needs: setup
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # allow committing alert log
+      pull-requests: write   # allow opening PR
+    outputs:
+      trivy_issues_found: ${{ steps.scan.outputs.trivy_issues_found }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Install Trivy
+        run: |
+          sudo apt update
+          sudo apt install wget -y
+          wget -qO- https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo tee /etc/apt/trusted.gpg.d/trivy.asc
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt update
+          sudo apt install -y trivy jq
+
+      - name: Run Trivy Filesystem Scan
+        id: scan
+        run: |
+          set -euo pipefail
+          echo "🛡️  Running Trivy scan (HIGH/CRITICAL)..."
+          mkdir -p tmp
+          trivy fs --format json --severity HIGH,CRITICAL --output tmp/trivy.json .
+          [[ -f tmp/trivy.json ]] || echo '{}' > tmp/trivy.json
+          if grep -q '"num":0' <<<"$(tail -n +1 tmp/trivy.json 2>/dev/null)"; then
+            echo "ℹ️  No language‑specific files detected — skipping vulnerability count."
+            echo "trivy_issues_found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          count=$(jq -e '
+            (.Results // [])                       # safe default
+            | map(.Vulnerabilities? // [])         # ? prevents error if field missing
+            | add
+            | map(select(.Severity=="HIGH" or .Severity=="CRITICAL"))
+            | length
+          ' tmp/trivy.json)
+          if [[ "$count" -gt 0 ]]; then
+            echo "trivy_issues_found=true"  >> "$GITHUB_OUTPUT"
+            echo "❌ Vulnerabilities found: $count"
+          else
+            echo "trivy_issues_found=false" >> "$GITHUB_OUTPUT"
+            echo "✅ No HIGH/CRITICAL vulnerabilities found"
+          fi
+
+      - name: Upload Trivy Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-json
+          path: tmp/trivy.json
+
+      # Fail the job to block merge, but continue workflow so PR can be created
+      - name: Set exit code if issues
+        if: ${{ steps.scan.outputs.trivy_issues_found == 'true' }}
+        run: exit 1
+        continue-on-error: true
+
+      - name: Generate PR Body
+        if: ${{ steps.scan.outputs.trivy_issues_found == 'true' }}
+        run: |
+          echo "# 🛡️ Trivy Scan Report" > tmp/pr-body.md
+          jq -r '
+            (.Results // [])
+            | .[]                                     # each result
+            | .Target as $file
+            | (.Vulnerabilities? // [])
+            | map(select(.Severity=="HIGH" or .Severity=="CRITICAL"))
+            | .[]
+            | "* File: \($file)\n  • Vulnerability ID: \(.VulnerabilityID)\n  • Pkg: \(.PkgName) \(.InstalledVersion)\n  • Severity: \(.Severity)\n  • Title: \(.Title)\n"
+          ' tmp/trivy.json >> tmp/pr-body.md
+
+      - name: Commit Trivy Alert Log (optional)
+        if: ${{ steps.scan.outputs.trivy_issues_found == 'true' }}
+        run: |
+          jq -r '
+            (.Results // [])
+            | .[]
+            | .Target as $file
+            | (.Vulnerabilities? // [])
+            | map(select(.Severity=="HIGH" or .Severity=="CRITICAL"))
+            | .[]
+            | "### 🛡️  Critical/High Vulnerability\n```\nFile: \($file)\nVulnerabilityID: \(.VulnerabilityID)\nPackage: \(.PkgName) \(.InstalledVersion)\nSeverity: \(.Severity)\nTitle: \(.Title)\n```\n"
+          ' tmp/trivy.json > .trivy-alert.log || true
+
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add -f .trivy-alert.log || true
+          git commit -m "chore: trivy security alert log" || true
+
+      - name: Create Pull Request
+        if: ${{ steps.scan.outputs.trivy_issues_found == 'true' }}
+        uses: peter-evans/create-pull-request@v5
+        with:
+          commit-message: 'chore: vulnerabilities detected by Trivy (HIGH/CRITICAL)'
+          title: 'chore: auto PR for Trivy security scan'
+          body-path: tmp/pr-body.md
+          branch: auto/trivy-security-scan
+          base: soc2
+          delete-branch: true
