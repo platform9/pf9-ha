@@ -3024,17 +3024,19 @@ class NovaProvider(Provider):
             return []
         ip_map = {}
         self._hypervisor_details=""
-        for host in host_ids:
+        for host in filter(lambda x: x!=host_id,host_ids):
             # Make this as such only one request is used and then we parse it and get ips for different hosts
             ip_map[host]=self.get_ip_from_host_id(host)
 
         # Make nCr type combinations and choose amongst them randomly
-        ip_map.pop(host_id, None)
         # if n is less than r, we can't make combinations
-        if len(host_ids) > VMHA_MAX_FANOUT:
-            ip_pool = list(combinations(list(ip_map.values()), VMHA_MAX_FANOUT))
-            return ip_pool[randint(0,len(ip_pool)-1)]
-        return list(ip_map.values())
+        if len(host_ids) - 1 > VMHA_MAX_FANOUT:
+            ip_pool = list(combinations(list(ip_map.keys()), VMHA_MAX_FANOUT))
+            final_map = {}
+            for key in ip_pool[randint(0,len(ip_pool)-1)]:
+                final_map[key] = ip_map[key]
+            return final_map
+        return ip_map
 
 
 
