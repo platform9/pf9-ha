@@ -16,6 +16,8 @@ import json
 import logging
 import threading
 import time
+from random import randint
+from itertools import combinations
 from collections import defaultdict
 from datetime import datetime
 from datetime import timedelta
@@ -49,6 +51,8 @@ LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 AMQP_HOST_QUEUE_PREFIX = 'queue-receiving-for-host'
 AMQP_HTTP_PORT = 15672
 
+VMHA_MAX_FANOUT = 3
+
 class NovaProvider(Provider):
     def __init__(self, config):
         self._username = config.get('keystone_middleware', 'username')
@@ -70,6 +74,7 @@ class NovaProvider(Provider):
         self._db_uri = config.get("database", "sqlconnectURI")
         self._db_pwd = self._db_uri
         self._hamgr_config = '/etc/pf9/hamgr/hamgr.conf'
+        self._hypervisor_details = ""
         parser = ConfigParser()
         with open(self._hamgr_config) as fp: 
             parser.readfp(fp)
@@ -2982,6 +2987,56 @@ class NovaProvider(Provider):
                                       }]
                                       )
         LOG.info('reported consul agent role change for host %s from %s to %s', host_id, current_role, agent_role)
+        
+        
+# Get host-ids within same cluster as a host
+def get_hosts_with_same_cluster(self, host_id):
+    host_ids = []
+    headers = {"X-AUTH-TOKEN": self._token['id']}
+    url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-aggregates'
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        data = response.json()
+        if 'aggregates' in data:
+            host_ids = list(filter(lambda x: x["availability_zone"]!=None and host_id in x["hosts"], data['aggregates']))[0]['hosts']
+    return host_ids
+
+# Get ip from host-id
+def get_ip_from_host_id(self, host_id):
+    ip=""
+    if self._hypervisor_details == "":
+        headers = {"X-AUTH-TOKEN": self._token['id']}
+        # We dont know whats the hypervisor id so be brute force it
+        url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-hypervisors/detail'
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+    else:
+        data = self._hypervisor_details
+    if 'hypervisors' in data:
+        ip = list(filter(lambda x:x['service']['host'] == host_id, data['hypervisors']))[0]['host_ip']
+    return ip
+
+# Generate list of ips for vmha agent to monty
+def generate_ip_list(self, host_id):
+    host_ids = self.get_hosts_with_same_cluster(host_id)
+    if host_ids == []:
+        return []
+    ip_map = {}
+    self._hypervisor_details=""
+    for host in host_ids:
+        # Make this as such only one request is used and then we parse it and get ips for different hosts
+        ip_map[host]=self.get_ip_from_host_id(host)
+
+    # Make nCr type combinations and choose amongst them randomly
+    ip_map.pop(host_id, None)
+    # if n is less than r, we can't make combinations
+    if len(host_ids) > VMHA_MAX_FANOUT:
+        ip_pool = list(combinations(list(ip_map.values()), VMHA_MAX_FANOUT))
+        return ip_pool[randint(0,len(ip_pool)-1)]
+    return list(ip_map.values())
+
+
 
 def get_provider(config):
     db_api.init(config)

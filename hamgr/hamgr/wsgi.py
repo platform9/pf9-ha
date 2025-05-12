@@ -359,5 +359,21 @@ def set_consul_role(availability_zone, host_uuid, role):
         return jsonify(dict(success=False, error=e.message)), 412, CONTENT_TYPE_HEADER
 
 
+@app.route('/v1/vmha/hostlist/<host_id>', methods=['GET'])
+@error_handler
+def host_list_handler(host_id):
+    """
+    VMHA agent queries this endpoint to get list of the hosts with same
+    cluster to gossip to.
+
+    Args:
+        host_id (str): The host_id of the host which wants to get the list of its neighbours
+    """
+    nova_provider = provider_factory.ha_provider()
+    nova_provider._token = nova_provider._get_v3_token()
+    
+    return jsonify(nova_provider.generate_ip_list(host_id))
+
+
 def app_factory(global_config, **local_conf):
     return app
