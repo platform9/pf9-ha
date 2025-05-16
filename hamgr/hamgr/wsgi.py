@@ -385,16 +385,17 @@ def host_list_handler(host_id):
 @error_handler
 def host_status_handler(host_id):
     """
-    Rest to this endpoints mean the host is not up/working/is ded
+    VMHA agents send status of hosts to this endpoint
 
     Args:
         host_id (str): The host_id of the host malfunctioning
     """
     
     body = request.get_json()
+    LOG.debug(f"Body in request {body}")
     if len(body)==0:
         return jsonify(dict(success=False, error="host not found in body")), 412, CONTENT_TYPE_HEADER
-    header = request.headers.get("X-Auth-Token")
+    header = request.headers
 
     # Get list of all the hosts that are in failed state
     for host in body:
