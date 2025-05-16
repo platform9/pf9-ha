@@ -395,7 +395,7 @@ def host_status_handler(host_id):
     LOG.info(f"Body in request {body}")
     if len(body)==0:
         return jsonify(dict(success=False, error="host not found in body")), 412, CONTENT_TYPE_HEADER
-    header = request.headers
+    header = {"X-Auth-Token": request.headers.get("X-Auth-Token")}
 
     # Get list of all the hosts that are in failed state
     for host in body:
