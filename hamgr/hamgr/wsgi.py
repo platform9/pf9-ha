@@ -381,7 +381,7 @@ def host_list_handler(host_id):
     return jsonify(nova_provider.generate_ip_list(host_id))
 
 
-@app.route('/v1/vmha/hoststatus/<host_id>', methods=['GET'])
+@app.route('/v1/vmha/hoststatus/<host_id>', methods=['POST'])
 @error_handler
 def host_status_handler(host_id):
     """
