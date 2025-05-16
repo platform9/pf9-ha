@@ -392,7 +392,7 @@ def host_status_handler(host_id):
     """
     
     body = request.get_json()
-    LOG.debug(f"Body in request {body}")
+    LOG.info(f"Body in request {body}")
     if len(body)==0:
         return jsonify(dict(success=False, error="host not found in body")), 412, CONTENT_TYPE_HEADER
     header = request.headers
