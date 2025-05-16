@@ -17,6 +17,8 @@ import json
 from datetime import datetime, timedelta
 from flask import jsonify
 from flask import request
+import requests
+import time
 from hamgr import app
 from hamgr.context import error_handler
 from shared.exceptions import ha_exceptions as exceptions
@@ -27,6 +29,10 @@ from shared.constants import LOGGER_PREFIX
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 CONTENT_TYPE_HEADER = {'Content-Type': 'application/json'}
+
+VMHA_CACHE = {}
+VMHA_TABLE={}
+MAX_FAILED_TIME = 5*60 #5mins
 
 
 def get_provider():
@@ -375,5 +381,65 @@ def host_list_handler(host_id):
     return jsonify(nova_provider.generate_ip_list(host_id))
 
 
+@app.route('/v1/vmha/hoststatus/<host_id>', methods=['GET'])
+@error_handler
+def host_status_handler(host_id):
+    """
+    Rest to this endpoints mean the host is not up/working/is ded
+
+    Args:
+        host_id (str): The host_id of the host malfunctioning
+    """
+    
+    body = request.get_json()
+    if len(body)==0:
+        return jsonify(dict(success=False, error="host not found in body")), 412, CONTENT_TYPE_HEADER
+    header = request.headers.get("X-Auth-Token")
+
+    # Get list of all the hosts that are in failed state
+    for host in body:
+        if host not in VMHA_TABLE:
+            VMHA_TABLE[host]=[]
+        if body[host]!="Success":
+            VMHA_TABLE.append(False)
+        else:
+            VMHA_TABLE.append(True)
+        # Remove older status to keep a queue of most recent statuses
+        if len(VMHA_TABLE[host]) >= 5:
+            VMHA_TABLE[host].pop(0)
+        if VMHA_TABLE[host].count(True)-VMHA_TABLE.count(False) < 0:
+            LOG.debug(f"Body of request {body}. Cache looks like {VMHA_CACHE}. Table looks like this {VMHA_TABLE}")
+            if host in VMHA_CACHE:
+                if time.time() - VMHA_CACHE[host] > MAX_FAILED_TIME:
+                    LOG.info(f"Triggering migration of VMs on host{host} after being failed for {time.time() - VMHA_CACHE[host]} seconds")
+
+                    migration_body = {
+                        'event': "host-down",
+                        'event_details': {
+                            'event': {
+                                'reportedBy': host_id
+                            } 
+                        }
+                    }
+                    LOG.info(f"Request payload for migration endpoint {migration_body}")
+                    # Make request for that host being down
+                    requests.post(f"http://localhost:9083/v1/ha/{host}", json=migration_body, headers=header)
+
+                    # Remove from cache
+                    VMHA_CACHE.pop(host, None)
+            else:
+                VMHA_CACHE[host] = time.time()
+        else:
+            # the host is OK
+            # Remove it from cache if it exists
+            if host in VMHA_CACHE:
+                VMHA_CACHE.pop(host, None)
+
+    return jsonify(dict(success=True)), 204, CONTENT_TYPE_HEADER
+
 def app_factory(global_config, **local_conf):
+    global VMHA_CACHE
+    global VMHA_TABLE
+    VMHA_CACHE = {}
+    VMHA_TABLE = {}
     return app
