@@ -424,7 +424,8 @@ def host_status_handler(host_id):
                     }
                     LOG.info(f"Request payload for migration endpoint {migration_body}")
                     # Make request for that host being down
-                    requests.post(f"http://localhost:9083/v1/ha/{host}", json=migration_body, headers=header)
+                    req=requests.post(f"http://localhost:9083/v1/ha/{host}", json=migration_body, headers=header, timeout=5)
+                    LOG.info(f"Request status code {req.status_code}")
 
                     # Remove from cache
                     VMHA_CACHE.pop(host, None)
