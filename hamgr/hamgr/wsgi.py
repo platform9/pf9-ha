@@ -402,9 +402,9 @@ def host_status_handler(host_id):
         if host not in VMHA_TABLE:
             VMHA_TABLE[host]=[]
         if body[host]!="Success":
-            VMHA_TABLE.append(False)
+            VMHA_TABLE[host].append(False)
         else:
-            VMHA_TABLE.append(True)
+            VMHA_TABLE[host].append(True)
         # Remove older status to keep a queue of most recent statuses
         if len(VMHA_TABLE[host]) >= 5:
             VMHA_TABLE[host].pop(0)
