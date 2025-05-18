@@ -19,7 +19,11 @@ import uuid
 import mock
 import time
 import json
+import shutil
+import logging
 from oslo_config import cfg
+
+LOG = logging.getLogger(__name__)
 
 class HostManagerTest(unittest.TestCase):
     pf9_ha_config="""
@@ -176,12 +180,25 @@ amqp_exchange_type = direct
             {'path':'conf.d', 'type':'dir'},
             {'path':'test.conf', 'type':'file' }
         ]
+        # for x in paths:
+        #     if os.path.exists(x['path']):
+        #         if x['type'] == 'file':
+        #             os.system('rm -f %s' % x['path'])
+        #         if x['type'] == 'dir':
+        #             os.system('rm -rf %s' % x['path'])
         for x in paths:
-            if os.path.exists(x['path']):
+            path = x['path']
+            if os.path.exists(path):
                 if x['type'] == 'file':
-                    os.system('rm -f %s' % x['path'])
-                if x['type'] == 'dir':
-                    os.system('rm -rf %s' % x['path'])
+                    try:
+                        os.remove(path)
+                    except Exception as e:
+                        LOG.warning(f"Failed to remove file {path}: {e}")
+                elif x['type'] == 'dir':
+                    try:
+                        shutil.rmtree(path)
+                    except Exception as e:
+                        LOG.warning(f"Failed to remove directory {path}: {e}")
 
     def test_consul_config_needs_refresh(self):
         needed = self._manager.config_needs_refresh()

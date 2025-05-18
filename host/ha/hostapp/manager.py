@@ -16,6 +16,7 @@ import json
 import os
 import io
 import logging
+import shlex
 from datetime import datetime
 from datetime import timedelta
 from subprocess import call
@@ -237,7 +238,8 @@ def generate_consul_conf(server_mode, ignore_expect=False):
 
 def run_cmd(cmd):
     LOG.debug('run command in shell : %s', str(cmd))
-    retcode = call(cmd, shell=True)
+    cmd_args = shlex.split(cmd)
+    retcode = call(cmd_args)
     if retcode != 0:
         LOG.warning("command '{cmd}' returned non-zero code".format(cmd=cmd))
     LOG.debug('return code : %s , command : %s', str(retcode), str(cmd))

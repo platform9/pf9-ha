@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime
 from datetime import timedelta
 import tempfile
+import shlex
 
 import requests
 from keystoneauth1 import loading
@@ -336,7 +337,8 @@ class CinderProvider(Provider):
                     cmd = f"cinder-manage --config-file {cinder_conf_path} volume update_host --currenthost {source_host} --newhost {target_host}"
                     LOG.info(f"Executing command: {cmd}")
                     
-                    result = subprocess.run(cmd, shell=True, env=env, capture_output=True, text=True)
+                    cmd_args = shlex.split(cmd)
+                    result = subprocess.run(cmd_args, env=env, capture_output=True, text=True)
                     
                     if result.returncode == 0:
                         LOG.info(f"Database update for migration from {source_host} to {target_host} completed")

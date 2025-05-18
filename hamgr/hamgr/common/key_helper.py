@@ -16,6 +16,7 @@ import logging
 import base64
 import os
 import datetime
+import shlex
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from subprocess import Popen, PIPE
@@ -42,14 +43,14 @@ def execute_shell_command(command, in_directory=None, env_variables=dict()):
         for x, y in iteritems(env_variables):
             envs[x] = y
     LOG.debug('command "%s"', str(command))
+    command_args = shlex.split(command)
     if in_directory:
         os.chdir(in_directory)
-    p = Popen(command,
+    p = Popen(command_args,
               stdout=PIPE,
               stderr=PIPE,
               cwd=in_directory,
-              env=envs,
-              shell=True)
+              env=envs)
     msg, err = p.communicate()
     ret = p.returncode
     LOG.debug('command "%s" finished. returncode: %s, stdout: %s, stderr: %s',
