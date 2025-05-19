@@ -34,6 +34,11 @@ VMHA_CACHE = {}
 VMHA_TABLE={}
 MAX_FAILED_TIME = 5*60 #5mins
 
+class MockEvent:
+    def __init__(self, kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
 
 def get_provider():
     return provider_factory.ha_provider()
@@ -395,7 +400,9 @@ def host_status_handler(host_id):
     LOG.info(f"Body in request {body}")
     if len(body)==0:
         return jsonify(dict(success=False, error="host not found in body")), 412, CONTENT_TYPE_HEADER
-    header = {"X-Auth-Token": request.headers.get("X-Auth-Token")}
+    
+    # Use nova provider
+    nova_provider = provider_factory.ha_provider()
 
     # Get list of all the hosts that are in failed state
     for host in body:
@@ -412,22 +419,19 @@ def host_status_handler(host_id):
             LOG.debug(f"Body of request {body}. Cache looks like {VMHA_CACHE}. Table looks like this {VMHA_TABLE}")
             if host in VMHA_CACHE:
                 if time.time() - VMHA_CACHE[host] > MAX_FAILED_TIME:
-                    LOG.info(f"Triggering migration of VMs on host{host} after being failed for {time.time() - VMHA_CACHE[host]} seconds")
-
-                    migration_body = {
-                        'event': "host-down",
-                        'event_details': {
-                            'event': {
-                                'reportedBy': host_id,
-                                'hostName': host
-                            } 
+                    LOG.info(f"Triggering migration of VMs on host {host} after being failed for {time.time() - VMHA_CACHE[host]} seconds")
+                    event = MockEvent(
+                        {
+                            'host_name': host,
+                            'event_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            'event_type': 'COMPUTE_HOST',
+                            'event_uuid': None
                         }
-                    }
-                    LOG.info(f"Request payload for migration endpoint {migration_body}")
-                    # Make request for that host being down
-                    req=requests.post(f"http://localhost:9083/v1/ha/{host}", json=migration_body, headers=header, timeout=5)
-                    LOG.info(f"Request status code {req.status_code}")
-
+                    )
+                    ret = nova_provider._report_event_to_masakari(event)
+                    LOG.info(f"Return from masakari func {ret}")
+                    if ret==None:
+                        return jsonify(dict(success=False, error="unable to send masakari notification")), 500, CONTENT_TYPE_HEADER
                     # Remove from cache
                     VMHA_CACHE.pop(host, None)
             else:
