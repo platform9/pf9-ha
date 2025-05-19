@@ -397,7 +397,6 @@ def host_status_handler(host_id):
     """
     
     body = request.get_json()
-    LOG.info(f"Body in request {body}")
     if len(body)==0:
         return jsonify(dict(success=False, error="host not found in body")), 412, CONTENT_TYPE_HEADER
     
@@ -415,10 +414,11 @@ def host_status_handler(host_id):
         # Remove older status to keep a queue of most recent statuses
         if len(VMHA_TABLE[host]) >= 5:
             VMHA_TABLE[host].pop(0)
+        LOG.info(f"Cache looks like {VMHA_CACHE}. Table looks like this {VMHA_TABLE}")
         if VMHA_TABLE[host].count(True)-VMHA_TABLE[host].count(False) < 0:
-            LOG.debug(f"Body of request {body}. Cache looks like {VMHA_CACHE}. Table looks like this {VMHA_TABLE}")
+            LOG.debug(f"Cache looks like {VMHA_CACHE}. Table looks like this {VMHA_TABLE}")
             if host in VMHA_CACHE:
-                if time.time() - VMHA_CACHE[host] > MAX_FAILED_TIME:
+                if time.time() - VMHA_CACHE[host] > MAX_FAILED_TIME and VMHA_CACHE[host]!=0:
                     LOG.info(f"Triggering migration of VMs on host {host} after being failed for {time.time() - VMHA_CACHE[host]} seconds")
                     event = MockEvent(
                         {
@@ -432,8 +432,8 @@ def host_status_handler(host_id):
                     LOG.info(f"Return from masakari func {ret}")
                     if ret==None:
                         return jsonify(dict(success=False, error="unable to send masakari notification")), 500, CONTENT_TYPE_HEADER
-                    # Remove from cache
-                    VMHA_CACHE.pop(host, None)
+                    # The host is processed. Escape the check above
+                    VMHA_CACHE[host] = 0
             else:
                 VMHA_CACHE[host] = time.time()
         else:
