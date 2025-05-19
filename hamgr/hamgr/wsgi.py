@@ -418,7 +418,8 @@ def host_status_handler(host_id):
                         'event': "host-down",
                         'event_details': {
                             'event': {
-                                'reportedBy': host_id
+                                'reportedBy': host_id,
+                                'hostName': host
                             } 
                         }
                     }
