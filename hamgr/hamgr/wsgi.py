@@ -32,7 +32,8 @@ CONTENT_TYPE_HEADER = {'Content-Type': 'application/json'}
 
 VMHA_CACHE = {}
 VMHA_TABLE={}
-MAX_FAILED_TIME = 5*60 #5mins
+MAX_FAILED_TIME = 10
+# ^ in sec
 
 class MockEvent:
     def __init__(self, kwargs):
