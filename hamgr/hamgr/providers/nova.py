@@ -1332,10 +1332,13 @@ class NovaProvider(Provider):
             return self._get_ha_status()
 
     def _validate_hosts(self, hosts, check_cluster=True, check_host_insufficient=True):
+        # [FOR CONSUL]
         # Since the consul needs 3 to 5 servers for bootstrapping, it is safe
         # to enable HA only if 4 hosts are present. So that even if 1 host goes
         # down after cluster is created, we can reconfigure it.
-        if check_host_insufficient and len(hosts) < 4:
+        # [FOR VMHA-AGENT]
+        # Just check if there are atleast 2 hosts in the cluster
+        if check_host_insufficient and len(hosts) < 2:
             raise ha_exceptions.InsufficientHosts()
 
         # Check host state and role status in resmgr before proceeding
@@ -1653,22 +1656,22 @@ class NovaProvider(Provider):
         self.__perf_meter('utils.get_token', time_begin)
         try:
             # when request to enable a cluster, first create CA if not exist, and svc key and certs
-            if self._is_consul_encryption_enabled():
-                ca_changed = False
-                svc_changed = False
-                if not keyhelper.are_consul_ca_key_cert_pair_exist() or \
-                        keyhelper.is_consul_ca_cert_expired():
-                    ca_changed = keyhelper.create_consul_ca_key_cert_pairs()
-                    LOG.info('CA key and cert are generated ? %s', str(ca_changed))
-                else:
-                    LOG.debug('CA key and cert are good for now')
+            # if self._is_consul_encryption_enabled():
+            #     ca_changed = False
+            #     svc_changed = False
+            #     if not keyhelper.are_consul_ca_key_cert_pair_exist() or \
+            #             keyhelper.is_consul_ca_cert_expired():
+            #         ca_changed = keyhelper.create_consul_ca_key_cert_pairs()
+            #         LOG.info('CA key and cert are generated ? %s', str(ca_changed))
+            #     else:
+            #         LOG.debug('CA key and cert are good for now')
 
-                if not keyhelper.are_consul_svc_key_cert_pair_exist(cluster_name) or \
-                        keyhelper.is_consul_svc_cert_expired(cluster_name):
-                    svc_changed = keyhelper.create_consul_svc_key_cert_pairs(cluster_name)
-                    LOG.info('svc key and cert for cluster name %s are generated ? %s', cluster_name, str(svc_changed))
-                else:
-                    LOG.debug('svc key and cert for cluster name %s are good for now', cluster_name)
+            #     if not keyhelper.are_consul_svc_key_cert_pair_exist(cluster_name) or \
+            #             keyhelper.is_consul_svc_cert_expired(cluster_name):
+            #         svc_changed = keyhelper.create_consul_svc_key_cert_pairs(cluster_name)
+            #         LOG.info('svc key and cert for cluster name %s are generated ? %s', cluster_name, str(svc_changed))
+            #     else:
+            #         LOG.debug('svc key and cert for cluster name %s are good for now', cluster_name)
 
             # 1. update task_state to 'creating' and mark request as 'enabling' in status
             cluster = db_api.get_cluster(cluster_id)
@@ -1879,8 +1882,8 @@ class NovaProvider(Provider):
                                     for x in az['hosts'].keys():
                                         az_hosts.append(x)
                                     break
-                            if len(az_hosts) < 4:
-                                LOG.info('less than 4 hosts in availability zone %s waiting till it has >=4 hosts', str_availability_zone)
+                            if len(az_hosts) < 2:
+                                LOG.info('less than 2 hosts in availability zone %s waiting till it has >=2 hosts', str_availability_zone)
                                 continue
                         self._handle_enable_request(request, hosts=az_hosts)
                     if request.status == constants.HA_STATE_REQUEST_DISABLE:
