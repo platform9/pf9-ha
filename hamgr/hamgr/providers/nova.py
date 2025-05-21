@@ -1417,6 +1417,7 @@ class NovaProvider(Provider):
         return customize_cfg
 
     def _auth(self, availability_zone, ip_lookup, cluster_ip_lookup, nodes_details, token, nodes, role=None):
+        return
         valid_ips = [x for x in cluster_ip_lookup.values() if x != '']
         ips = ','.join([str(v) for v in sorted(valid_ips)])
         LOG.info('ips for consul members to join : %s', ips)
