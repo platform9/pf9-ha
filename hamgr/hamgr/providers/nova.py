@@ -1417,21 +1417,21 @@ class NovaProvider(Provider):
         return customize_cfg
 
     def _auth(self, availability_zone, ip_lookup, cluster_ip_lookup, nodes_details, token, nodes, role=None):
-        return
         valid_ips = [x for x in cluster_ip_lookup.values() if x != '']
         ips = ','.join([str(v) for v in sorted(valid_ips)])
         LOG.info('ips for consul members to join : %s', ips)
         for node in nodes:
             start_time = datetime.now()
-            data = self._customize_pf9_ha_slave_config(availability_zone, ips, ip_lookup[node], cluster_ip_lookup[node], nodes_details)
-            if role:
-                data['bootstrap_expect'] = 3 if role == 'server' else 0
-                LOG.info('Authorizing pf9-ha-slave role on node %s using IP %s',
-                         node, ip_lookup[node])
-            else:
-                LOG.info('Updating pf9-ha-slave role on node %s using IP %s',
-                         node, ip_lookup[node])
-            LOG.debug('authorize by updating settings for host %s for pf9-ha-slave with : %s', node, str(data))
+            data = {}
+            # data = self._customize_pf9_ha_slave_config(availability_zone, ips, ip_lookup[node], cluster_ip_lookup[node], nodes_details)
+            # if role:
+            #     data['bootstrap_expect'] = 3 if role == 'server' else 0
+            #     LOG.info('Authorizing pf9-ha-slave role on node %s using IP %s',
+            #              node, ip_lookup[node])
+            # else:
+            #     LOG.info('Updating pf9-ha-slave role on node %s using IP %s',
+            #              node, ip_lookup[node])
+            # LOG.debug('authorize by updating settings for host %s for pf9-ha-slave with : %s', node, str(data))
             resp = self._resmgr_client.update_role(node, 'pf9-ha-slave', data, self._token['id'])
             if resp.status_code == requests.codes.not_found and \
                     resp.content.find(b'HostDown'):
