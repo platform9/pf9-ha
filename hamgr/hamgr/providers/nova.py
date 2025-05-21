@@ -640,21 +640,21 @@ class NovaProvider(Provider):
                         masakari.add_hosts_to_failover_segment(self._token,
                                                                cluster_name,
                                                                nova_delta_ids)
-                        if cluster_enabled:
-                            # pick consul role for new host based on other cluster members
-                            consul_role = constants.CONSUL_ROLE_SERVER
-                            c_report = self._get_latest_consul_status(cluster_name)
-                            if c_report and c_report.get('members', []):
-                                members = c_report.get('members')
-                                c_servers = [x for x in members if x['Tags']['role'] == 'consul']
-                                c_servers_alive = [x for x in c_servers if x['Status'] == 1]
-                                if len(c_servers_alive) >= constants.SERVER_THRESHOLD:
-                                    consul_role = constants.CONSUL_ROLE_CLIENT
-                            LOG.info('add ha slave role (%s) to added hosts: %s', consul_role, str(nova_delta_ids))
-                            self._add_ha_slave_if_not_exist(cluster_name, nova_delta_ids, consul_role, common_ids)
-                            # trigger a consul role rebalance request
-                            time.sleep(30)
-                            self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_ADDED)
+                        # if cluster_enabled:
+                        #     # pick consul role for new host based on other cluster members
+                        #     consul_role = constants.CONSUL_ROLE_SERVER
+                        #     c_report = self._get_latest_consul_status(cluster_name)
+                        #     if c_report and c_report.get('members', []):
+                        #         members = c_report.get('members')
+                        #         c_servers = [x for x in members if x['Tags']['role'] == 'consul']
+                        #         c_servers_alive = [x for x in c_servers if x['Status'] == 1]
+                        #         if len(c_servers_alive) >= constants.SERVER_THRESHOLD:
+                        #             consul_role = constants.CONSUL_ROLE_CLIENT
+                        #     LOG.info('add ha slave role (%s) to added hosts: %s', consul_role, str(nova_delta_ids))
+                        #     self._add_ha_slave_if_not_exist(cluster_name, nova_delta_ids, consul_role, common_ids)
+                        #     # trigger a consul role rebalance request
+                        #     time.sleep(30)
+                        #     self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_ADDED)
                 # when cluster is enabled, make sure pf9-ha-slave role is on all active hosts
                 # ----------------------------------------------------------
                 # then reconcile masakari hosts and pf9-ha-slave on those
@@ -775,8 +775,8 @@ class NovaProvider(Provider):
                         elif len(ip_mismatch_host_ids) > 0:
                             LOG.info('updating join ips for availability_zone %s, hosts %s',
                                      str(availability_zone), ip_mismatch_host_ids)
-                            self._auth(availability_zone, cluster_ip_lookup, cluster_ip_lookup, cluster_details,
-                                       self._token, ip_mismatch_host_ids)
+                            #self._auth(availability_zone, cluster_ip_lookup, cluster_ip_lookup, cluster_details,
+                            #           self._token, ip_mismatch_host_ids)
                         else:
                             LOG.info("all hosts already have pf9-ha-slave role")
 
@@ -790,8 +790,8 @@ class NovaProvider(Provider):
                         self._add_ha_slave_if_not_exist(cluster_name, new_active_host_ids, 'server',
                                                         masakari_host_ids)
                         # trigger consul role rebalance request
-                        time.sleep(30)
-                        self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_ADDED)
+                        #time.sleep(30)
+                        #self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_ADDED)
 
                     if len(new_inactive_host_ids) > 0:
                         # need to wait for them become active so can put pf9-ha-slave role on them
@@ -806,8 +806,8 @@ class NovaProvider(Provider):
                         self._remove_ha_slave_if_exist(cluster_name, removed_host_ids,
                             list( set(existing_active_host_ids).difference(set(removed_host_ids)) ))
                         LOG.info('try to rebalance consul roles after removing hosts: %s', str(removed_host_ids))
-                        time.sleep(30)
-                        self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_REMOVED)
+                        #time.sleep(30)
+                        #self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_REMOVED)
 
                     if len(existing_inactive_host_ids) > 0:
                         LOG.warning('existing inactive hosts in segment %s: %s, wait for hosts to become active',
