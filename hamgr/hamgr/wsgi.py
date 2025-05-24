@@ -384,6 +384,17 @@ def host_list_handler(host_id):
     nova_provider = provider_factory.ha_provider()
     nova_provider._token = nova_provider._get_v3_token()
     
+    # Using this as a simple cleanup job for VMHA CACHE. This does not correspond to the functionality of the endpoint
+    # but I kinda find it would be easier to do here
+    try:
+        for host in VMHA_CACHE:
+            ret = nova_provider.get_ip_from_host_id(host)
+            if not ret:
+                # Asserting if the ip of that host doesn't exist then host doesn't exist
+                VMHA_CACHE.pop(host, None)
+    except:
+        pass
+        
     return jsonify(nova_provider.generate_ip_list(host_id))
 
 
@@ -398,6 +409,7 @@ def host_status_handler(host_id):
     """
     
     body = request.get_json()
+    LOG.debug(f"Body of request for hoststatus {body}")
     if len(body)==0:
         return jsonify(dict(success=False, error="host not found in body")), 412, CONTENT_TYPE_HEADER
     
@@ -415,9 +427,8 @@ def host_status_handler(host_id):
         # Remove older status to keep a queue of most recent statuses
         if len(VMHA_TABLE[host]) >= 5:
             VMHA_TABLE[host].pop(0)
-        LOG.info(f"Cache looks like {VMHA_CACHE}. Table looks like this {VMHA_TABLE}")
+        LOG.debug(f"Cache looks like {VMHA_CACHE}. Table looks like this {VMHA_TABLE}")
         if VMHA_TABLE[host].count(True)-VMHA_TABLE[host].count(False) < 0:
-            LOG.debug(f"Cache looks like {VMHA_CACHE}. Table looks like this {VMHA_TABLE}")
             if host in VMHA_CACHE:
                 if time.time() - VMHA_CACHE[host] > MAX_FAILED_TIME and VMHA_CACHE[host]!=0:
                     LOG.info(f"Triggering migration of VMs on host {host} after being failed for {time.time() - VMHA_CACHE[host]} seconds")
@@ -436,11 +447,13 @@ def host_status_handler(host_id):
                     # The host is processed. Escape the check above
                     VMHA_CACHE[host] = 0
             else:
+                LOG.debug(f"Start timer on host {host}")
                 VMHA_CACHE[host] = time.time()
         else:
             # the host is OK
             # Remove it from cache if it exists
             if host in VMHA_CACHE:
+                LOG.debug(f"Host {host} is back up. Removing from VMHA_CACHE")
                 VMHA_CACHE.pop(host, None)
 
     return jsonify(dict(success=True)), 204, CONTENT_TYPE_HEADER

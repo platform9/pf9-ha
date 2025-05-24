@@ -3018,7 +3018,8 @@ class NovaProvider(Provider):
         else:
             data = self._hypervisor_details
         if 'hypervisors' in data:
-            ip = list(filter(lambda x:x['service']['host'] == host_id, data['hypervisors']))[0]['host_ip']
+            if len(data['hypervisors']) > 0:
+                ip = list(filter(lambda x:x['service']['host'] == host_id, data['hypervisors']))[0]['host_ip']
         return ip
 
     # Generate list of ips for vmha agent to monty
@@ -3031,6 +3032,8 @@ class NovaProvider(Provider):
         for host in filter(lambda x: x!=host_id,host_ids):
             # Make this as such only one request is used and then we parse it and get ips for different hosts
             ip_map[host]=self.get_ip_from_host_id(host)
+            if not ip_map[host]:
+                return []
 
         # Make nCr type combinations and choose amongst them randomly
         # if n is less than r, we can't make combinations
