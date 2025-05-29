@@ -53,6 +53,8 @@ AMQP_HTTP_PORT = 15672
 
 VMHA_MAX_FANOUT = 3
 
+NOVA_REQ_TIMEOUT = 5
+
 class NovaProvider(Provider):
     def __init__(self, config):
         self._username = config.get('keystone_middleware', 'username')
@@ -2998,11 +3000,15 @@ class NovaProvider(Provider):
         host_ids = []
         headers = {"X-AUTH-TOKEN": self._token['id']}
         url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-aggregates'
-        response = requests.get(url, headers=headers)
+        try:
+            response = requests.get(url, headers=headers,timeout=NOVA_REQ_TIMEOUT)
+        except requests.exceptions.Timeout:
+            return host_ids
         if response.status_code == 200:
             data = response.json()
             if 'aggregates' in data:
-                host_ids = list(filter(lambda x: x["availability_zone"]!=None and host_id in x["hosts"], data['aggregates']))[0]['hosts']
+                filtered_aggregates = list(filter(lambda x: x["availability_zone"]!=None and host_id in x["hosts"], data['aggregates']))
+                host_ids = filtered_aggregates[0]['hosts'] if filtered_aggregates else []
         return host_ids
 
     # Get ip from host-id
@@ -3012,7 +3018,10 @@ class NovaProvider(Provider):
             headers = {"X-AUTH-TOKEN": self._token['id']}
             # We dont know whats the hypervisor id so be brute force it
             url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-hypervisors/detail'
-            response = requests.get(url, headers=headers)
+            try:
+                response = requests.get(url, headers=headers, timeout=NOVA_REQ_TIMEOUT)
+            except requests.exceptions.Timeout:
+                return ip
             if response.status_code == 200:
                 data = response.json()
         else:
@@ -3026,14 +3035,14 @@ class NovaProvider(Provider):
     def generate_ip_list(self, host_id):
         host_ids = self.get_hosts_with_same_cluster(host_id)
         if host_ids == []:
-            return []
+            return {}
         ip_map = {}
         self._hypervisor_details=""
         for host in filter(lambda x: x!=host_id,host_ids):
             # Make this as such only one request is used and then we parse it and get ips for different hosts
             ip_map[host]=self.get_ip_from_host_id(host)
             if not ip_map[host]:
-                return []
+                return {}
 
         # Make nCr type combinations and choose amongst them randomly
         # if n is less than r, we can't make combinations
