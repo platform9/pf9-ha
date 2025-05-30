@@ -16,6 +16,8 @@ import json
 import logging
 import threading
 import time
+from random import randint
+from itertools import combinations
 from collections import defaultdict
 from datetime import datetime
 from datetime import timedelta
@@ -49,6 +51,10 @@ LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 AMQP_HOST_QUEUE_PREFIX = 'queue-receiving-for-host'
 AMQP_HTTP_PORT = 15672
 
+VMHA_MAX_FANOUT = 3
+
+NOVA_REQ_TIMEOUT = 5
+
 class NovaProvider(Provider):
     def __init__(self, config):
         self._username = config.get('keystone_middleware', 'username')
@@ -70,6 +76,7 @@ class NovaProvider(Provider):
         self._db_uri = config.get("database", "sqlconnectURI")
         self._db_pwd = self._db_uri
         self._hamgr_config = '/etc/pf9/hamgr/hamgr.conf'
+        self._hypervisor_details = ""
         parser = ConfigParser()
         with open(self._hamgr_config) as fp: 
             parser.readfp(fp)
@@ -635,21 +642,21 @@ class NovaProvider(Provider):
                         masakari.add_hosts_to_failover_segment(self._token,
                                                                cluster_name,
                                                                nova_delta_ids)
-                        if cluster_enabled:
-                            # pick consul role for new host based on other cluster members
-                            consul_role = constants.CONSUL_ROLE_SERVER
-                            c_report = self._get_latest_consul_status(cluster_name)
-                            if c_report and c_report.get('members', []):
-                                members = c_report.get('members')
-                                c_servers = [x for x in members if x['Tags']['role'] == 'consul']
-                                c_servers_alive = [x for x in c_servers if x['Status'] == 1]
-                                if len(c_servers_alive) >= constants.SERVER_THRESHOLD:
-                                    consul_role = constants.CONSUL_ROLE_CLIENT
-                            LOG.info('add ha slave role (%s) to added hosts: %s', consul_role, str(nova_delta_ids))
-                            self._add_ha_slave_if_not_exist(cluster_name, nova_delta_ids, consul_role, common_ids)
-                            # trigger a consul role rebalance request
-                            time.sleep(30)
-                            self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_ADDED)
+                        # if cluster_enabled:
+                        #     # pick consul role for new host based on other cluster members
+                        #     consul_role = constants.CONSUL_ROLE_SERVER
+                        #     c_report = self._get_latest_consul_status(cluster_name)
+                        #     if c_report and c_report.get('members', []):
+                        #         members = c_report.get('members')
+                        #         c_servers = [x for x in members if x['Tags']['role'] == 'consul']
+                        #         c_servers_alive = [x for x in c_servers if x['Status'] == 1]
+                        #         if len(c_servers_alive) >= constants.SERVER_THRESHOLD:
+                        #             consul_role = constants.CONSUL_ROLE_CLIENT
+                        #     LOG.info('add ha slave role (%s) to added hosts: %s', consul_role, str(nova_delta_ids))
+                        #     self._add_ha_slave_if_not_exist(cluster_name, nova_delta_ids, consul_role, common_ids)
+                        #     # trigger a consul role rebalance request
+                        #     time.sleep(30)
+                        #     self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_ADDED)
                 # when cluster is enabled, make sure pf9-ha-slave role is on all active hosts
                 # ----------------------------------------------------------
                 # then reconcile masakari hosts and pf9-ha-slave on those
@@ -770,8 +777,8 @@ class NovaProvider(Provider):
                         elif len(ip_mismatch_host_ids) > 0:
                             LOG.info('updating join ips for availability_zone %s, hosts %s',
                                      str(availability_zone), ip_mismatch_host_ids)
-                            self._auth(availability_zone, cluster_ip_lookup, cluster_ip_lookup, cluster_details,
-                                       self._token, ip_mismatch_host_ids)
+                            #self._auth(availability_zone, cluster_ip_lookup, cluster_ip_lookup, cluster_details,
+                            #           self._token, ip_mismatch_host_ids)
                         else:
                             LOG.info("all hosts already have pf9-ha-slave role")
 
@@ -785,8 +792,8 @@ class NovaProvider(Provider):
                         self._add_ha_slave_if_not_exist(cluster_name, new_active_host_ids, 'server',
                                                         masakari_host_ids)
                         # trigger consul role rebalance request
-                        time.sleep(30)
-                        self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_ADDED)
+                        #time.sleep(30)
+                        #self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_ADDED)
 
                     if len(new_inactive_host_ids) > 0:
                         # need to wait for them become active so can put pf9-ha-slave role on them
@@ -801,8 +808,8 @@ class NovaProvider(Provider):
                         self._remove_ha_slave_if_exist(cluster_name, removed_host_ids,
                             list( set(existing_active_host_ids).difference(set(removed_host_ids)) ))
                         LOG.info('try to rebalance consul roles after removing hosts: %s', str(removed_host_ids))
-                        time.sleep(30)
-                        self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_REMOVED)
+                        #time.sleep(30)
+                        #self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_REMOVED)
 
                     if len(existing_inactive_host_ids) > 0:
                         LOG.warning('existing inactive hosts in segment %s: %s, wait for hosts to become active',
@@ -1327,10 +1334,13 @@ class NovaProvider(Provider):
             return self._get_ha_status()
 
     def _validate_hosts(self, hosts, check_cluster=True, check_host_insufficient=True):
+        # [FOR CONSUL]
         # Since the consul needs 3 to 5 servers for bootstrapping, it is safe
         # to enable HA only if 4 hosts are present. So that even if 1 host goes
         # down after cluster is created, we can reconfigure it.
-        if check_host_insufficient and len(hosts) < 4:
+        # [FOR VMHA-AGENT]
+        # Just check if there are atleast 2 hosts in the cluster
+        if check_host_insufficient and len(hosts) < 2:
             raise ha_exceptions.InsufficientHosts()
 
         # Check host state and role status in resmgr before proceeding
@@ -1414,15 +1424,16 @@ class NovaProvider(Provider):
         LOG.info('ips for consul members to join : %s', ips)
         for node in nodes:
             start_time = datetime.now()
-            data = self._customize_pf9_ha_slave_config(availability_zone, ips, ip_lookup[node], cluster_ip_lookup[node], nodes_details)
-            if role:
-                data['bootstrap_expect'] = 3 if role == 'server' else 0
-                LOG.info('Authorizing pf9-ha-slave role on node %s using IP %s',
-                         node, ip_lookup[node])
-            else:
-                LOG.info('Updating pf9-ha-slave role on node %s using IP %s',
-                         node, ip_lookup[node])
-            LOG.debug('authorize by updating settings for host %s for pf9-ha-slave with : %s', node, str(data))
+            data = {}
+            # data = self._customize_pf9_ha_slave_config(availability_zone, ips, ip_lookup[node], cluster_ip_lookup[node], nodes_details)
+            # if role:
+            #     data['bootstrap_expect'] = 3 if role == 'server' else 0
+            #     LOG.info('Authorizing pf9-ha-slave role on node %s using IP %s',
+            #              node, ip_lookup[node])
+            # else:
+            #     LOG.info('Updating pf9-ha-slave role on node %s using IP %s',
+            #              node, ip_lookup[node])
+            # LOG.debug('authorize by updating settings for host %s for pf9-ha-slave with : %s', node, str(data))
             resp = self._resmgr_client.update_role(node, 'pf9-ha-slave', data, self._token['id'])
             if resp.status_code == requests.codes.not_found and \
                     resp.content.find(b'HostDown'):
@@ -1648,22 +1659,22 @@ class NovaProvider(Provider):
         self.__perf_meter('utils.get_token', time_begin)
         try:
             # when request to enable a cluster, first create CA if not exist, and svc key and certs
-            if self._is_consul_encryption_enabled():
-                ca_changed = False
-                svc_changed = False
-                if not keyhelper.are_consul_ca_key_cert_pair_exist() or \
-                        keyhelper.is_consul_ca_cert_expired():
-                    ca_changed = keyhelper.create_consul_ca_key_cert_pairs()
-                    LOG.info('CA key and cert are generated ? %s', str(ca_changed))
-                else:
-                    LOG.debug('CA key and cert are good for now')
+            # if self._is_consul_encryption_enabled():
+            #     ca_changed = False
+            #     svc_changed = False
+            #     if not keyhelper.are_consul_ca_key_cert_pair_exist() or \
+            #             keyhelper.is_consul_ca_cert_expired():
+            #         ca_changed = keyhelper.create_consul_ca_key_cert_pairs()
+            #         LOG.info('CA key and cert are generated ? %s', str(ca_changed))
+            #     else:
+            #         LOG.debug('CA key and cert are good for now')
 
-                if not keyhelper.are_consul_svc_key_cert_pair_exist(cluster_name) or \
-                        keyhelper.is_consul_svc_cert_expired(cluster_name):
-                    svc_changed = keyhelper.create_consul_svc_key_cert_pairs(cluster_name)
-                    LOG.info('svc key and cert for cluster name %s are generated ? %s', cluster_name, str(svc_changed))
-                else:
-                    LOG.debug('svc key and cert for cluster name %s are good for now', cluster_name)
+            #     if not keyhelper.are_consul_svc_key_cert_pair_exist(cluster_name) or \
+            #             keyhelper.is_consul_svc_cert_expired(cluster_name):
+            #         svc_changed = keyhelper.create_consul_svc_key_cert_pairs(cluster_name)
+            #         LOG.info('svc key and cert for cluster name %s are generated ? %s', cluster_name, str(svc_changed))
+            #     else:
+            #         LOG.debug('svc key and cert for cluster name %s are good for now', cluster_name)
 
             # 1. update task_state to 'creating' and mark request as 'enabling' in status
             cluster = db_api.get_cluster(cluster_id)
@@ -1874,8 +1885,8 @@ class NovaProvider(Provider):
                                     for x in az['hosts'].keys():
                                         az_hosts.append(x)
                                     break
-                            if len(az_hosts) < 4:
-                                LOG.info('less than 4 hosts in availability zone %s waiting till it has >=4 hosts', str_availability_zone)
+                            if len(az_hosts) < 2:
+                                LOG.info('less than 2 hosts in availability zone %s waiting till it has >=2 hosts', str_availability_zone)
                                 continue
                         self._handle_enable_request(request, hosts=az_hosts)
                     if request.status == constants.HA_STATE_REQUEST_DISABLE:
@@ -2982,6 +2993,68 @@ class NovaProvider(Provider):
                                       }]
                                       )
         LOG.info('reported consul agent role change for host %s from %s to %s', host_id, current_role, agent_role)
+        
+        
+    # Get host-ids within same cluster as a host
+    def get_hosts_with_same_cluster(self, host_id):
+        host_ids = []
+        headers = {"X-AUTH-TOKEN": self._token['id']}
+        url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-aggregates'
+        try:
+            response = requests.get(url, headers=headers,timeout=NOVA_REQ_TIMEOUT)
+        except requests.exceptions.Timeout:
+            return host_ids
+        if response.status_code == 200:
+            data = response.json()
+            if 'aggregates' in data:
+                filtered_aggregates = list(filter(lambda x: x["availability_zone"]!=None and host_id in x["hosts"], data['aggregates']))
+                host_ids = filtered_aggregates[0]['hosts'] if filtered_aggregates else []
+        return host_ids
+
+    # Get ip from host-id
+    def get_ip_from_host_id(self, host_id):
+        ip=""
+        if self._hypervisor_details == "":
+            headers = {"X-AUTH-TOKEN": self._token['id']}
+            # We dont know whats the hypervisor id so be brute force it
+            url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-hypervisors/detail'
+            try:
+                response = requests.get(url, headers=headers, timeout=NOVA_REQ_TIMEOUT)
+            except requests.exceptions.Timeout:
+                return ip
+            if response.status_code == 200:
+                data = response.json()
+        else:
+            data = self._hypervisor_details
+        if 'hypervisors' in data:
+            if len(data['hypervisors']) > 0:
+                ip = list(filter(lambda x:x['service']['host'] == host_id, data['hypervisors']))[0]['host_ip']
+        return ip
+
+    # Generate list of ips for vmha agent to monty
+    def generate_ip_list(self, host_id):
+        host_ids = self.get_hosts_with_same_cluster(host_id)
+        if host_ids == []:
+            return {}
+        ip_map = {}
+        self._hypervisor_details=""
+        for host in filter(lambda x: x!=host_id,host_ids):
+            # Make this as such only one request is used and then we parse it and get ips for different hosts
+            ip_map[host]=self.get_ip_from_host_id(host)
+            if not ip_map[host]:
+                return {}
+
+        # Make nCr type combinations and choose amongst them randomly
+        # if n is less than r, we can't make combinations
+        if len(host_ids) - 1 > VMHA_MAX_FANOUT:
+            ip_pool = list(combinations(list(ip_map.keys()), VMHA_MAX_FANOUT))
+            final_map = {}
+            for key in ip_pool[randint(0,len(ip_pool)-1)]:
+                final_map[key] = ip_map[key]
+            return final_map
+        return ip_map
+
+
 
 def get_provider(config):
     db_api.init(config)

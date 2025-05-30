@@ -17,6 +17,8 @@ import json
 from datetime import datetime, timedelta
 from flask import jsonify
 from flask import request
+import requests
+import time
 from hamgr import app
 from hamgr.context import error_handler
 from shared.exceptions import ha_exceptions as exceptions
@@ -27,6 +29,16 @@ from shared.constants import LOGGER_PREFIX
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 CONTENT_TYPE_HEADER = {'Content-Type': 'application/json'}
+
+VMHA_CACHE = {}
+VMHA_TABLE={}
+MAX_FAILED_TIME = 10
+# ^ in sec
+
+class MockEvent:
+    def __init__(self, kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
 
 def get_provider():
@@ -359,5 +371,96 @@ def set_consul_role(availability_zone, host_uuid, role):
         return jsonify(dict(success=False, error=e.message)), 412, CONTENT_TYPE_HEADER
 
 
+@app.route('/v1/vmha/hostlist/<host_id>', methods=['GET'])
+@error_handler
+def host_list_handler(host_id):
+    """
+    VMHA agent queries this endpoint to get list of the hosts with same
+    cluster to gossip to.
+
+    Args:
+        host_id (str): The host_id of the host which wants to get the list of its neighbours
+    """
+    nova_provider = provider_factory.ha_provider()
+    nova_provider._token = nova_provider._get_v3_token()
+    
+    # Using this as a simple cleanup job for VMHA CACHE. This does not correspond to the functionality of the endpoint
+    # but I kinda find it would be easier to do here
+    try:
+        for host in VMHA_CACHE:
+            ret = nova_provider.get_ip_from_host_id(host)
+            if not ret:
+                # Asserting if the ip of that host doesn't exist then host doesn't exist
+                VMHA_CACHE.pop(host, None)
+    except:
+        pass
+        
+    return jsonify(nova_provider.generate_ip_list(host_id))
+
+
+@app.route('/v1/vmha/hoststatus/<host_id>', methods=['POST'])
+@error_handler
+def host_status_handler(host_id):
+    """
+    VMHA agents send status of hosts to this endpoint
+
+    Args:
+        host_id (str): The host_id of the host malfunctioning
+    """
+    
+    body = request.get_json()
+    LOG.debug(f"Body of request for hoststatus {body}")
+    if len(body)==0:
+        return jsonify(dict(success=False, error="host not found in body")), 412, CONTENT_TYPE_HEADER
+    
+    # Use nova provider
+    nova_provider = provider_factory.ha_provider()
+
+    # Get list of all the hosts that are in failed state
+    for host in body:
+        if host not in VMHA_TABLE:
+            VMHA_TABLE[host]=[]
+        if body[host]!="Success":
+            VMHA_TABLE[host].append(False)
+        else:
+            VMHA_TABLE[host].append(True)
+        # Remove older status to keep a queue of most recent statuses
+        if len(VMHA_TABLE[host]) >= 5:
+            VMHA_TABLE[host].pop(0)
+        LOG.debug(f"Cache looks like {VMHA_CACHE}. Table looks like this {VMHA_TABLE}")
+        if VMHA_TABLE[host].count(True)-VMHA_TABLE[host].count(False) < 0:
+            if host in VMHA_CACHE:
+                if time.time() - VMHA_CACHE[host] > MAX_FAILED_TIME and VMHA_CACHE[host]!=0:
+                    LOG.info(f"Triggering migration of VMs on host {host} after being failed for {time.time() - VMHA_CACHE[host]} seconds")
+                    event = MockEvent(
+                        {
+                            'host_name': host,
+                            'event_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            'event_type': 'COMPUTE_HOST',
+                            'event_uuid': None
+                        }
+                    )
+                    ret = nova_provider._report_event_to_masakari(event)
+                    LOG.info(f"Return from masakari func {ret}")
+                    if ret==None:
+                        return jsonify(dict(success=False, error="unable to send masakari notification")), 500, CONTENT_TYPE_HEADER
+                    # The host is processed. Escape the check above
+                    VMHA_CACHE[host] = 0
+            else:
+                LOG.debug(f"Start timer on host {host}")
+                VMHA_CACHE[host] = time.time()
+        else:
+            # the host is OK
+            # Remove it from cache if it exists
+            if host in VMHA_CACHE:
+                LOG.debug(f"Host {host} is back up. Removing from VMHA_CACHE")
+                VMHA_CACHE.pop(host, None)
+
+    return jsonify(dict(success=True)), 204, CONTENT_TYPE_HEADER
+
 def app_factory(global_config, **local_conf):
+    global VMHA_CACHE
+    global VMHA_TABLE
+    VMHA_CACHE = {}
+    VMHA_TABLE = {}
     return app
