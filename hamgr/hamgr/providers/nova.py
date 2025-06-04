@@ -1870,7 +1870,13 @@ class NovaProvider(Provider):
                 for request in requests:
                     if request.status == constants.HA_STATE_REQUEST_ENABLE:
                         # cleanup before enable request is processed to avoid masakari conflict
-                        self._cleanup_vmha_and_masakari()
+                        # <Notes - khallnayak>
+                        # Skipping cleanup as cluster requests with vmha enabled but no hosts assigned will
+                        # get disabled by this func call causing enabling of vmha only after hosts are attached.
+                        # The workflow makes sense tbh. But this causes diff with whats in the backend and whats
+                        # shown on UI.
+                        # </Notes>
+                        #self._cleanup_vmha_and_masakari()
                         with self.ha_status_processing_lock:
                             str_availability_zone = request.name
                             _ , azInfo = self._get_active_azs(self._token['id'])
