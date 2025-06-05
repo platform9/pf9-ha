@@ -428,7 +428,7 @@ def host_status_handler(host_id):
         if len(VMHA_TABLE[host]) >= 5:
             VMHA_TABLE[host].pop(0)
         LOG.debug(f"Cache looks like {VMHA_CACHE}. Table looks like this {VMHA_TABLE}")
-        if VMHA_TABLE[host].count(True)-VMHA_TABLE[host].count(False) < 0:
+        if VMHA_TABLE[host].count(True)-VMHA_TABLE[host].count(False) <= 0:
             if host in VMHA_CACHE:
                 if time.time() - VMHA_CACHE[host] > MAX_FAILED_TIME and VMHA_CACHE[host]!=0:
                     LOG.info(f"Triggering migration of VMs on host {host} after being failed for {time.time() - VMHA_CACHE[host]} seconds")
