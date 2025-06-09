@@ -437,7 +437,9 @@ def host_status_handler(host_id):
                             'host_name': host,
                             'event_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                             'event_type': 'COMPUTE_HOST',
-                            'event_uuid': None
+                            'event_uuid': None,
+                            'event': 'FAILED',
+                            'host_status': 'DOWN'
                         }
                     )
                     ret = nova_provider._report_event_to_masakari(event)

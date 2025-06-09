@@ -428,8 +428,8 @@ class NovaProvider(Provider):
         try:
             self._token = self._get_v3_token()
             data = {
-                "event": 'STOPPED',
-                "host_status": 'NORMAL',
+                "event": 'STOPPED' if not event.event else (event.event),
+                "host_status": 'NORMAL' if not event.host_status else (event.host_status),
                 "cluster_status": 'OFFLINE'
             }
             notification_obj = \
