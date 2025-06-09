@@ -964,7 +964,7 @@ class NovaProvider(Provider):
         # try to remove additional ha clusters
         for cluster_name in hamgr_clusters_to_remove:
             try:
-                if db_api.check_vmha_enabled_in_resmgr(cluster_name=cluster_name):
+                if self.check_vmha_enabled_on_resmgr(cluster_name=cluster_name):
                     LOG.debug('the cluster %s seems to be enabled from resmgr side. Skipping disabling call for this', cluster_name)
                     continue
                 LOG.debug('disable additional vmha cluster : %s', cluster_name)
@@ -3056,6 +3056,25 @@ class NovaProvider(Provider):
                 final_map[key] = ip_map[key]
             return final_map
         return ip_map
+    
+    # Check from resmgr if the cluster has vmha enabled
+    def check_vmha_enabled_on_resmgr(self,cluster_name):
+        headers = {"X-AUTH-TOKEN": self._token['id']}
+        url = 'http://resmgr.' + self._du_name + '.svc.cluster.local:8083/v2/clusters/' + cluster_name
+        try:
+            response = requests.get(url, headers=headers,timeout=NOVA_REQ_TIMEOUT)
+        except requests.exceptions.Timeout:
+            return False
+        try:
+            body = response.json()
+        except Exception as e:
+            LOG.warning("unable to unpack reponse from resmgr")
+            return False
+        if 'vmHighAvailability' in body:
+            if 'enabled' in body['vmHighAvailability']:
+                if body['vmHighAvailability']['enabled']:
+                    return True
+        return False
 
 
 

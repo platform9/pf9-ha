@@ -159,48 +159,6 @@ class Hosts(Base):
     on_maintenance = Column(Integer)
     control_attributes = Column(Text)
     
-class HostClusters(Base):
-    __tablename__ = 'hostclusters'
-    __table_args__ = {'schema': 'resmgr','mysql_engine': 'InnoDB'}
-    __mapper_args__ = {'always_refresh': True}
-    
-    # name: varchar(60), NO null, PRI key
-    name = Column(String(60), primary_key=True, nullable=False)
-
-    # vmha_enabled: tinyint(1), YES null
-    # tinyint(1) is commonly mapped to a Boolean in application code.
-    vmha_enabled = Column(Boolean, nullable=True)
-
-    # arr_enabled: tinyint(1), YES null
-    arr_enabled = Column(Boolean, nullable=True)
-
-    # arr_frequency: int, YES null
-    arr_frequency = Column(Integer, nullable=True)
-
-    # aggregate_id: int, YES null
-    # This might be a ForeignKey to another table, but based purely on the
-    # schema provided, it is mapped as a standard Integer.
-    aggregate_id = Column(Integer, nullable=True)
-
-    # created_at: datetime, YES null
-    created_at = Column(DateTime, nullable=True)
-
-    # updated_at: datetime, YES null
-    updated_at = Column(DateTime, nullable=True)
-
-    # hostlist: json, YES null
-    # Requires a JSON type, which can be dialect-specific.
-    hostlist = Column(JSON, nullable=True)
-
-    # description: varchar(256), YES null
-    description = Column(String(256), nullable=True)
-
-    # gpu_enabled: tinyint(1), YES null, Default is 0
-    gpu_enabled = Column(Boolean, nullable=True, default=0)
-
-    # gpu_mode: varchar(20), YES null, Default is 'passthrough'
-    gpu_mode = Column(String(20), nullable=True, default='passthrough')
-
 def init(config, connection_string=None):
     conn_str = connection_string or config.get('database', 'sqlconnectURI')
 
@@ -262,13 +220,6 @@ def _get_all_clusters(session, read_deleted=False):
         query = query.filter_by(deleted=0)
     return query.all()
 
-def _get_all_resmgr_clusters(session, vmha_enabled=False):
-    query = session.query(HostClusters)
-    if vmha_enabled:
-        query = query.filter_by(vmha_enabled=True)
-    return query
-
-
 def _get_all_active_clusters(session):
     query = session.query(Cluster)
     # when async operation of enable/disable, the 'enabled' is not
@@ -297,16 +248,6 @@ def _get_cluster(session, cluster_name_or_id, read_deleted=False):
         query = query.filter_by(id=cluster_name_or_id)
 
     return query.first()
-
-
-def check_vmha_enabled_in_resmgr(cluster_name):
-    with dbsession() as session:
-        all = _get_all_resmgr_clusters(session, vmha_enabled=True)
-        if all:
-            ret = all.filter_by(name=cluster_name)
-            return ret.all()
-    return []
-
 
 def get_all_clusters(read_deleted=False):
     with dbsession() as session:
