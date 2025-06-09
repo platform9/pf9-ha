@@ -25,7 +25,6 @@ from sqlalchemy import create_engine
 from sqlalchemy import DateTime
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.dialects.mysql import JSON
 from sqlalchemy import Integer
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import String
