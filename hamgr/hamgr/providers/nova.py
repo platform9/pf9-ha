@@ -3060,13 +3060,15 @@ class NovaProvider(Provider):
     # Check from resmgr if the cluster has vmha enabled
     def check_vmha_enabled_on_resmgr(self,cluster_name):
         headers = {"X-AUTH-TOKEN": self._token['id']}
-        url = 'http://resmgr.' + self._du_name + '.svc.cluster.local:8083/v2/clusters/' + cluster_name
+        url = 'http://resmgr.' + self._du_name + '.svc.cluster.local:18083/v2/clusters/' + cluster_name
         try:
             response = requests.get(url, headers=headers,timeout=NOVA_REQ_TIMEOUT)
         except requests.exceptions.Timeout:
+            LOG.debug("request failed with timeout on resmgr")
             return False
         try:
             body = response.json()
+            LOG.debug("response from resmgr %s", body)
         except Exception as e:
             LOG.warning("unable to unpack reponse from resmgr")
             return False
