@@ -108,7 +108,9 @@ class HamgrConfig:
         db_created = db.check_create_db(root_dbinfo['name'])
         grants_updated = db.check_add_grants(db_name=hamgr_dbinfo['name'], db_user=hamgr_dbinfo['user'],
                                              db_pass=hamgr_dbinfo['password'])
-
+        # PCD-2284
+        grants_updated = db.check_add_grants(db_name='resmgr', db_user=hamgr_dbinfo['user'],
+                                             db_pass=hamgr_dbinfo['password'])
         if db_created or grants_updated:
             LOG.info('Database was updated, updating config store with '
                      'values: %s',
