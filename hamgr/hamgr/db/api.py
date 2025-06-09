@@ -161,11 +161,8 @@ class Hosts(Base):
     
 class HostClusters(Base):
     __tablename__ = 'hostclusters'
-    __table_args__ = {'mysql_engine': 'InnoDB'}
+    __table_args__ = {'schema': 'resmgr','mysql_engine': 'InnoDB'}
     __mapper_args__ = {'always_refresh': True}
-    
-    deleted = Column(Integer, default=None)
-    deleted_at = Column(DateTime, default=None)
     
     # name: varchar(60), NO null, PRI key
     name = Column(String(60), primary_key=True, nullable=False)
@@ -265,10 +262,8 @@ def _get_all_clusters(session, read_deleted=False):
         query = query.filter_by(deleted=0)
     return query.all()
 
-def _get_all_resmgr_clusters(session, read_deleted=False, vmha_enabled=False):
+def _get_all_resmgr_clusters(session, vmha_enabled=False):
     query = session.query(HostClusters)
-    if read_deleted is False:
-        query = query.filter_by(deleted=0)
     if vmha_enabled:
         query = query.filter_by(vmha_enabled=True)
     return query
