@@ -157,7 +157,7 @@ class Hosts(Base):
     reserved = Column(Integer)
     on_maintenance = Column(Integer)
     control_attributes = Column(Text)
-    
+
 def init(config, connection_string=None):
     conn_str = connection_string or config.get('database', 'sqlconnectURI')
 
