@@ -32,7 +32,7 @@ CONTENT_TYPE_HEADER = {'Content-Type': 'application/json'}
 
 VMHA_CACHE = {}
 VMHA_TABLE={}
-MAX_FAILED_TIME = 10
+MAX_FAILED_TIME = 180
 # ^ in sec
 
 class MockEvent:
