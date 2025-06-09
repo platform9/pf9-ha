@@ -164,6 +164,9 @@ class HostClusters(Base):
     __table_args__ = {'mysql_engine': 'InnoDB'}
     __mapper_args__ = {'always_refresh': True}
     
+    deleted = Column(Integer, default=None)
+    deleted_at = Column(DateTime, default=None)
+    
     # name: varchar(60), NO null, PRI key
     name = Column(String(60), primary_key=True, nullable=False)
 
