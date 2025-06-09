@@ -964,6 +964,9 @@ class NovaProvider(Provider):
         # try to remove additional ha clusters
         for cluster_name in hamgr_clusters_to_remove:
             try:
+                if db_api.check_vmha_enabled_in_resmgr(cluster_name=cluster_name):
+                    LOG.debug('the cluster %s seems to be enabled from resmgr side. Skipping disabling call for this', cluster_name)
+                    continue
                 LOG.debug('disable additional vmha cluster : %s', cluster_name)
                 self._disable(cluster_name, synchronize=True)
             except Exception as exp:
