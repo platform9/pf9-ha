@@ -219,7 +219,6 @@ def _get_all_clusters(session, read_deleted=False):
         query = query.filter_by(deleted=0)
     return query.all()
 
-
 def _get_all_active_clusters(session):
     query = session.query(Cluster)
     # when async operation of enable/disable, the 'enabled' is not
@@ -248,7 +247,6 @@ def _get_cluster(session, cluster_name_or_id, read_deleted=False):
         query = query.filter_by(id=cluster_name_or_id)
 
     return query.first()
-
 
 def get_all_clusters(read_deleted=False):
     with dbsession() as session:
