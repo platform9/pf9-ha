@@ -58,6 +58,9 @@ class Cluster(Base):
     name = Column(String(255))
     task_state = Column(String(36), nullable=True)
 
+    def __repr__(self):
+        return f"<Cluster name: {self.name}, id: {self.id}, status: {self.status}, enabled: {self.enabled}, task_state: {self.task_state}>"
+
 
 class ChangeEvents(Base):
     __tablename__ = 'change_events'
