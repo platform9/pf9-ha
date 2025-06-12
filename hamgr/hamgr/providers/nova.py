@@ -575,6 +575,7 @@ class NovaProvider(Provider):
                     if hamgr_entry.status in [constants.HA_STATE_DISABLED]:
                         LOG.info('VMHA enabled on cluster %s from resmgr. Setting db state to request-enable', current_cluster.name)
                         db_api.update_request_status(current_cluster.name, constants.HA_STATE_REQUEST_ENABLE)
+                        db_api.update_cluster_task_state(current_cluster.name, constants.TASK_WAITING)
                         continue
                 # reconcile hosts to hamgr and masakari
                 cluster_name = current_cluster.name
