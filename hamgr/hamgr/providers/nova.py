@@ -569,7 +569,7 @@ class NovaProvider(Provider):
                 if current_cluster.status == 'request-enable': 
                    LOG.info('VMHA is not yet enabled for availability zone: %s not precessing it', current_cluster.name)                                 
                    continue
-                if self.check_vmha_enabled_on_resmgr(current_cluster):
+                if self.check_vmha_enabled_on_resmgr(current_cluster.name):
                     LOG.info('VMHA enabled on cluster %s from resmgr. Setting db state to request-enable', current_cluster.name)
                     db_api.update_request_status(current_cluster.name, constants.HA_STATE_REQUEST_ENABLE)
                     continue
