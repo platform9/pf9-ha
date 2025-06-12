@@ -570,9 +570,12 @@ class NovaProvider(Provider):
                    LOG.info('VMHA is not yet enabled for availability zone: %s not precessing it', current_cluster.name)                                 
                    continue
                 if self.check_vmha_enabled_on_resmgr(current_cluster.name):
-                    LOG.info('VMHA enabled on cluster %s from resmgr. Setting db state to request-enable', current_cluster.name)
-                    db_api.update_request_status(current_cluster.name, constants.HA_STATE_REQUEST_ENABLE)
-                    continue
+                    hamgr_entry = db_api.get_cluster(current_cluster.name)
+                    LOG.debug("current cluster status in hamgr %s", hamgr_entry.status)
+                    if hamgr_entry.status in [constants.HA_STATE_DISABLED]:
+                        LOG.info('VMHA enabled on cluster %s from resmgr. Setting db state to request-enable', current_cluster.name)
+                        db_api.update_request_status(current_cluster.name, constants.HA_STATE_REQUEST_ENABLE)
+                        continue
                 # reconcile hosts to hamgr and masakari
                 cluster_name = current_cluster.name
                 cluster_enabled = current_cluster.enabled
