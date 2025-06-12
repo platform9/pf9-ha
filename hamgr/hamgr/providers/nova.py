@@ -568,7 +568,11 @@ class NovaProvider(Provider):
                          current_cluster.name, az_name)
                 if current_cluster.status == 'request-enable': 
                    LOG.info('VMHA is not yet enabled for availability zone: %s not precessing it', current_cluster.name)                                 
-                   continue  
+                   continue
+                if self.check_vmha_enabled_on_resmgr(current_cluster):
+                    LOG.info('VMHA enabled on cluster %s from resmgr. Setting db state to request-enable', current_cluster.name)
+                    db_api.update_request_status(current_cluster.name, constants.HA_STATE_REQUEST_ENABLE)
+                    continue
                 # reconcile hosts to hamgr and masakari
                 cluster_name = current_cluster.name
                 cluster_enabled = current_cluster.enabled
@@ -610,8 +614,8 @@ class NovaProvider(Provider):
                             self._remove_ha_slave_if_exist(cluster_name, masakari_delta_ids, common_ids)
                             LOG.info('try to rebalance consul roles after removed hosts : %s',
                                      str(masakari_delta_ids))
-                            time.sleep(30)
-                            self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_REMOVED)
+                            #time.sleep(30)
+                            #self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_REMOVED)
 
                 masakari_hosts = []
 
