@@ -535,6 +535,17 @@ class NovaProvider(Provider):
             LOG.debug('active nova availability_zones : %s', nova_active_azs)
             hamgr_all_clusters = db_api.get_all_clusters()
             LOG.debug('all vmha clusters : %s', str(hamgr_all_clusters))
+            
+            # Covering the case where cluster got marked as deleted but exists on resmgr with VMHA enabled
+            # This condition feels technically hacky but this is seen on test setups
+            if len(hamgr_all_clusters)==0:
+                hamgr_all_clusters=[]
+                all_clusters = db_api.get_all_clusters(read_deleted=True)
+                for kluster in all_clusters:
+                    if self.check_vmha_enabled_on_resmgr(kluster):
+                        LOG.info("cluster %s was deleted but was alive on resmgr with vmha enabled", kluster)
+                        hamgr_all_clusters.append(kluster)
+            LOG.debug('final vmha clusters list : %s', str(hamgr_all_clusters))
 
             # because hosts in availability zone reflect the real world settings for HA, so need to reconcile hosts in
             # each availability zone from nova to hamgr and masakari
@@ -1987,7 +1998,11 @@ class NovaProvider(Provider):
             raise
         else:
             if cluster:
-                db_api.update_cluster(cluster.id, False)
+                # There are cases where the ha request got failed(intermittent network issue) and 
+                # handle disable request was called. But before setting the cluster as deleted, we must
+                # check if the cluster exists on resmgr. If yes, then lets not delete it
+                if not self.check_vmha_enabled_on_resmgr(cluster.name):
+                    db_api.update_cluster(cluster.id, False)
                 db_api.update_cluster_task_state(cluster.id, next_state)
 
     def put(self, availability_zone, method):
@@ -3072,7 +3087,7 @@ class NovaProvider(Provider):
         try:
             response = requests.get(url, headers=headers,timeout=NOVA_REQ_TIMEOUT)
         except requests.exceptions.Timeout:
-            LOG.debug("request failed with timeout on resmgr")
+            LOG.info("request failed with timeout on resmgr")
             return False
         try:
             body = response.json()
