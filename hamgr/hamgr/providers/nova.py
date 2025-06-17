@@ -535,17 +535,6 @@ class NovaProvider(Provider):
             LOG.debug('active nova availability_zones : %s', nova_active_azs)
             hamgr_all_clusters = db_api.get_all_clusters()
             LOG.debug('all vmha clusters : %s', str(hamgr_all_clusters))
-            
-            # Covering the case where cluster got marked as deleted but exists on resmgr with VMHA enabled
-            # This condition feels technically hacky but this is seen on test setups
-            if len(hamgr_all_clusters)==0:
-                hamgr_all_clusters=[]
-                all_clusters = db_api.get_all_clusters(read_deleted=True)
-                for kluster in all_clusters:
-                    if self.check_vmha_enabled_on_resmgr(kluster):
-                        LOG.info("cluster %s was deleted but was alive on resmgr with vmha enabled", kluster)
-                        hamgr_all_clusters.append(kluster)
-            LOG.debug('final vmha clusters list : %s', str(hamgr_all_clusters))
 
             # because hosts in availability zone reflect the real world settings for HA, so need to reconcile hosts in
             # each availability zone from nova to hamgr and masakari
