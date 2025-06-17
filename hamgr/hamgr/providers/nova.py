@@ -3076,7 +3076,7 @@ class NovaProvider(Provider):
         try:
             response = requests.get(url, headers=headers,timeout=NOVA_REQ_TIMEOUT)
         except requests.exceptions.Timeout:
-            LOG.info("request failed with timeout on resmgr")
+            LOG.info("request failed for url %s with timeout on resmgr", url)
             return False
         try:
             body = response.json()
