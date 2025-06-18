@@ -35,6 +35,16 @@ VMHA_TABLE={}
 MAX_FAILED_TIME = 180
 # ^ in sec
 
+version_payload = {
+   "versions":
+      {
+         "id":"v1",
+         "status":"CURRENT",
+         "version":"1.0",
+         "min_version":"1.0",
+      }
+}
+
 class MockEvent:
     def __init__(self, kwargs):
         for key, value in kwargs.items():
@@ -72,6 +82,11 @@ def get_providers_for_host(host_id, event_type):
     providers.append(nova_provider)
     
     return providers
+
+@app.route('/version', methods=['GET'])
+@error_handler
+def get_version():
+    return jsonify(version_payload)
 
 
 @app.route('/v1/ha', methods=['GET'])
@@ -425,7 +440,7 @@ def host_status_handler(host_id):
         else:
             VMHA_TABLE[host].append(True)
         # Remove older status to keep a queue of most recent statuses
-        if len(VMHA_TABLE[host]) >= 5:
+        if len(VMHA_TABLE[host]) >= 2:
             VMHA_TABLE[host].pop(0)
         LOG.debug(f"Cache looks like {VMHA_CACHE}. Table looks like this {VMHA_TABLE}")
         if VMHA_TABLE[host].count(True)-VMHA_TABLE[host].count(False) <= 0:
