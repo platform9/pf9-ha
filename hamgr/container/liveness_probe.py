@@ -44,9 +44,10 @@ if __name__ == "__main__":
     response = requests.get(HAMGR_URL, headers=headers,timeout=60)
     data = response.json()
     if response.status_code == 200:
-        if data["status"] == None:
-            result = subprocess.run(['supervisorctl', 'restart', 'hamgr'], capture_output=True, text=True)
-            logger.info(result.stdout)
+        logger.info("response received")
+        #if data["status"] == None:
+        #    result = subprocess.run(['supervisorctl', 'restart', 'hamgr'], capture_output=True, text=True)
+        #    logger.info(result.stdout)
     else: 
         logger.error(f"Failed to connect hamgr")
         sys.exit(1)
