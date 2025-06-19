@@ -3019,6 +3019,7 @@ class NovaProvider(Provider):
         url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-aggregates'
         flag=False
         if time.time() - self.vmha_os_aggregates["last_check"] > VMHA_HOST_CACHE_INVALIDATION or self.vmha_os_aggregates["response"]=={}:
+            LOG.debug("internal %s cache looks like %s", time.time(), self.vmha_os_aggregates)
             flag=True
             try:
                 LOG.debug("request sent to %s", url)
@@ -3026,7 +3027,7 @@ class NovaProvider(Provider):
             except requests.exceptions.Timeout:
                 LOG.debug("request timed out %s", url)
                 return host_ids
-            LOG.debug("request completed to %s", url)
+            LOG.debug("request completed with response %s", response.status_code)
         if flag:
             if response.status_code == 200:
                 data = response.json()
@@ -3049,6 +3050,7 @@ class NovaProvider(Provider):
         url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-hypervisors/detail'
         flag=False
         if time.time() - self.vmha_nova_details["last_check"] > VMHA_HOST_CACHE_INVALIDATION or self.vmha_nova_details["response"]=={}:
+            LOG.debug("internal %s cache looks like %s", time.time(), self.vmha_nova_details)
             flag=True
             try:
                 LOG.debug("request sent to %s", url)
@@ -3056,7 +3058,7 @@ class NovaProvider(Provider):
             except requests.exceptions.Timeout:
                 LOG.debug("request timed out %s", url)
                 return ip
-        LOG.debug("request completed to %s", url)
+            LOG.debug("request completed with response %s", response.status_code)
         if flag:
             if response.status_code == 200:
                 data = response.json()
