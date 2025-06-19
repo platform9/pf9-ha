@@ -3029,8 +3029,10 @@ class NovaProvider(Provider):
         headers = {"X-AUTH-TOKEN": self._token['id']}
         url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-aggregates'
         try:
+            LOG.debug("request sent to %s", url)
             response = requests.get(url, headers=headers,timeout=NOVA_REQ_TIMEOUT)
         except requests.exceptions.Timeout:
+            LOG.debug("request timed out %s", url)
             return host_ids
         if response.status_code == 200:
             data = response.json()
@@ -3050,8 +3052,10 @@ class NovaProvider(Provider):
             # We dont know whats the hypervisor id so be brute force it
             url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-hypervisors/detail'
             try:
+                LOG.debug("request sent to %s", url)
                 response = requests.get(url, headers=headers, timeout=NOVA_REQ_TIMEOUT)
             except requests.exceptions.Timeout:
+                LOG.debug("request timed out %s", url)
                 return ip
             if response.status_code == 200:
                 data = response.json()
@@ -3068,6 +3072,7 @@ class NovaProvider(Provider):
         LOG.info("handling request for host_id %s", host_id)
         host_ids = self.get_hosts_with_same_cluster(host_id)
         if host_ids == []:
+            LOG.debug("host ids result %s", host_ids)
             return {}
         ip_map = {}
         self._hypervisor_details=""
@@ -3075,6 +3080,7 @@ class NovaProvider(Provider):
             # Make this as such only one request is used and then we parse it and get ips for different hosts
             ip_map[host]=self.get_ip_from_host_id(host)
             if not ip_map[host]:
+                LOG.debug("ip map result %s", ip_map)
                 return {}
 
         # Make nCr type combinations and choose amongst them randomly
