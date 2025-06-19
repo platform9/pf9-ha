@@ -3076,7 +3076,7 @@ class NovaProvider(Provider):
         # Make nCr type combinations and choose amongst them randomly
         # if n is less than r, we can't make combinations
         if len(host_ids) - 1 > VMHA_MAX_FANOUT:
-            picking_list = ip_map.keys()
+            picking_list = list(ip_map.keys())
             list_len = len(picking_list)-1
             ind1, ind2, ind3 = randint(0, list_len), randint(0, list_len), randint(0, list_len)
             final_map={
