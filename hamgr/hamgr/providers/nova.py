@@ -1992,7 +1992,11 @@ class NovaProvider(Provider):
             raise
         else:
             if cluster:
-                db_api.update_cluster(cluster.id, False)
+                # There are cases where the ha request got failed(intermittent network issue) and 
+                # handle disable request was called. But before setting the cluster as deleted, we must
+                # check if the cluster exists on resmgr. If yes, then lets not delete it
+                if not self.check_vmha_enabled_on_resmgr(cluster.name):
+                    db_api.update_cluster(cluster.id, False)
                 db_api.update_cluster_task_state(cluster.id, next_state)
 
     def put(self, availability_zone, method):
@@ -3119,7 +3123,7 @@ class NovaProvider(Provider):
         try:
             response = requests.get(url, headers=headers,timeout=NOVA_REQ_TIMEOUT)
         except requests.exceptions.Timeout:
-            LOG.debug("request failed with timeout on resmgr")
+            LOG.info("request failed for url %s with timeout on resmgr", url)
             return False
         try:
             body = response.json()
