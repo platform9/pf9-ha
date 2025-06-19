@@ -52,6 +52,8 @@ AMQP_HOST_QUEUE_PREFIX = 'queue-receiving-for-host'
 AMQP_HTTP_PORT = 15672
 
 VMHA_MAX_FANOUT = 3
+VMHA_HOST_CACHE_INVALIDATION = 10*60
+# ^ 10 min for cache invalidation
 
 NOVA_REQ_TIMEOUT = 5
 
@@ -157,6 +159,10 @@ class NovaProvider(Provider):
         self.consul_encryption_processing_running = False
         self.queue_processing_lock = threading.Lock()
         self.queue_processing_running = False
+        
+        # vmha caching of nova output
+        self.host_with_same_cluster={"host_ids":[], "last_check":0}
+        self.host_ip_to_id_map={}
 
     def _get_v3_token(self):
         self._token = utils.get_token(self._auth_url,
@@ -3008,6 +3014,13 @@ class NovaProvider(Provider):
         
     # Get host-ids within same cluster as a host
     def get_hosts_with_same_cluster(self, host_id):
+        if time.time() - self.host_with_same_cluster["last_check"] < VMHA_HOST_CACHE_INVALIDATION:
+            for host_list in self.host_with_same_cluster["host_ids"]:
+                if host_id in host_list:
+                    LOG.info("Cache hit for host list")
+                    return host_list
+        LOG.info("cache miss. Adding to cache %s", host_id)
+        self.host_with_same_cluster["last_check"] = time.time()
         host_ids = []
         headers = {"X-AUTH-TOKEN": self._token['id']}
         url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-aggregates'
@@ -3020,10 +3033,13 @@ class NovaProvider(Provider):
             if 'aggregates' in data:
                 filtered_aggregates = list(filter(lambda x: x["availability_zone"]!=None and host_id in x["hosts"], data['aggregates']))
                 host_ids = filtered_aggregates[0]['hosts'] if filtered_aggregates else []
+        self.host_with_same_cluster["host_ids"].append(host_ids)
         return host_ids
 
     # Get ip from host-id
     def get_ip_from_host_id(self, host_id):
+        if host_id in self.host_ip_to_id_map:
+            return self.host_ip_to_id_map[host_id]
         ip=""
         if self._hypervisor_details == "":
             headers = {"X-AUTH-TOKEN": self._token['id']}
@@ -3040,6 +3056,7 @@ class NovaProvider(Provider):
         if 'hypervisors' in data:
             if len(data['hypervisors']) > 0:
                 ip = list(filter(lambda x:x['service']['host'] == host_id, data['hypervisors']))[0]['host_ip']
+        self.host_ip_to_id_map[host_id] = ip
         return ip
 
     # Generate list of ips for vmha agent to monty
@@ -3058,11 +3075,22 @@ class NovaProvider(Provider):
         # Make nCr type combinations and choose amongst them randomly
         # if n is less than r, we can't make combinations
         if len(host_ids) - 1 > VMHA_MAX_FANOUT:
-            ip_pool = list(combinations(list(ip_map.keys()), VMHA_MAX_FANOUT))
-            final_map = {}
-            for key in ip_pool[randint(0,len(ip_pool)-1)]:
-                final_map[key] = ip_map[key]
+            picking_list = ip_map.keys()
+            list_len = len(picking_list)
+            ind1, ind2, ind3 = randint(0, list_len), randint(0, list_len), randint(0, list_len)
+            final_map={
+                picking_list[ind1]: ip_map[picking_list[ind1]],
+                picking_list[ind2]: ip_map[picking_list[ind2]],
+                picking_list[ind3]: ip_map[picking_list[ind3]],
+            }
             return final_map
+            
+            # Below is older implementation with combinations
+            #ip_pool = list(combinations(list(ip_map.keys()), VMHA_MAX_FANOUT))
+            #final_map = {}
+            #for key in ip_pool[randint(0,len(ip_pool)-1)]:
+            #    final_map[key] = ip_map[key]
+            #return final_map
         return ip_map
     
     # Check from resmgr if the cluster has vmha enabled
