@@ -3030,6 +3030,7 @@ class NovaProvider(Provider):
         except requests.exceptions.Timeout:
             LOG.debug("request timed out %s", url)
             return host_ids
+        LOG.debug("request completed to %s", url)
         if response.status_code == 200:
             data = response.json()
             if 'aggregates' in data:
@@ -3053,6 +3054,7 @@ class NovaProvider(Provider):
             except requests.exceptions.Timeout:
                 LOG.debug("request timed out %s", url)
                 return ip
+            LOG.debug("request completed to %s", url)
             if response.status_code == 200:
                 data = response.json()
         else:
@@ -3060,7 +3062,8 @@ class NovaProvider(Provider):
         if 'hypervisors' in data:
             if len(data['hypervisors']) > 0:
                 ip = list(filter(lambda x:x['service']['host'] == host_id, data['hypervisors']))[0]['host_ip']
-        self.host_ip_to_id_map[host_id] = ip
+        if not ip:
+            self.host_ip_to_id_map[host_id] = ip
         return ip
 
     # Generate list of ips for vmha agent to monty
