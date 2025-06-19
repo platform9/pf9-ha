@@ -3027,23 +3027,22 @@ class NovaProvider(Provider):
                 LOG.debug("request timed out %s", url)
                 return host_ids
             LOG.debug("request completed to %s", url)
-        if response.status_code == 200:
-            if flag:
+        if flag:
+            if response.status_code == 200:
                 data = response.json()
                 self.vmha_os_aggregates["last_check"] = time.time()
                 self.vmha_os_aggregates["response"]=data
             else:
-                data=self.vmha_os_aggregates["response"]
-            if 'aggregates' in data:
-                filtered_aggregates = list(filter(lambda x: x["availability_zone"]!=None and host_id in x["hosts"], data['aggregates']))
-                host_ids = filtered_aggregates[0]['hosts'] if filtered_aggregates else []
-        self.host_with_same_cluster["host_ids"].append(host_ids)
+                return host_ids
+        else:
+            data=self.vmha_os_aggregates["response"]
+        if 'aggregates' in data:
+            filtered_aggregates = list(filter(lambda x: x["availability_zone"]!=None and host_id in x["hosts"], data['aggregates']))
+            host_ids = filtered_aggregates[0]['hosts'] if filtered_aggregates else []
         return host_ids
 
     # Get ip from host-id
     def get_ip_from_host_id(self, host_id):
-        if host_id in self.host_ip_to_id_map:
-            return self.host_ip_to_id_map[host_id]
         ip=""
         headers = {"X-AUTH-TOKEN": self._token['id']}
         # We dont know whats the hypervisor id so be brute force it
@@ -3058,18 +3057,18 @@ class NovaProvider(Provider):
                 LOG.debug("request timed out %s", url)
                 return ip
         LOG.debug("request completed to %s", url)
-        if response.status_code == 200:
-            if flag:
+        if flag:
+            if response.status_code == 200:
                 data = response.json()
                 self.vmha_nova_details["last_check"] = time.time()
                 self.vmha_nova_details["response"]=data
             else:
-                data=self.vmha_nova_details["response"]
+                return ip
+        else:
+            data=self.vmha_nova_details["response"]
         if 'hypervisors' in data:
             if len(data['hypervisors']) > 0:
                 ip = list(filter(lambda x:x['service']['host'] == host_id, data['hypervisors']))[0]['host_ip']
-        if not ip:
-            self.host_ip_to_id_map[host_id] = ip
         return ip
 
     # Generate list of ips for vmha agent to monty
