@@ -3061,6 +3061,7 @@ class NovaProvider(Provider):
 
     # Generate list of ips for vmha agent to monty
     def generate_ip_list(self, host_id):
+        LOG.info("handling request for host_id %s", host_id)
         host_ids = self.get_hosts_with_same_cluster(host_id)
         if host_ids == []:
             return {}
@@ -3083,6 +3084,7 @@ class NovaProvider(Provider):
                 picking_list[ind2]: ip_map[picking_list[ind2]],
                 picking_list[ind3]: ip_map[picking_list[ind3]],
             }
+            LOG.info("completed request for host_id %s", host_id)
             return final_map
             
             # Below is older implementation with combinations
@@ -3091,6 +3093,7 @@ class NovaProvider(Provider):
             #for key in ip_pool[randint(0,len(ip_pool)-1)]:
             #    final_map[key] = ip_map[key]
             #return final_map
+        LOG.info("completed request for host_id %s", host_id)
         return ip_map
     
     # Check from resmgr if the cluster has vmha enabled
