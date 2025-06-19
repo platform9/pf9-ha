@@ -161,8 +161,8 @@ class NovaProvider(Provider):
         self.queue_processing_running = False
         
         # vmha caching of nova output
-        self.host_with_same_cluster={"host_ids":[], "last_check":0}
-        self.host_ip_to_id_map={}
+        self.vmha_os_aggregates={"last_check":0, "response":{}}
+        self.vmha_nova_details={"last_check":0, "response":{}}
 
     def _get_v3_token(self):
         self._token = utils.get_token(self._auth_url,
@@ -3018,25 +3018,26 @@ class NovaProvider(Provider):
         
     # Get host-ids within same cluster as a host
     def get_hosts_with_same_cluster(self, host_id):
-        if time.time() - self.host_with_same_cluster["last_check"] < VMHA_HOST_CACHE_INVALIDATION:
-            for host_list in self.host_with_same_cluster["host_ids"]:
-                if host_id in host_list:
-                    LOG.info("Cache hit for host list")
-                    return host_list
-        LOG.info("cache miss. Adding to cache %s", host_id)
-        self.host_with_same_cluster["last_check"] = time.time()
         host_ids = []
         headers = {"X-AUTH-TOKEN": self._token['id']}
         url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-aggregates'
-        try:
-            LOG.debug("request sent to %s", url)
-            response = requests.get(url, headers=headers,timeout=NOVA_REQ_TIMEOUT)
-        except requests.exceptions.Timeout:
-            LOG.debug("request timed out %s", url)
-            return host_ids
-        LOG.debug("request completed to %s", url)
+        flag=False
+        if time.time() - self.vmha_os_aggregates["last_check"] > VMHA_HOST_CACHE_INVALIDATION or self.vmha_os_aggregates["response"]=={}:
+            flag=True
+            try:
+                LOG.debug("request sent to %s", url)
+                response = requests.get(url, headers=headers,timeout=NOVA_REQ_TIMEOUT)
+            except requests.exceptions.Timeout:
+                LOG.debug("request timed out %s", url)
+                return host_ids
+            LOG.debug("request completed to %s", url)
         if response.status_code == 200:
-            data = response.json()
+            if flag:
+                data = response.json()
+                self.vmha_os_aggregates["last_check"] = time.time()
+                self.vmha_os_aggregates["response"]=data
+            else:
+                data=self.vmha_os_aggregates["response"]
             if 'aggregates' in data:
                 filtered_aggregates = list(filter(lambda x: x["availability_zone"]!=None and host_id in x["hosts"], data['aggregates']))
                 host_ids = filtered_aggregates[0]['hosts'] if filtered_aggregates else []
@@ -3048,21 +3049,26 @@ class NovaProvider(Provider):
         if host_id in self.host_ip_to_id_map:
             return self.host_ip_to_id_map[host_id]
         ip=""
-        if self._hypervisor_details == "":
-            headers = {"X-AUTH-TOKEN": self._token['id']}
-            # We dont know whats the hypervisor id so be brute force it
-            url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-hypervisors/detail'
+        headers = {"X-AUTH-TOKEN": self._token['id']}
+        # We dont know whats the hypervisor id so be brute force it
+        url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-hypervisors/detail'
+        flag=False
+        if time.time() - self.vmha_nova_details["last_check"] > VMHA_HOST_CACHE_INVALIDATION or self.vmha_nova_details["response"]=={}:
+            flag=True
             try:
                 LOG.debug("request sent to %s", url)
                 response = requests.get(url, headers=headers, timeout=NOVA_REQ_TIMEOUT)
             except requests.exceptions.Timeout:
                 LOG.debug("request timed out %s", url)
                 return ip
-            LOG.debug("request completed to %s", url)
-            if response.status_code == 200:
+        LOG.debug("request completed to %s", url)
+        if response.status_code == 200:
+            if flag:
                 data = response.json()
-        else:
-            data = self._hypervisor_details
+                self.vmha_nova_details["last_check"] = time.time()
+                self.vmha_nova_details["response"]=data
+            else:
+                data=self.vmha_nova_details["response"]
         if 'hypervisors' in data:
             if len(data['hypervisors']) > 0:
                 ip = list(filter(lambda x:x['service']['host'] == host_id, data['hypervisors']))[0]['host_ip']
@@ -3088,6 +3094,7 @@ class NovaProvider(Provider):
 
         # Make nCr type combinations and choose amongst them randomly
         # if n is less than r, we can't make combinations
+        LOG.debug("starting combinations")
         if len(host_ids) - 1 > VMHA_MAX_FANOUT:
             picking_list = list(ip_map.keys())
             list_len = len(picking_list)-1
