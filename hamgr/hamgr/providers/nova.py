@@ -54,6 +54,8 @@ AMQP_HTTP_PORT = 15672
 VMHA_MAX_FANOUT = 3
 VMHA_HOST_CACHE_INVALIDATION = 10*60
 # ^ 10 min for cache invalidation
+VMHA_NOVA_DETAILS={"last_check":0, "response":{}}
+VMHA_OS_AGGREGATES={"last_check":0, "response":{}}
 
 NOVA_REQ_TIMEOUT = 5
 
@@ -160,9 +162,6 @@ class NovaProvider(Provider):
         self.queue_processing_lock = threading.Lock()
         self.queue_processing_running = False
         
-        # vmha caching of nova output
-        self.vmha_os_aggregates={"last_check":0, "response":{}}
-        self.vmha_nova_details={"last_check":0, "response":{}}
 
     def _get_v3_token(self):
         self._token = utils.get_token(self._auth_url,
@@ -3018,8 +3017,8 @@ class NovaProvider(Provider):
         headers = {"X-AUTH-TOKEN": self._token['id']}
         url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-aggregates'
         flag=False
-        if time.time() - self.vmha_os_aggregates["last_check"] > VMHA_HOST_CACHE_INVALIDATION or self.vmha_os_aggregates["response"]=={}:
-            LOG.debug("internal %s cache looks like %s", time.time(), self.vmha_os_aggregates)
+        if time.time() - VMHA_OS_AGGREGATES["last_check"] > VMHA_HOST_CACHE_INVALIDATION or VMHA_OS_AGGREGATES["response"]=={}:
+            LOG.debug("internal %s cache looks like %s", time.time(), VMHA_OS_AGGREGATES)
             flag=True
             try:
                 LOG.debug("request sent to %s", url)
@@ -3031,12 +3030,12 @@ class NovaProvider(Provider):
         if flag:
             if response.status_code == 200:
                 data = response.json()
-                self.vmha_os_aggregates["last_check"] = time.time()
-                self.vmha_os_aggregates["response"]=data
+                VMHA_OS_AGGREGATES["last_check"] = time.time()
+                VMHA_OS_AGGREGATES["response"]=data
             else:
                 return host_ids
         else:
-            data=self.vmha_os_aggregates["response"]
+            data=VMHA_OS_AGGREGATES["response"]
         if 'aggregates' in data:
             filtered_aggregates = list(filter(lambda x: x["availability_zone"]!=None and host_id in x["hosts"], data['aggregates']))
             host_ids = filtered_aggregates[0]['hosts'] if filtered_aggregates else []
@@ -3049,8 +3048,8 @@ class NovaProvider(Provider):
         # We dont know whats the hypervisor id so be brute force it
         url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-hypervisors/detail'
         flag=False
-        if time.time() - self.vmha_nova_details["last_check"] > VMHA_HOST_CACHE_INVALIDATION or self.vmha_nova_details["response"]=={}:
-            LOG.debug("internal %s cache looks like %s", time.time(), self.vmha_nova_details)
+        if time.time() - VMHA_NOVA_DETAILS["last_check"] > VMHA_HOST_CACHE_INVALIDATION or VMHA_NOVA_DETAILS["response"]=={}:
+            LOG.debug("internal %s cache looks like %s", time.time(), VMHA_NOVA_DETAILS)
             flag=True
             try:
                 LOG.debug("request sent to %s", url)
@@ -3062,12 +3061,12 @@ class NovaProvider(Provider):
         if flag:
             if response.status_code == 200:
                 data = response.json()
-                self.vmha_nova_details["last_check"] = time.time()
-                self.vmha_nova_details["response"]=data
+                VMHA_NOVA_DETAILS["last_check"] = time.time()
+                VMHA_NOVA_DETAILS["response"]=data
             else:
                 return ip
         else:
-            data=self.vmha_nova_details["response"]
+            data=VMHA_NOVA_DETAILS["response"]
         if 'hypervisors' in data:
             if len(data['hypervisors']) > 0:
                 ip = list(filter(lambda x:x['service']['host'] == host_id, data['hypervisors']))[0]['host_ip']
