@@ -52,8 +52,8 @@ AMQP_HOST_QUEUE_PREFIX = 'queue-receiving-for-host'
 AMQP_HTTP_PORT = 15672
 
 VMHA_MAX_FANOUT = 3
-VMHA_HOST_CACHE_INVALIDATION = 10*60
-# ^ 10 min for cache invalidation
+VMHA_HOST_CACHE_INVALIDATION = 5*60
+# ^ 5 min for cache invalidation
 VMHA_NOVA_DETAILS={"last_check":0, "response":{}}
 VMHA_OS_AGGREGATES={"last_check":0, "response":{}}
 
@@ -3020,10 +3020,10 @@ class NovaProvider(Provider):
         host_ids = []
         headers = {"X-AUTH-TOKEN": self._token['id']}
         url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-aggregates'
-        flag=False
+        request_sent=False
         if time.time() - VMHA_OS_AGGREGATES["last_check"] > VMHA_HOST_CACHE_INVALIDATION or VMHA_OS_AGGREGATES["response"]=={}:
             LOG.debug("internal %s cache looks like %s", time.time(), VMHA_OS_AGGREGATES)
-            flag=True
+            request_sent=True
             try:
                 LOG.debug("request sent to %s", url)
                 response = requests.get(url, headers=headers,timeout=NOVA_REQ_TIMEOUT)
@@ -3031,7 +3031,7 @@ class NovaProvider(Provider):
                 LOG.debug("request timed out %s", url)
                 return host_ids
             LOG.debug("request completed with response %s", response.status_code)
-        if flag:
+        if request_sent:
             if response.status_code == 200:
                 data = response.json()
                 VMHA_OS_AGGREGATES["last_check"] = time.time()
@@ -3051,10 +3051,10 @@ class NovaProvider(Provider):
         headers = {"X-AUTH-TOKEN": self._token['id']}
         # We dont know whats the hypervisor id so be brute force it
         url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-hypervisors/detail'
-        flag=False
+        request_sent=False
         if time.time() - VMHA_NOVA_DETAILS["last_check"] > VMHA_HOST_CACHE_INVALIDATION or VMHA_NOVA_DETAILS["response"]=={}:
             LOG.debug("internal %s cache looks like %s", time.time(), VMHA_NOVA_DETAILS)
-            flag=True
+            request_sent=True
             try:
                 LOG.debug("request sent to %s", url)
                 response = requests.get(url, headers=headers, timeout=NOVA_REQ_TIMEOUT)
@@ -3062,7 +3062,7 @@ class NovaProvider(Provider):
                 LOG.debug("request timed out %s", url)
                 return ip
             LOG.debug("request completed with response %s", response.status_code)
-        if flag:
+        if request_sent:
             if response.status_code == 200:
                 data = response.json()
                 VMHA_NOVA_DETAILS["last_check"] = time.time()
