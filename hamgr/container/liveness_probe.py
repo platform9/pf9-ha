@@ -49,6 +49,6 @@ if __name__ == "__main__":
         #    result = subprocess.run(['supervisorctl', 'restart', 'hamgr'], capture_output=True, text=True)
         #    logger.info(result.stdout)
     else: 
-        logger.error(f"Failed to connect hamgr")
+        logger.error(f"Failed to connect hamgr. Response code {response.status_code}")
         sys.exit(1)
     sys.exit(0)
