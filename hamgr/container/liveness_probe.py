@@ -39,15 +39,16 @@ if __name__ == "__main__":
     catalog = auth_ref.service_catalog.get_endpoints(service_type='hamgr', interface='internal',region_name=config.get('DEFAULT', 'region_name'), service_name='hamgr' )
     hamgr_endpoint = catalog['hamgr'][0]['url']
     token = sess.get_token()
-    HAMGR_URL = hamgr_endpoint + 'v1/ha'
+    HAMGR_URL = hamgr_endpoint + '/version'
     headers = {"X-AUTH-TOKEN": token}
-    response = requests.get(HAMGR_URL, headers=headers)
+    response = requests.get(HAMGR_URL, headers=headers,timeout=60)
     data = response.json()
     if response.status_code == 200:
-        if data["status"] == None:
-            result = subprocess.run(['supervisorctl', 'restart', 'hamgr'], capture_output=True, text=True)
-            logger.info(result.stdout)
+        logger.info("response received")
+        #if data["status"] == None:
+        #    result = subprocess.run(['supervisorctl', 'restart', 'hamgr'], capture_output=True, text=True)
+        #    logger.info(result.stdout)
     else: 
-        logger.error(f"Failed to connect hamgr")
+        logger.error(f"Failed to connect hamgr. Response code {response.status_code}")
         sys.exit(1)
     sys.exit(0)
