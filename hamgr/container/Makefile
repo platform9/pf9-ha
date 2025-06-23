@@ -52,11 +52,18 @@ $(BLDROOT):
 # Expects the image tag to be passed in as an argument
 # Example: $(call image_build, "a.b.c.d")
 define image_build
-	docker build -f Dockerfile --rm -t $(CONTAINER_IMG):$(1) \
+	if ! docker buildx inspect pcd-graviton >/dev/null 2>&1; then \
+		docker buildx create --name pcd-graviton --use --bootstrap; \
+	else \
+		docker buildx use pcd-graviton; \
+	fi
+
+	docker buildx build --platform linux/arm64,linux/amd64 -f Dockerfile --rm -t $(CONTAINER_IMG):$(1) \
 		--build-arg BUILD_ID=$(BUILD_ID) \
 		--build-arg VERSION=$(PF9_VERSION) \
 		--build-arg BRANCH="$(BRANCH_NAME)" \
 		--build-arg APP_METADATA=`cat $(APP_METADATA_JSON)` \
+		--push \
 		$(STAGE)
 	echo -ne "$(1)" >$(SRCROOT)/build/container-tag
 endef
@@ -69,8 +76,8 @@ image: stage
 # Expects the image tag to be passed in as an argument
 # Example: $(call image_push, "a.b.c.d")
 define image_push
-	docker push $(CONTAINER_IMG):$(1) && \
-	docker rmi $(CONTAINER_IMG):$(1) && \
+#	docker push $(CONTAINER_IMG):$(1) && \
+#	docker rmi $(CONTAINER_IMG):$(1) && \
 	mkdir -p $(BLDROOT) && \
 	echo -ne "$(1)" >$(BLDROOT)/container-tag
 endef
