@@ -32,7 +32,7 @@ CONTENT_TYPE_HEADER = {'Content-Type': 'application/json'}
 
 VMHA_CACHE = {}
 VMHA_TABLE={}
-MAX_FAILED_TIME = 60
+MAX_FAILED_TIME = 150
 # ^ in sec
 
 version_payload = {
