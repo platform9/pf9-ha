@@ -2,10 +2,10 @@ name: Python Security & Linting
 'on':
   push:
     branches:
-      - soc2
+      - private/soc2
   pull_request:
     branches:
-      - soc2
+      - private/soc2
 jobs:
   setup:
     name: Shared Setup
@@ -115,7 +115,7 @@ jobs:
             title: 'chore: auto PR for Bandit scan'
             body-path: tmp/pr-body.md
             branch: auto/bandit-security-scan
-            base: soc2
+            base: private/soc2
             delete-branch: true
         
   ruff-lint-and-pr:
@@ -294,5 +294,5 @@ jobs:
           title: 'chore: auto PR for Trivy security scan'
           body-path: tmp/pr-body.md
           branch: auto/trivy-security-scan
-          base: soc2
+          base: private/soc2
           delete-branch: true
