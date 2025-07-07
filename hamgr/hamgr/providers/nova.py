@@ -52,6 +52,10 @@ AMQP_HOST_QUEUE_PREFIX = 'queue-receiving-for-host'
 AMQP_HTTP_PORT = 15672
 
 VMHA_MAX_FANOUT = 3
+VMHA_HOST_CACHE_INVALIDATION = 5*60
+# ^ 5 min for cache invalidation
+VMHA_NOVA_DETAILS={"last_check":0, "response":{}}
+VMHA_OS_AGGREGATES={"last_check":0, "response":{}}
 
 NOVA_REQ_TIMEOUT = 5
 
@@ -157,6 +161,7 @@ class NovaProvider(Provider):
         self.consul_encryption_processing_running = False
         self.queue_processing_lock = threading.Lock()
         self.queue_processing_running = False
+        
 
     def _get_v3_token(self):
         self._token = utils.get_token(self._auth_url,
@@ -568,7 +573,15 @@ class NovaProvider(Provider):
                          current_cluster.name, az_name)
                 if current_cluster.status == 'request-enable': 
                    LOG.info('VMHA is not yet enabled for availability zone: %s not precessing it', current_cluster.name)                                 
-                   continue  
+                   continue
+                if self.check_vmha_enabled_on_resmgr(current_cluster.name):
+                    hamgr_entry = db_api.get_cluster(current_cluster.name)
+                    LOG.debug("current cluster status in hamgr %s", hamgr_entry.status)
+                    if hamgr_entry.status in [constants.HA_STATE_DISABLED]:
+                        LOG.info('VMHA enabled on cluster %s from resmgr. Setting db state to request-enable', current_cluster.name)
+                        db_api.update_request_status(current_cluster.name, constants.HA_STATE_REQUEST_ENABLE)
+                        db_api.update_cluster_task_state(current_cluster.name, constants.TASK_WAITING)
+                        continue
                 # reconcile hosts to hamgr and masakari
                 cluster_name = current_cluster.name
                 cluster_enabled = current_cluster.enabled
@@ -610,8 +623,8 @@ class NovaProvider(Provider):
                             self._remove_ha_slave_if_exist(cluster_name, masakari_delta_ids, common_ids)
                             LOG.info('try to rebalance consul roles after removed hosts : %s',
                                      str(masakari_delta_ids))
-                            time.sleep(30)
-                            self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_REMOVED)
+                            #time.sleep(30)
+                            #self._rebalance_consul_roles_if_needed(cluster_name, constants.EVENT_HOST_REMOVED)
 
                 masakari_hosts = []
 
@@ -964,6 +977,9 @@ class NovaProvider(Provider):
         # try to remove additional ha clusters
         for cluster_name in hamgr_clusters_to_remove:
             try:
+                if self.check_vmha_enabled_on_resmgr(cluster_name=cluster_name):
+                    LOG.debug('the cluster %s seems to be enabled from resmgr side. Skipping disabling call for this', cluster_name)
+                    continue
                 LOG.debug('disable additional vmha cluster : %s', cluster_name)
                 self._disable(cluster_name, synchronize=True)
             except Exception as exp:
@@ -1976,7 +1992,11 @@ class NovaProvider(Provider):
             raise
         else:
             if cluster:
-                db_api.update_cluster(cluster.id, False)
+                # There are cases where the ha request got failed(intermittent network issue) and 
+                # handle disable request was called. But before setting the cluster as deleted, we must
+                # check if the cluster exists on resmgr. If yes, then lets not delete it
+                if not self.check_vmha_enabled_on_resmgr(cluster.name):
+                    db_api.update_cluster(cluster.id, False)
                 db_api.update_cluster_task_state(cluster.id, next_state)
 
     def put(self, availability_zone, method):
@@ -3000,32 +3020,57 @@ class NovaProvider(Provider):
         host_ids = []
         headers = {"X-AUTH-TOKEN": self._token['id']}
         url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-aggregates'
-        try:
-            response = requests.get(url, headers=headers,timeout=NOVA_REQ_TIMEOUT)
-        except requests.exceptions.Timeout:
-            return host_ids
-        if response.status_code == 200:
-            data = response.json()
-            if 'aggregates' in data:
-                filtered_aggregates = list(filter(lambda x: x["availability_zone"]!=None and host_id in x["hosts"], data['aggregates']))
-                host_ids = filtered_aggregates[0]['hosts'] if filtered_aggregates else []
+        request_sent=False
+        if time.time() - VMHA_OS_AGGREGATES["last_check"] > VMHA_HOST_CACHE_INVALIDATION or VMHA_OS_AGGREGATES["response"]=={}:
+            LOG.debug("internal %s cache looks like %s", time.time(), VMHA_OS_AGGREGATES)
+            request_sent=True
+            try:
+                LOG.debug("request sent to %s", url)
+                response = requests.get(url, headers=headers,timeout=NOVA_REQ_TIMEOUT)
+            except requests.exceptions.Timeout:
+                LOG.debug("request timed out %s", url)
+                return host_ids
+            LOG.debug("request completed with response %s", response.status_code)
+        if request_sent:
+            if response.status_code == 200:
+                data = response.json()
+                VMHA_OS_AGGREGATES["last_check"] = time.time()
+                VMHA_OS_AGGREGATES["response"]=data
+            else:
+                return host_ids
+        else:
+            data=VMHA_OS_AGGREGATES["response"]
+        if 'aggregates' in data:
+            filtered_aggregates = list(filter(lambda x: x["availability_zone"]!=None and host_id in x["hosts"], data['aggregates']))
+            host_ids = filtered_aggregates[0]['hosts'] if filtered_aggregates else []
         return host_ids
 
     # Get ip from host-id
     def get_ip_from_host_id(self, host_id):
         ip=""
-        if self._hypervisor_details == "":
-            headers = {"X-AUTH-TOKEN": self._token['id']}
-            # We dont know whats the hypervisor id so be brute force it
-            url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-hypervisors/detail'
+        headers = {"X-AUTH-TOKEN": self._token['id']}
+        # We dont know whats the hypervisor id so be brute force it
+        url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-hypervisors/detail'
+        request_sent=False
+        if time.time() - VMHA_NOVA_DETAILS["last_check"] > VMHA_HOST_CACHE_INVALIDATION or VMHA_NOVA_DETAILS["response"]=={}:
+            LOG.debug("internal %s cache looks like %s", time.time(), VMHA_NOVA_DETAILS)
+            request_sent=True
             try:
+                LOG.debug("request sent to %s", url)
                 response = requests.get(url, headers=headers, timeout=NOVA_REQ_TIMEOUT)
             except requests.exceptions.Timeout:
+                LOG.debug("request timed out %s", url)
                 return ip
+            LOG.debug("request completed with response %s", response.status_code)
+        if request_sent:
             if response.status_code == 200:
                 data = response.json()
+                VMHA_NOVA_DETAILS["last_check"] = time.time()
+                VMHA_NOVA_DETAILS["response"]=data
+            else:
+                return ip
         else:
-            data = self._hypervisor_details
+            data=VMHA_NOVA_DETAILS["response"]
         if 'hypervisors' in data:
             if len(data['hypervisors']) > 0:
                 ip = list(filter(lambda x:x['service']['host'] == host_id, data['hypervisors']))[0]['host_ip']
@@ -3033,8 +3078,10 @@ class NovaProvider(Provider):
 
     # Generate list of ips for vmha agent to monty
     def generate_ip_list(self, host_id):
+        LOG.info("handling request for host_id %s", host_id)
         host_ids = self.get_hosts_with_same_cluster(host_id)
         if host_ids == []:
+            LOG.debug("host ids result %s", host_ids)
             return {}
         ip_map = {}
         self._hypervisor_details=""
@@ -3042,17 +3089,53 @@ class NovaProvider(Provider):
             # Make this as such only one request is used and then we parse it and get ips for different hosts
             ip_map[host]=self.get_ip_from_host_id(host)
             if not ip_map[host]:
+                LOG.debug("ip map result %s", ip_map)
                 return {}
 
         # Make nCr type combinations and choose amongst them randomly
         # if n is less than r, we can't make combinations
+        LOG.debug("starting combinations")
         if len(host_ids) - 1 > VMHA_MAX_FANOUT:
-            ip_pool = list(combinations(list(ip_map.keys()), VMHA_MAX_FANOUT))
-            final_map = {}
-            for key in ip_pool[randint(0,len(ip_pool)-1)]:
-                final_map[key] = ip_map[key]
+            picking_list = list(ip_map.keys())
+            list_len = len(picking_list)-1
+            ind1, ind2, ind3 = randint(0, list_len), randint(0, list_len), randint(0, list_len)
+            final_map={
+                picking_list[ind1]: ip_map[picking_list[ind1]],
+                picking_list[ind2]: ip_map[picking_list[ind2]],
+                picking_list[ind3]: ip_map[picking_list[ind3]],
+            }
+            LOG.info("completed request for host_id %s", host_id)
             return final_map
+            
+            # Below is older implementation with combinations
+            #ip_pool = list(combinations(list(ip_map.keys()), VMHA_MAX_FANOUT))
+            #final_map = {}
+            #for key in ip_pool[randint(0,len(ip_pool)-1)]:
+            #    final_map[key] = ip_map[key]
+            #return final_map
+        LOG.info("completed request for host_id %s", host_id)
         return ip_map
+    
+    # Check from resmgr if the cluster has vmha enabled
+    def check_vmha_enabled_on_resmgr(self,cluster_name):
+        headers = {"X-AUTH-TOKEN": self._token['id']}
+        url = 'http://resmgr.' + self._du_name + '.svc.cluster.local:18083/v2/clusters/' + cluster_name
+        try:
+            response = requests.get(url, headers=headers,timeout=NOVA_REQ_TIMEOUT)
+        except requests.exceptions.Timeout:
+            LOG.info("request failed for url %s with timeout on resmgr", url)
+            return False
+        try:
+            body = response.json()
+            LOG.debug("response from resmgr %s", body)
+        except Exception as e:
+            LOG.warning("unable to unpack reponse from resmgr")
+            return False
+        if 'vmHighAvailability' in body:
+            if 'enabled' in body['vmHighAvailability']:
+                if body['vmHighAvailability']['enabled']:
+                    return True
+        return False
 
 
 
