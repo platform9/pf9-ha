@@ -435,7 +435,7 @@ def host_status_handler(host_id):
     for host in body:
         if host not in VMHA_TABLE:
             VMHA_TABLE[host]=[]
-        if body[host]!="Success":
+        if body[host] in ["Timeout"]:
             VMHA_TABLE[host].append(False)
         else:
             VMHA_TABLE[host].append(True)
