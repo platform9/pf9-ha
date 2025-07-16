@@ -399,6 +399,14 @@ def host_list_handler(host_id):
     nova_provider = provider_factory.ha_provider()
     nova_provider._token = nova_provider._get_v3_token()
     
+    # We see cases where the faulty host comes back online along with other hosts
+    # but because all the hosts are up, no POST request is sent to hamgr
+    # so cleanup of VMHA CACHE is postponed to the next host down event. 
+    # We fix it by asserting if the agent on that host is able to send GET request
+    # then the host must be up.
+    if host_id in VMHA_CACHE:
+        VMHA_CACHE.pop(host_id, None)
+    
     # Using this as a simple cleanup job for VMHA CACHE. This does not correspond to the functionality of the endpoint
     # but I kinda find it would be easier to do here
     try:
@@ -435,6 +443,8 @@ def host_status_handler(host_id):
     for host in body:
         if host not in VMHA_TABLE:
             VMHA_TABLE[host]=[]
+        # We see false negatives from libvirt exporter in case of error VMs 
+        # so using only Timeout as metric to mark host down
         if body[host] in ["Timeout"]:
             VMHA_TABLE[host].append(False)
         else:
