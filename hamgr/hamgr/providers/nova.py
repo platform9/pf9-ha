@@ -1904,7 +1904,12 @@ class NovaProvider(Provider):
                             if len(az_hosts) < 2:
                                 LOG.info('less than 2 hosts in availability zone %s waiting till it has >=2 hosts', str_availability_zone)
                                 continue
-                        self._handle_enable_request(request, hosts=az_hosts)
+                        try:
+                            self._handle_enable_request(request, hosts=az_hosts)
+                        except Exception as e:
+                            LOG.error(f"Enable HA failed with error {str(e)}")
+                            db_api.update_request_status(request.name, constants.HA_STATE_REQUEST_ENABLE)
+                            db_api.update_cluster_task_state(request.name, constants.TASK_WAITING)
                     if request.status == constants.HA_STATE_REQUEST_DISABLE:
                         self._handle_disable_request(request)
                         # cleanup after disable request is processed to keep things synced
