@@ -444,7 +444,7 @@ def host_status_handler(host_id):
         # Remove older status to keep a queue of most recent statuses
         if len(VMHA_TABLE[host]) >= 2:
             VMHA_TABLE[host].pop(0)
-        LOG.debug(f"Cache looks like {VMHA_CACHE}. Table looks like this {VMHA_TABLE}")
+        LOG.info(f"Cache looks like {VMHA_CACHE}. Table looks like this {VMHA_TABLE}")
         if VMHA_TABLE[host].count(True)-VMHA_TABLE[host].count(False) <= 0:
             if host in VMHA_CACHE:
                 if time.time() - VMHA_CACHE[host] > MAX_FAILED_TIME and VMHA_CACHE[host]!=0:
