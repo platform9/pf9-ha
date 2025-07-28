@@ -1,4 +1,4 @@
-FROM  artifactory.platform9.horse/docker-local/pf9-py39-baseimg-alpine:pcd-graviton-v2
+FROM  artifactory.platform9.horse/docker-local/pf9-py39-baseimg-alpine:pcd-graviton-v4
 LABEL com.platform9.image-type=du
 
 ADD "https://www.random.org/cgi-bin/randbyte?nbytes=10&format=h" skipcache
