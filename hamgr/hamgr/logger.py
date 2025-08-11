@@ -19,6 +19,7 @@ import hamgr
 from os.path import exists
 from os.path import dirname
 from os import makedirs
+import sys
 from shared.constants import ROOT_LOGGER
 
 from six.moves.configparser import ConfigParser
@@ -49,20 +50,31 @@ def setup_root_logger(conf=None):
 
     logger = logging.getLogger(ROOT_LOGGER)
     logger.setLevel(log_level)
-
+    
     # to mitigate the drawback of linux built-in log rotation which runs just once a day
     # let the RotatingFileHandler to rotate the log , the built-in log rotation will do
     # daily clean up and archives
-    handler = logging.handlers.RotatingFileHandler(log_file,
+    file_handler = logging.handlers.RotatingFileHandler(log_file,
                                                    mode=log_mode,
                                                    maxBytes=int(log_rotate_size),
                                                    backupCount=int(log_rotate_count))
-    handler.setLevel(log_level)
-    handler.setFormatter(log_format)
-    for hdl in logger.handlers:
-        logger.removeHandler(hdl)
-    logger.addHandler(handler)
+    stderr_handler = logging.StreamHandler(stream=sys.stderr)
 
+    for handler in logger.handlers:                                                         
+        logger.removeHandler(handler)
+
+    our_handlers = [stderr_handler, file_handler]
+    for handler in our_handlers:
+        handler.setLevel(log_level)
+        handler.setFormatter(log_format)
+        logger.addHandler(handler)
+    
+    
+    ### test start
+    logger.info('checking if this log ends up in the supervisor log')
+    logger.error('checking if this log ends up in the supervisor log')
+    logger.warning('checking if this log ends up in the supervisor log')
+    ### test end
     try:
         if dirname(log_file) != '' and not exists(dirname(log_file)):
             makedirs(dirname(log_file))
