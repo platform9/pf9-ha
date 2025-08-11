@@ -3,14 +3,13 @@ from keystoneauth1.identity import v3
 from six.moves.configparser import ConfigParser
 import logging
 import requests
-import subprocess
 import sys
 
 # configure logging
-logs_format = '[%(asctime)s] %(levelname)s - %(message)s'
+logs_format = 'liveness_probe: [%(asctime)s] %(levelname)s - %(message)s'
 logger = logging.getLogger()
-# this is needed in order to see the logs through K8s logs
-handler = logging.FileHandler('/var/log/pf9/haprobe.log', mode='w')
+# write logs to supervisord's stdout to see output in `kubectl logs`
+handler = logging.FileHandler('/proc/1/fd/1', mode='w')
 logger.setLevel(logging.DEBUG)
 formatter = logging.Formatter(logs_format)
 handler.setFormatter(formatter)
@@ -49,6 +48,6 @@ if __name__ == "__main__":
         #    result = subprocess.run(['supervisorctl', 'restart', 'hamgr'], capture_output=True, text=True)
         #    logger.info(result.stdout)
     else: 
-        logger.error(f"Failed to connect hamgr. Response code {response.status_code}")
+        logger.error(f"Failed to connect hamgr. Response code {response.status_code} {data}")
         sys.exit(1)
     sys.exit(0)
