@@ -6,7 +6,7 @@ import requests
 import sys
 
 # configure logging
-logs_format = 'liveness_probe: [%(asctime)s] %(levelname)s - %(message)s'
+logs_format = 'liveness_probe.py: [%(asctime)s] %(levelname)s - %(message)s'
 logger = logging.getLogger()
 # write logs to supervisord's stdout to see output in `kubectl logs`
 handler = logging.FileHandler('/proc/1/fd/1', mode='w')
