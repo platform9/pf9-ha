@@ -68,13 +68,7 @@ def setup_root_logger(conf=None):
         handler.setLevel(log_level)
         handler.setFormatter(log_format)
         logger.addHandler(handler)
-    
-    
-    ### test start
-    logger.info('checking if this log ends up in the supervisor log')
-    logger.error('checking if this log ends up in the supervisor log')
-    logger.warning('checking if this log ends up in the supervisor log')
-    ### test end
+        
     try:
         if dirname(log_file) != '' and not exists(dirname(log_file)):
             makedirs(dirname(log_file))
