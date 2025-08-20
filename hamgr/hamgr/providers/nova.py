@@ -3055,7 +3055,7 @@ class NovaProvider(Provider):
         ip=""
         headers = {"X-AUTH-TOKEN": self._token['id']}
         # We dont know whats the hypervisor id so be brute force it
-        url = 'http://nova-api.' + self._du_name + '.svc.cluster.local:8774/v2.1/os-hypervisors/detail'
+        url = 'http://resmgr.' + self._du_name + '.svc.cluster.local:18083/v2/hosts'
         request_sent=False
         if time.time() - VMHA_NOVA_DETAILS["last_check"] > VMHA_HOST_CACHE_INVALIDATION or VMHA_NOVA_DETAILS["response"]=={}:
             LOG.debug("internal %s cache looks like %s", time.time(), VMHA_NOVA_DETAILS)
@@ -3071,14 +3071,14 @@ class NovaProvider(Provider):
             if response.status_code == 200:
                 data = response.json()
                 VMHA_NOVA_DETAILS["last_check"] = time.time()
-                VMHA_NOVA_DETAILS["response"]=data
+                VMHA_NOVA_DETAILS["response"]=dict([ (x['id'],x) for x in data])
             else:
                 return ip
         else:
             data=VMHA_NOVA_DETAILS["response"]
-        if 'hypervisors' in data:
-            if len(data['hypervisors']) > 0:
-                ip = list(filter(lambda x:x['service']['host'] == host_id, data['hypervisors']))[0]['host_ip']
+
+        if len(data) > 0:
+            ip = data[host_id]['host_ip_mappings']['hostLivenessInterface']
         return ip
 
     # Generate list of ips for vmha agent to monty
