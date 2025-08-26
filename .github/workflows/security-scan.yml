@@ -1,0 +1,172 @@
+name: Python Security scan
+'on':
+  push:
+    branches:
+      - main
+      - private/harsh/soc2-scan
+  pull_request:
+
+jobs:
+  setup:
+    name: Shared Setup
+    runs-on: ubuntu-latest
+    outputs:
+      python-version: '3.10'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Export Python Version
+        run: echo "python-version=3.10" >> $GITHUB_OUTPUT
+
+  bandit_scan:
+    name: Bandit Security Scan (Full)
+    needs: setup
+    runs-on: ubuntu-latest
+    outputs:
+      bandit-high-found: ${{ steps.scan.outputs.bandit_high_found }}
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '${{ needs.setup.outputs.python-version }}'
+      - name: Install Bandit
+        run: pip install bandit jq
+      - name: Sanitize branch name
+        run: echo "SAFE_REF_NAME=${GITHUB_REF_NAME//\//-}" >> $GITHUB_ENV
+      - name: Run Full Bandit Scan
+        id: scan
+        run: |
+          echo "Running full Bandit scan..."
+          mkdir -p tmp
+          bandit -r . --severity-level medium -f json -o tmp/bandit_output.json || true
+          echo -e "\nHuman-readable Bandit output:\n"
+          bandit -r . --severity-level medium || true
+          cat tmp/bandit_output.json || echo "{}"
+          count=$(jq '.results | map(select(.issue_severity == "HIGH")) | length' tmp/bandit_output.json || echo 0)
+
+          if [[ "$count" -gt 0 ]]; then
+            echo "bandit_high_found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "bandit_high_found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload Bandit Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-json-${{ env.SAFE_REF_NAME }}
+          path: tmp/bandit_output.json
+
+      - name: Generate PR Body (if vulnerabilities found)
+        if: ${{ steps.scan.outputs.bandit_high_found == 'true' }}
+        run: |
+          echo "# Bandit Scan Report for branch \`${GITHUB_REF_NAME}\`" > tmp/pr-body.md
+          jq -r '.results[]
+              | select(.issue_severity == "HIGH")
+              | "* File: \(.filename)\n  • Line: \(.line_number)\n  • Severity: \(.issue_severity)\n  • Confidence: \(.issue_confidence)\n  • Issue: \(.issue_text)\n"' \
+              tmp/bandit_output.json >> tmp/pr-body.md
+
+      - name: Create Pull Request (if vulnerabilities found)
+        if: ${{ steps.scan.outputs.bandit_high_found == 'true' }}
+        uses: peter-evans/create-pull-request@v5
+        with:
+          commit-message: 'chore: issues detected by Bandit (HIGH)'
+          title: 'Bandit Vulnerability Report for branch ${{ github.ref_name }}'
+          body-path: tmp/pr-body.md
+          branch: auto/bandit-scan/${{ env.SAFE_REF_NAME }}
+          base: ${{ github.ref_name }}
+          delete-branch: true
+
+      - name: Fail Job If Vulnerabilities Found
+        if: ${{ steps.scan.outputs.bandit_high_found == 'true' }}
+        run: exit 1
+
+  trivy_scan:
+    name: Trivy Security Scan (Full)
+    needs: setup
+    runs-on: ubuntu-latest
+    outputs:
+      trivy_issues_found: ${{ steps.scan.outputs.trivy_issues_found }}
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Install Trivy
+        run: |
+          sudo apt update
+          sudo apt install wget -y
+          wget -qO- https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo tee /etc/apt/trusted.gpg.d/trivy.asc
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt update
+          sudo apt install -y trivy jq
+
+      - name: Sanitize branch name
+        run: echo "SAFE_REF_NAME=${GITHUB_REF_NAME//\//-}" >> $GITHUB_ENV
+
+      - name: Run Trivy Filesystem Scan
+        id: scan
+        run: |
+          set -euo pipefail
+          echo "Running Trivy scan (HIGH/CRITICAL)..."
+          mkdir -p tmp
+          trivy fs --format json --severity HIGH,CRITICAL --output tmp/trivy.json .
+          [[ -f tmp/trivy.json ]] || echo '{"Results":[]}' > tmp/trivy.json
+          if ! jq -e '.Results and (.Results | length > 0)' tmp/trivy.json >/dev/null; then
+            echo "No scan results available — likely no supported files found."
+            echo "trivy_issues_found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          count=$(jq -e '
+            (.Results // [])
+            | map(.Vulnerabilities? // [])
+            | add
+            | map(select(.Severity=="HIGH" or .Severity=="CRITICAL"))
+            | length
+          ' tmp/trivy.json)
+          if [[ "$count" -gt 0 ]]; then
+            echo "trivy_issues_found=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "trivy_issues_found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload Trivy Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-json-${{ env.SAFE_REF_NAME }}
+          path: tmp/trivy.json
+
+      - name: Generate PR Body (if vulnerabilities found)
+        if: ${{ steps.scan.outputs.trivy_issues_found == 'true' }}
+        run: |
+          echo "# 🛡️ Trivy Scan Report for branch \`${GITHUB_REF_NAME}\`" > tmp/pr-body.md
+          jq -r '
+            (.Results // [])
+            | .[]
+            | .Target as $file
+            | (.Vulnerabilities? // [])
+            | map(select(.Severity=="HIGH" or .Severity=="CRITICAL"))
+            | .[]
+            | "* File: \($file)\n  • Vulnerability ID: \(.VulnerabilityID)\n  • Pkg: \(.PkgName) \(.InstalledVersion)\n  • Severity: \(.Severity)\n  • Title: \(.Title)\n"
+          ' tmp/trivy.json >> tmp/pr-body.md
+
+      - name: Create Pull Request (if vulnerabilities found)
+        if: ${{ steps.scan.outputs.trivy_issues_found == 'true' }}
+        uses: peter-evans/create-pull-request@v5
+        with:
+          commit-message: 'chore: vulnerabilities detected by Trivy (HIGH/CRITICAL)'
+          title: 'Trivy Vulnerability Report for branch ${{ github.ref_name }}'
+          body-path: tmp/pr-body.md
+          branch: auto/trivy-scan/${{ env.SAFE_REF_NAME }}
+          base: ${{ github.ref_name }}
+          delete-branch: true
+
+      - name: Fail Job If Vulnerabilities Found
+        if: ${{ steps.scan.outputs.trivy_issues_found == 'true' }}
+        run: exit 1
