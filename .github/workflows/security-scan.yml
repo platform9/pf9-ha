@@ -71,7 +71,7 @@ jobs:
               tmp/bandit_output.json >> tmp/pr-body.md
 
       - name: Create Pull Request (if vulnerabilities found)
-        if: ${{ steps.scan.outputs.bandit_high_found == 'true' }}
+        if: ${{ github.event_name == 'push' && steps.scan.outputs.bandit_high_found == 'true' }}
         uses: peter-evans/create-pull-request@v5
         with:
           commit-message: 'chore: issues detected by Bandit (HIGH)'
@@ -157,7 +157,7 @@ jobs:
           ' tmp/trivy.json >> tmp/pr-body.md
 
       - name: Create Pull Request (if vulnerabilities found)
-        if: ${{ steps.scan.outputs.trivy_issues_found == 'true' }}
+        if: ${{ github.event_name == 'push' && steps.scan.outputs.trivy_issues_found == 'true' }}
         uses: peter-evans/create-pull-request@v5
         with:
           commit-message: 'chore: vulnerabilities detected by Trivy (HIGH/CRITICAL)'
