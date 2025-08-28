@@ -1261,6 +1261,8 @@ class NovaProvider(Provider):
             self._deauth(host_ids)
             self._wait_for_role_to_ok_v2(host_ids)
             # Update join_ips for existing hosts
+            #fetch fresh info to avoid role apply (PCD-3631)
+            hosts_info = self._resmgr_client.fetch_hosts_details(all_hosts, self._token['id'])
             ip_lookup, cluster_ip_lookup, nodes_details = self._get_ips_for_hosts_v2(hypervisors,
                                                                                      cluster_hosts,
                                                                                      hosts_info)
