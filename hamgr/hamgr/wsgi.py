@@ -449,18 +449,25 @@ def host_status_handler(host_id):
             if host in VMHA_CACHE:
                 if time.time() - VMHA_CACHE[host] > MAX_FAILED_TIME and VMHA_CACHE[host]!=0:
                     LOG.info(f"Triggering migration of VMs on host {host} after being failed for {time.time() - VMHA_CACHE[host]} seconds")
-                    event = MockEvent(
-                        {
-                            'host_name': host,
-                            'event_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                            'event_type': 'COMPUTE_HOST',
-                            'event_uuid': None
-                        }
-                    )
-                    ret = nova_provider._report_event_to_masakari(event)
-                    LOG.info(f"Return from masakari func {ret}")
-                    if ret==None:
-                        return jsonify(dict(success=False, error="unable to send masakari notification")), 500, CONTENT_TYPE_HEADER
+                    vm_list= nova_provider.fetch_vms_on_a_host(host)
+                    LOG.info(f"Got {len(vm_list)} vms on host {host}. VMs - {vm_list}")
+                    
+                    for vm in vm_list:
+                        LOG.info(f"Evacuating {vm}")
+                        nova_provider.evacuate_instance(host)
+
+                    #event = MockEvent(
+                    #    {
+                    #        'host_name': host,
+                    #        'event_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    #        'event_type': 'COMPUTE_HOST',
+                    #        'event_uuid': None
+                    #    }
+                    #)
+                    #ret = nova_provider._report_event_to_masakari(event)
+                    #LOG.info(f"Return from masakari func {ret}")
+                    #if ret==None:
+                    #    return jsonify(dict(success=False, error="unable to send masakari notification")), 500, CONTENT_TYPE_HEADER
                     # The host is processed. Escape the check above
                     VMHA_CACHE[host] = 0
             else:
