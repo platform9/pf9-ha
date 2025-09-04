@@ -3171,7 +3171,7 @@ class NovaProvider(Provider):
         NOVA_CLIENT.servers.evacuate(uuid, host=target,on_shared_storage=False)
         
     @ensure_nova_client
-    def wait_for_task(instance_id, success_states=("ACTIVE", "SHUTOFF"),
+    def wait_for_task(self,instance_id, success_states=("ACTIVE", "SHUTOFF"),
                   error_states=("ERROR",), timeout=60, poll_interval=5):
         """Poll a server until task_state is cleared and status stabilizes."""
         start = time.time()
