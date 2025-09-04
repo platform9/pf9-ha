@@ -60,6 +60,13 @@ VMHA_OS_AGGREGATES={"last_check":0, "response":{}}
 NOVA_REQ_TIMEOUT = 5
 
 NOVA_CLIENT=None
+def ensure_nova_client(func):
+    def wrapper(self, uuid, *args, **kwargs):
+        global NOVA_CLIENT
+        if NOVA_CLIENT is None:
+            NOVA_CLIENT = self._get_nova_client()
+        return func(self, uuid, *args, **kwargs)
+    return wrapper
 
 class NovaProvider(Provider):
     def __init__(self, config):
@@ -3130,12 +3137,23 @@ class NovaProvider(Provider):
         """This gives host ids where the VMs might land after evacuate"""
         # Trigger dry_run api on nova actions 
     
+    @ensure_nova_client
+    def lock_server(self, uuid):
+        """Lock a server."""
+        msg = ('Call lock server command for instance %(uuid)s')
+        LOG.info(msg, {'uuid': uuid})
+        return NOVA_CLIENT.servers.lock(uuid)
+
+    @ensure_nova_client
+    def unlock_server(self, uuid):
+        """Unlock a server."""
+        msg = ('Call unlock server command for instance %(uuid)s')
+        LOG.info(msg, {'uuid': uuid})
+        return NOVA_CLIENT.servers.unlock(uuid)
     
+    @ensure_nova_client
     def fetch_vms_on_a_host(self, host_id):
         """This fetches the VMs running on a host and returns the list"""
-        
-        if NOVA_CLIENT==None:
-            NOVA_CLIENT=self._get_nova_client()
         opts = {
             'host': host_id,
             'all_tenants': True
@@ -3143,16 +3161,14 @@ class NovaProvider(Provider):
         LOG.info('Fetch Server list on %s', host_id)
         return NOVA_CLIENT.servers.list(detailed=True, search_opts=opts)
     
+    @ensure_nova_client
     def evacuate_instance(self, uuid, target=None):
         """Evacuate an instance from failed host to specified host."""
         msg = ('Call evacuate command for instance %(uuid)s on host '
                '%(target)s')
-        
-        if NOVA_CLIENT==None:
-            NOVA_CLIENT=self._get_nova_client()
         LOG.info(msg, {'uuid': uuid, 'target': target})
         
-        NOVA_CLIENT.servers.evacuate(uuid, host=target)
+        NOVA_CLIENT.servers.evacuate(uuid, host=target,on_shared_storage=False)
     
     # Check from resmgr if the cluster has vmha enabled
     def check_vmha_enabled_on_resmgr(self,cluster_name):

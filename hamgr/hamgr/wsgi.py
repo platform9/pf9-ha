@@ -454,7 +454,9 @@ def host_status_handler(host_id):
                     
                     for vm in vm_list:
                         LOG.info(f"Evacuating {vm}")
-                        nova_provider.evacuate_instance(host)
+                        nova_provider.lock_server(vm.id)
+                        nova_provider.evacuate_instance(vm.id)
+                        nova_provider.unlock_server(vm.id)
 
                     #event = MockEvent(
                     #    {
