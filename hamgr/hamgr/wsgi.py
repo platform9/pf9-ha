@@ -455,22 +455,11 @@ def host_status_handler(host_id):
                     for vm in vm_list:
                         LOG.info(f"Evacuating {vm}")
                         nova_provider.lock_server(vm.id)
+                        nova_provider.wait_for_task(vm.id)
                         nova_provider.evacuate_instance(vm.id)
+                        nova_provider.wait_for_task(vm.id)
                         nova_provider.unlock_server(vm.id)
-
-                    #event = MockEvent(
-                    #    {
-                    #        'host_name': host,
-                    #        'event_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    #        'event_type': 'COMPUTE_HOST',
-                    #        'event_uuid': None
-                    #    }
-                    #)
-                    #ret = nova_provider._report_event_to_masakari(event)
-                    #LOG.info(f"Return from masakari func {ret}")
-                    #if ret==None:
-                    #    return jsonify(dict(success=False, error="unable to send masakari notification")), 500, CONTENT_TYPE_HEADER
-                    # The host is processed. Escape the check above
+                        nova_provider.wait_for_task(vm.id)
                     VMHA_CACHE[host] = 0
             else:
                 LOG.debug(f"Start timer on host {host}")

@@ -3169,6 +3169,32 @@ class NovaProvider(Provider):
         LOG.info(msg, {'uuid': uuid, 'target': target})
         
         NOVA_CLIENT.servers.evacuate(uuid, host=target,on_shared_storage=False)
+        
+    @ensure_nova_client
+    def wait_for_task(instance_id, success_states=("ACTIVE", "SHUTOFF"),
+                  error_states=("ERROR",), timeout=60, poll_interval=5):
+        """Poll a server until task_state is cleared and status stabilizes."""
+        start = time.time()
+        while time.time() - start < timeout:
+            server = NOVA_CLIENT.servers.get(instance_id)
+
+            task_state = getattr(server, "OS-EXT-STS:task_state", None)
+            vm_state = getattr(server, "OS-EXT-STS:vm_state", None)
+
+            LOG.info(f"[{server.id}] status={server.status}, vm_state={vm_state}, task_state={task_state}")
+
+            if task_state is None:
+                if server.status in success_states:
+                    return True, f"Task finished successfully (status={server.status})"
+                elif server.status in error_states:
+                    fault = getattr(server, "fault", None)
+                    return False, f"Task failed (status={server.status}, fault={fault})"
+                else:
+                    return False, f"Task finished in unexpected state {server.status}"
+
+            time.sleep(poll_interval)
+
+        return False, f"Timeout after {timeout}s waiting for task on {instance_id}"
     
     # Check from resmgr if the cluster has vmha enabled
     def check_vmha_enabled_on_resmgr(self,cluster_name):
