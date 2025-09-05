@@ -45,6 +45,7 @@ from hamgr.common import key_helper as keyhelper
 from hamgr.resmgr_client import ResmgrClient
 from shared.constants import LOGGER_PREFIX
 from six.moves.configparser import ConfigParser
+from hamgr.locks import VM_EVACUATION_LOCK, VM_EVACUATION_QUEUE
 
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
@@ -170,9 +171,6 @@ class NovaProvider(Provider):
         self.consul_encryption_processing_running = False
         self.queue_processing_lock = threading.Lock()
         self.queue_processing_running = False
-        # lock for vm evacuation and confirmation
-        self.vm_evacuation_lock = threading.Lock()
-        self.host_for_vm_evacuation_queue = []
 
 
     def _get_v3_token(self):
@@ -3220,13 +3218,15 @@ class NovaProvider(Provider):
     
     
     # periodic task for evacuating VMs on a faulty host
-    @ensure_nova_client
     def process_vm_evacuation(self):
-        with self.vm_evacuation_lock:
-            if len(self.host_for_vm_evacuation_queue)==0:
+        LOG.info("Checking for VM evacuations")
+        with VM_EVACUATION_LOCK:
+            LOG.info(f"Current host queue {VM_EVACUATION_QUEUE}")
+            if len(VM_EVACUATION_QUEUE)==0:
                 return
             # check for hosts pending for evacuation
-            host = self.host_for_vm_evacuation_queue.pop(0)
+            host = VM_EVACUATION_QUEUE.pop(0)
+            LOG.info(f"Evacuating VMs on host {host}")
         vm_list= self.fetch_vms_on_a_host(host)
         LOG.info(f"Got {len(vm_list)} vms on host {host}. VMs - {vm_list}")
         for vm in vm_list:

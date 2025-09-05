@@ -26,6 +26,8 @@ import shared.constants as constants
 from hamgr import provider_factory
 from shared.constants import LOGGER_PREFIX
 
+from hamgr.locks import VM_EVACUATION_LOCK, VM_EVACUATION_QUEUE
+
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 CONTENT_TYPE_HEADER = {'Content-Type': 'application/json'}
@@ -449,9 +451,9 @@ def host_status_handler(host_id):
             if host in VMHA_CACHE:
                 if time.time() - VMHA_CACHE[host] > MAX_FAILED_TIME and VMHA_CACHE[host]!=0:
                     LOG.info(f"Triggering migration of VMs on host {host} after being failed for {time.time() - VMHA_CACHE[host]} seconds")
-                    with nova_provider.vm_evacuation_lock:
-                        nova_provider.host_for_vm_evacuation_queue.append(host)
-                        LOG.info(f"Evacuation queue looks like {nova_provider.host_for_vm_evacuation_queue}")
+                    with VM_EVACUATION_LOCK:
+                        VM_EVACUATION_QUEUE.append(host)
+                        LOG.info(f"Evacuation queue looks like {VM_EVACUATION_QUEUE} after removing {host}")
                     VMHA_CACHE[host] = 0
             else:
                 LOG.debug(f"Start timer on host {host}")
