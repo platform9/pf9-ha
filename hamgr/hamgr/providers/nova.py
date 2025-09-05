@@ -47,10 +47,14 @@ from shared.constants import LOGGER_PREFIX
 from six.moves.configparser import ConfigParser
 from hamgr.locks import VM_EVACUATION_LOCK, VM_EVACUATION_QUEUE
 
+from prometheus_client import Gauge
+
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
 
 AMQP_HOST_QUEUE_PREFIX = 'queue-receiving-for-host'
 AMQP_HTTP_PORT = 15672
+
+TASK_DETAILS=Gauge('vmha_task_details','Details about task triggered by vmha',['host_id','vm_id', 'task', 'vm_state', 'status', 'task_state','fault'])
 
 VMHA_MAX_FANOUT = 3
 VMHA_HOST_CACHE_INVALIDATION = 5*60
@@ -3170,7 +3174,7 @@ class NovaProvider(Provider):
         NOVA_CLIENT.servers.evacuate(uuid, host=target,on_shared_storage=False)
         
     @ensure_nova_client
-    def wait_for_task(self,instance_id, success_states=("ACTIVE", "SHUTOFF"),
+    def wait_for_task(self,instance_id, task_info=None,success_states=("ACTIVE", "SHUTOFF"),
                   error_states=("ERROR",), timeout=60, poll_interval=5):
         """Poll a server until task_state is cleared and status stabilizes."""
         start = time.time()
@@ -3184,15 +3188,22 @@ class NovaProvider(Provider):
 
             if task_state is None:
                 if server.status in success_states:
+                    TASK_DETAILS.labels(host_id=server.hostId,vm_id=server.id,task=task_info,vm_state=vm_state,status=server.status,task_state=task_state).set(1)
                     return True, f"Task finished successfully (status={server.status})"
                 elif server.status in error_states:
                     fault = getattr(server, "fault", None)
+                    TASK_DETAILS.labels(host_id=server.hostId,vm_id=server.id,task=task_info,vm_state=vm_state,status=server.status,task_state=task_state,fault=fault).set(1)
                     return False, f"Task failed (status={server.status}, fault={fault})"
                 else:
+                    TASK_DETAILS.labels(host_id=server.hostId,vm_id=server.id,task=task_info,vm_state=vm_state,status=server.status,task_state=task_state,fault=fault).set(1)
                     return False, f"Task finished in unexpected state {server.status}"
 
             time.sleep(poll_interval)
 
+        try:
+            TASK_DETAILS.labels(host_id=server.hostId,vm_id=server.id,task=task_info,vm_state=vm_state,status=server.status,task_state=task_state,fault='timeout').set(1)
+        except:
+            pass
         return False, f"Timeout after {timeout}s waiting for task on {instance_id}"
     
     # Check from resmgr if the cluster has vmha enabled
@@ -3232,11 +3243,11 @@ class NovaProvider(Provider):
         for vm in vm_list:
             LOG.info(f"Evacuating {vm}")
             self.lock_server(vm.id)
-            self.wait_for_task(vm.id)
+            self.wait_for_task(vm.id,"lock")
             self.evacuate_instance(vm.id)
-            self.wait_for_task(vm.id)
+            self.wait_for_task(vm.id,"evacuate")
             self.unlock_server(vm.id)
-            self.wait_for_task(vm.id)
+            self.wait_for_task(vm.id,"unlock")
 
 
 def get_provider(config):

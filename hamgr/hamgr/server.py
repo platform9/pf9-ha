@@ -31,6 +31,8 @@ from hamgr import periodic_task
 from hamgr import provider_factory
 from shared.constants import LOGGER_PREFIX
 
+from prometheus_client import start_http_server
+
 from six.moves.configparser import ConfigParser
 
 LOG = logging.getLogger(LOGGER_PREFIX + __name__)
@@ -43,6 +45,10 @@ def _get_arg_parser():
                         default='/etc/pf9/hamgr/hamgr.conf')
     parser.add_argument('--paste-ini', dest='paste_file', default='/etc/pf9/hamgr/hamgr-api-paste.ini')
     return parser.parse_args()
+
+
+def prometheus_server(port=8000):
+    start_http_server(port)
 
 
 def start_server(conf, paste_ini):
@@ -75,6 +81,9 @@ def start_server(conf, paste_ini):
         # task to evacuate VMs from the failed host
         LOG.debug("add task process_vm_evacuations")
         periodic_task.add_task(provider.process_vm_evacuation, 30, run_now=False)
+        # task for running prometheus http server
+        LOG.debug("starting prometheus server")
+        periodic_task.add_task(prometheus_server, 0, run_now=True, run_once=True)
         
         # Initialize cinder provider and add cinder event processing task
         LOG.debug('Initializing cinder provider')
