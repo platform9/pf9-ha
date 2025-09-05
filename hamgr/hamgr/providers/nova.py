@@ -3181,27 +3181,27 @@ class NovaProvider(Provider):
         while time.time() - start < timeout:
             server = NOVA_CLIENT.servers.get(instance_id)
 
-            task_state = getattr(server, "OS-EXT-STS:task_state", None)
-            vm_state = getattr(server, "OS-EXT-STS:vm_state", None)
+            taskState = getattr(server, "OS-EXT-STS:task_state", None)
+            vmState = getattr(server, "OS-EXT-STS:vm_state", None)
 
-            LOG.info(f"[{server.id}] status={server.status}, vm_state={vm_state}, task_state={task_state}")
+            LOG.info(f"[{server.id}] status={server.status}, vm_state={vmState}, task_state={taskState}")
 
-            if task_state is None:
+            if taskState is None:
                 if server.status in success_states:
-                    TASK_DETAILS.labels(host_id=server.hostId,vm_id=server.id,task=task_info,vm_state=vm_state,status=server.status,task_state=task_state).set(1)
+                    TASK_DETAILS.labels(host_id=server.hostId,vm_id=server.id,task=task_info,vm_state=vmState,status=server.status,task_state=taskState,fault=None).set(1)
                     return True, f"Task finished successfully (status={server.status})"
                 elif server.status in error_states:
-                    fault = getattr(server, "fault", None)
-                    TASK_DETAILS.labels(host_id=server.hostId,vm_id=server.id,task=task_info,vm_state=vm_state,status=server.status,task_state=task_state,fault=fault).set(1)
-                    return False, f"Task failed (status={server.status}, fault={fault})"
+                    Fault = getattr(server, "fault", None)
+                    TASK_DETAILS.labels(host_id=server.hostId,vm_id=server.id,task=task_info,vm_state=vmState,status=server.status,task_state=taskState,fault=Fault).set(1)
+                    return False, f"Task failed (status={server.status}, fault={Fault})"
                 else:
-                    TASK_DETAILS.labels(host_id=server.hostId,vm_id=server.id,task=task_info,vm_state=vm_state,status=server.status,task_state=task_state,fault=fault).set(1)
+                    TASK_DETAILS.labels(host_id=server.hostId,vm_id=server.id,task=task_info,vm_state=vmState,status=server.status,task_state=taskState,fault=Fault).set(1)
                     return False, f"Task finished in unexpected state {server.status}"
 
             time.sleep(poll_interval)
 
         try:
-            TASK_DETAILS.labels(host_id=server.hostId,vm_id=server.id,task=task_info,vm_state=vm_state,status=server.status,task_state=task_state,fault='timeout').set(1)
+            TASK_DETAILS.labels(host_id=server.hostId,vm_id=server.id,task=task_info,vm_state=vmState,status=server.status,task_state=taskState,fault='timeout').set(1)
         except:
             pass
         return False, f"Timeout after {timeout}s waiting for task on {instance_id}"
