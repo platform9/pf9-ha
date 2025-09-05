@@ -449,17 +449,9 @@ def host_status_handler(host_id):
             if host in VMHA_CACHE:
                 if time.time() - VMHA_CACHE[host] > MAX_FAILED_TIME and VMHA_CACHE[host]!=0:
                     LOG.info(f"Triggering migration of VMs on host {host} after being failed for {time.time() - VMHA_CACHE[host]} seconds")
-                    vm_list= nova_provider.fetch_vms_on_a_host(host)
-                    LOG.info(f"Got {len(vm_list)} vms on host {host}. VMs - {vm_list}")
-                    
-                    for vm in vm_list:
-                        LOG.info(f"Evacuating {vm}")
-                        nova_provider.lock_server(vm.id)
-                        nova_provider.wait_for_task(vm.id)
-                        nova_provider.evacuate_instance(vm.id)
-                        nova_provider.wait_for_task(vm.id)
-                        nova_provider.unlock_server(vm.id)
-                        nova_provider.wait_for_task(vm.id)
+                    with nova_provider.vm_evacuation_lock:
+                        nova_provider.host_for_vm_evacuation_queue.append(host)
+                        LOG.info(f"Evacuation queue looks like {nova_provider.host_for_vm_evacuation_queue}")
                     VMHA_CACHE[host] = 0
             else:
                 LOG.debug(f"Start timer on host {host}")

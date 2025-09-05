@@ -72,6 +72,9 @@ def start_server(conf, paste_ini):
         LOG.debug("add task process_queue_for_unauthed_hosts")
         periodic_task.add_task(provider.process_queue_for_unauthed_hosts, 600,
                                run_now=True)
+        # task to evacuate VMs from the failed host
+        LOG.debug("add task process_vm_evacuations")
+        periodic_task.add_task(provider.process_vm_evacuation, 30, run_now=False)
         
         # Initialize cinder provider and add cinder event processing task
         LOG.debug('Initializing cinder provider')

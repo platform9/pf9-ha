@@ -170,9 +170,10 @@ class NovaProvider(Provider):
         self.consul_encryption_processing_running = False
         self.queue_processing_lock = threading.Lock()
         self.queue_processing_running = False
-        
+        # lock for vm evacuation and confirmation
+        self.vm_evacuation_lock = threading.Lock()
+        self.host_for_vm_evacuation_queue = []
 
-        
 
     def _get_v3_token(self):
         self._token = utils.get_token(self._auth_url,
@@ -3216,7 +3217,26 @@ class NovaProvider(Provider):
                 if body['vmHighAvailability']['enabled']:
                     return True
         return False
-
+    
+    
+    # periodic task for evacuating VMs on a faulty host
+    @ensure_nova_client
+    def process_vm_evacuation(self):
+        with self.vm_evacuation_lock:
+            if len(self.host_for_vm_evacuation_queue)==0:
+                return
+            # check for hosts pending for evacuation
+            host = self.host_for_vm_evacuation_queue.pop(0)
+        vm_list= self.fetch_vms_on_a_host(host)
+        LOG.info(f"Got {len(vm_list)} vms on host {host}. VMs - {vm_list}")
+        for vm in vm_list:
+            LOG.info(f"Evacuating {vm}")
+            self.lock_server(vm.id)
+            self.wait_for_task(vm.id)
+            self.evacuate_instance(vm.id)
+            self.wait_for_task(vm.id)
+            self.unlock_server(vm.id)
+            self.wait_for_task(vm.id)
 
 
 def get_provider(config):
